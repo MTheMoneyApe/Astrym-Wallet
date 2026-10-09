@@ -1,3 +1,4 @@
+import { ed25519 } from '@noble/curves/ed25519.js';
 /**
  * hdDerive.ts — SLIP-0010 Ed25519 hierarchical deterministic key derivation.
  *
@@ -237,6 +238,10 @@ export function deriveSolanaPublicKey(seed: Uint8Array, accountIndex: number): U
   const node = derivePath(seed, path);
   // Import lazily to avoid circular; @noble/curves ed25519 getPublicKey is pure
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { ed25519 } = require('@noble/curves/ed25519');
+  
   return ed25519.getPublicKey(node.privateKey);
 }
+
+
+
+

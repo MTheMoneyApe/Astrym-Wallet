@@ -641,3 +641,61 @@ describe('VaultService â€” hasVault', () => {
 });
 
 
+describe('VaultService — deleteVault', () => {
+  it('successfully deletes vault and clears memory', async () => {
+    const unlocker = new PasswordUnlocker(); const persistent = new MemPersistent(); const session = new MemSession();
+    const vault = new VaultService(unlocker, persistent, session);
+    await vault.createVault(PASSWORD, PHRASE);
+    expect(vault.isLocked).toBe(false);
+
+    await vault.deleteVault();
+
+    expect(vault.isLocked).toBe(true);
+    expect(() => vault.getMnemonic()).toThrow();
+    expect(await persistent.loadBlob()).toBeNull();
+    expect(await session.loadKey()).toBeNull();
+  });
+
+  it('fails clearBlob but still clears memory and session', async () => {
+    const unlocker = new PasswordUnlocker(); const persistent = new MemPersistent(); const session = new MemSession();
+    const vault = new VaultService(unlocker, persistent, session);
+    await vault.createVault(PASSWORD, PHRASE);
+
+    const error = new Error('Disk failure');
+    persistent.clearBlob = async () => { throw error; };
+
+    await expect(vault.deleteVault()).rejects.toThrow('deleteVault partially failed: Disk failure');
+    expect(vault.isLocked).toBe(true);
+    expect(() => vault.getMnemonic()).toThrow();
+    expect(await session.loadKey()).toBeNull();
+  });
+
+  it('fails clearKey but still clears memory and blob', async () => {
+    const unlocker = new PasswordUnlocker(); const persistent = new MemPersistent(); const session = new MemSession();
+    const vault = new VaultService(unlocker, persistent, session);
+    await vault.createVault(PASSWORD, PHRASE);
+
+    session.clearKey = async () => { throw new Error('Session failure'); };
+
+    await expect(vault.deleteVault()).rejects.toThrow('deleteVault partially failed: Session failure');
+    expect(vault.isLocked).toBe(true);
+    expect(() => vault.getMnemonic()).toThrow();
+    expect(await persistent.loadBlob()).toBeNull();
+  });
+
+  it('fails both clearBlob and clearKey, aggregates errors', async () => {
+    const unlocker = new PasswordUnlocker(); const persistent = new MemPersistent(); const session = new MemSession();
+    const vault = new VaultService(unlocker, persistent, session);
+    await vault.createVault(PASSWORD, PHRASE);
+
+    persistent.clearBlob = async () => { throw new Error('Disk error'); };
+    session.clearKey = async () => { throw new Error('Session error'); };
+
+    await expect(vault.deleteVault()).rejects.toThrow('deleteVault partially failed: Disk error; Session error');
+    expect(vault.isLocked).toBe(true);
+    expect(() => vault.getMnemonic()).toThrow();
+  });
+});
+
+
+

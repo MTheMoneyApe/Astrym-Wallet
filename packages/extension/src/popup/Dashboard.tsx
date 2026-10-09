@@ -21,6 +21,7 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
       const accounts = await sendIpcMessage('GET_ACCOUNTS', {});
       if (accounts.length > 0) {
         const selected = accounts[0];
+        if (!selected) return;
         setAccount({ address: selected.publicKey, label: selected.label, index: selected.index });
         
         const bal = await sendIpcMessage('GET_BALANCE', { address: selected.publicKey });
@@ -77,3 +78,4 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     </div>
   );
 }
+

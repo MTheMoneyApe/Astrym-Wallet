@@ -47,7 +47,7 @@ describe('ChromeAlarmService', () => {
     service.onAlarm(callback);
 
     // Extract the listener that was registered in constructor
-    const listener = vi.mocked(browser.alarms.onAlarm.addListener).mock.calls[0][0];
+    const listener = vi.mocked(browser.alarms.onAlarm.addListener).mock.calls[0]![0];
 
     // Wrong name
     await listener({ name: 'other_alarm' } as browser.Alarms.Alarm);
@@ -58,3 +58,4 @@ describe('ChromeAlarmService', () => {
     expect(callback).toHaveBeenCalledTimes(1);
   });
 });
+

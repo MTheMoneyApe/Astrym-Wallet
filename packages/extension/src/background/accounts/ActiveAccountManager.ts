@@ -7,8 +7,8 @@ export class ActiveAccountManager {
 
   public async initialize(): Promise<void> {
     const data = await browser.storage.local.get('solanym_active_index');
-    if (typeof data.solanym_active_index === 'number') {
-      this._activeAccountIndex = data.solanym_active_index;
+    if (typeof data['solanym_active_index'] === 'number') {
+      this._activeAccountIndex = data['solanym_active_index'];
     } else {
       this._activeAccountIndex = undefined;
     }
@@ -57,3 +57,4 @@ export class ActiveAccountManager {
 }
 
 export const activeAccountManager = new ActiveAccountManager();
+

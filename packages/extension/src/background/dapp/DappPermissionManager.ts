@@ -11,7 +11,8 @@ export class DappPermissionManager {
    */
   async getAllPermissions(): Promise<DappPermission[]> {
     const data = await chrome.storage.local.get(DappPermissionManager.STORAGE_KEY);
-    return data[DappPermissionManager.STORAGE_KEY] || [];
+    const stored = data[DappPermissionManager.STORAGE_KEY];
+    return Array.isArray(stored) ? (stored as DappPermission[]) : [];
   }
 
   /**
@@ -42,3 +43,4 @@ export class DappPermissionManager {
     await chrome.storage.local.set({ [DappPermissionManager.STORAGE_KEY]: updated });
   }
 }
+

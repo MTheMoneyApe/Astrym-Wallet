@@ -4,6 +4,7 @@ import { PasswordUnlocker } from '@solanym/wallet-core/src/vault/PasswordUnlocke
 import { ChromePersistentStorage } from '@solanym/wallet-core/src/vault/ChromePersistentStorage.js';
 import { ChromeSessionStorage } from '@solanym/wallet-core/src/vault/ChromeSessionStorage.js';
 import { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
+import { SoftwareSigner } from '@solanym/wallet-core/src/signer/SoftwareSigner.js';
 import { ChromeAccountStorage } from '@solanym/wallet-core/src/keyManager/ChromeAccountStorage.js';
 
 import { AccountService } from '@solanym/wallet-core/src/solana/accounts/AccountService.js';
@@ -42,8 +43,9 @@ async function initBackground() {
 
   // 2. Initialize Core Services
   const unlocker = new PasswordUnlocker();
-  const vaultService = new VaultService(persistentStorage, sessionStorage, unlocker, alarmService);
-  const keyManager = new KeyManager(vaultService, accountStorage);
+  const vaultService = new VaultService(unlocker, persistentStorage, sessionStorage, alarmService);
+  const signer = new SoftwareSigner(vaultService);
+  const keyManager = new KeyManager(signer, accountStorage);
   const accountService = new AccountService(keyManager);
   
   const config = resolveNetworkConfig('https://api.devnet.solana.com');
@@ -55,7 +57,7 @@ async function initBackground() {
   (globalThis as any).keyManager = keyManager;
 
   const { TransactionClient } = await import('@solanym/wallet-core/src/solana/transaction/TransactionClient.js');
-  const txClient = new TransactionClient(rpcClient, keyManager, vaultService as any);
+  const txClient = new TransactionClient(rpcClient, keyManager, { sign: (index, data) => signer.signTransaction(data, index) });
   (globalThis as any).txClient = txClient;
   (globalThis as any).vaultService = vaultService;
   (globalThis as any).accountService = accountService;
@@ -70,7 +72,8 @@ async function initBackground() {
     hasValidAccounts = true; // Schema is valid if loadState didn't throw
     
     // Check if there is an orphaned intent
-    const { solanym_add_account_intent } = await browser.storage.local.get('solanym_add_account_intent');
+    const _intentData = await browser.storage.local.get('solanym_add_account_intent');
+    const solanym_add_account_intent = (_intentData as Record<string, string>)['solanym_add_account_intent'];
     if (solanym_add_account_intent) {
       if (state.idempotencyMap[solanym_add_account_intent] !== undefined) {
         // Not orphaned, final commit succeeded, just the intent cleanup failed
@@ -124,7 +127,7 @@ async function initBackground() {
   router.registerHandler('SEND_TRANSFER', createSendTransferHandler(txClient) as any);
 
   // 4. Bind to Chrome runtime messaging
-  browser.runtime.onMessage.addListener(async (message, sender) => {
+  browser.runtime.onMessage.addListener(async (message: any, sender: any) => {
     return router.routeMessage(message, sender);
   });
 
@@ -141,3 +144,7 @@ async function initBackground() {
 initBackground().catch(() => {
   // Silent fail - service worker shouldn't crash unhandled.
 });
+
+
+
+

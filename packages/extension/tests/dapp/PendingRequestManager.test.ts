@@ -16,7 +16,7 @@ describe('PendingRequestManager', () => {
   it('first signing request becomes pending', async () => {
     const promise = manager.createSignRequest('https://example.com', {
       account: 'A', destination: 'B', amountLamports: '1', estimatedFeeLamports: '1', program: 'System Program (Transfer)'
-    }, new Uint8Array(), 0);
+    }, new Uint8Array(), 0, 'mock-pubkey');
     
     expect(manager.getPendingSign()).toBeDefined();
     expect(manager.getPendingSign()?.origin).toBe('https://example.com');
@@ -25,17 +25,17 @@ describe('PendingRequestManager', () => {
   it('second signing request immediately rejected', async () => {
     manager.createSignRequest('https://example.com', {
       account: 'A', destination: 'B', amountLamports: '1', estimatedFeeLamports: '1', program: 'System Program (Transfer)'
-    }, new Uint8Array(), 0);
+    }, new Uint8Array(), 0, 'mock-pubkey');
     
     await expect(manager.createSignRequest('https://evil.com', {
       account: 'A', destination: 'B', amountLamports: '1', estimatedFeeLamports: '1', program: 'System Program (Transfer)'
-    }, new Uint8Array(), 0)).rejects.toThrow(RequestAlreadyPendingError);
+    }, new Uint8Array(), 0, 'mock-pubkey')).rejects.toThrow(RequestAlreadyPendingError);
   });
 
   it('2-minute timeout rejects pending request', async () => {
     const promise = manager.createSignRequest('https://example.com', {
       account: 'A', destination: 'B', amountLamports: '1', estimatedFeeLamports: '1', program: 'System Program (Transfer)'
-    }, new Uint8Array(), 0);
+    }, new Uint8Array(), 0, 'mock-pubkey');
     
     expect(manager.getPendingSign()).toBeDefined();
     
@@ -49,7 +49,7 @@ describe('PendingRequestManager', () => {
   it('popup rejection clears pending state', async () => {
     const promise = manager.createSignRequest('https://example.com', {
       account: 'A', destination: 'B', amountLamports: '1', estimatedFeeLamports: '1', program: 'System Program (Transfer)'
-    }, new Uint8Array(), 0);
+    }, new Uint8Array(), 0, 'mock-pubkey');
     
     const req = manager.getPendingSign()!;
     manager.rejectSign(new UserRejectedError(), req.internalRequestId);
@@ -61,7 +61,7 @@ describe('PendingRequestManager', () => {
   it('popup approval resolves with signature', async () => {
     const promise = manager.createSignRequest('https://example.com', {
       account: 'A', destination: 'B', amountLamports: '1', estimatedFeeLamports: '1', program: 'System Program (Transfer)'
-    }, new Uint8Array(), 0);
+    }, new Uint8Array(), 0, 'mock-pubkey');
     
     const req = manager.getPendingSign()!;
     const mockResult = { signature: 'sig', transactionBase64: 'b64' };
@@ -75,7 +75,7 @@ describe('PendingRequestManager', () => {
   it('Test E — Duplicate approval (Double resolve)', async () => {
     const promise = manager.createSignRequest('https://example.com', {
       account: 'A', destination: 'B', amountLamports: '1', estimatedFeeLamports: '1', program: 'System Program (Transfer)'
-    }, new Uint8Array(), 0);
+    }, new Uint8Array(), 0, 'mock-pubkey');
     
     const req = manager.getPendingSign()!;
     const mockResult = { signature: 'sig', transactionBase64: 'b64' };
@@ -96,7 +96,7 @@ describe('PendingRequestManager', () => {
   it('Test F — Expired request cannot be approved', async () => {
     const promise = manager.createSignRequest('https://example.com', {
       account: 'A', destination: 'B', amountLamports: '1', estimatedFeeLamports: '1', program: 'System Program (Transfer)'
-    }, new Uint8Array(), 0);
+    }, new Uint8Array(), 0, 'mock-pubkey');
     
     const req = manager.getPendingSign()!;
     
@@ -153,3 +153,5 @@ describe('PendingRequestManager', () => {
     expect(manager.getPendingConnect()).toBeNull();
   });
 });
+
+

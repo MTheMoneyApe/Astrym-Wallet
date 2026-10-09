@@ -1,3 +1,4 @@
+import { address } from '@solana/kit';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { handleDappSignTransaction, handleApprovePendingRequest, permissionManager, pendingManager } from '../../src/background/handlers/dappHandlers.js';
 import { activeAccountManager } from '../../src/background/accounts/ActiveAccountManager.js';
@@ -5,6 +6,7 @@ import { TransactionValidator } from '@solanym/wallet-core/src/solana/transactio
 
 vi.mock('@solana/kit', () => {
   return {
+    address: (val: string) => val as any,
     getBase58Decoder: () => ({
       decode: (bytes: Uint8Array) => bytes[0] === 1 ? 'Account0Address' : 'Account1Address'
     }),
@@ -71,8 +73,8 @@ describe('dappHandlers security', () => {
     // Fake the validator to avoid base64 decoding complexity in this specific test
     vi.spyOn(TransactionValidator.prototype, 'validateExternalTransaction').mockImplementation((base64: string) => {
       return {
-        sourceAddress: base64 === 'tx-from-0' ? 'Account0Address' : 'Account1Address',
-        destinationAddress: 'DestAddress',
+        sourceAddress: address(base64 === 'tx-from-0' ? 'Account0Address' : 'Account1Address'),
+        destinationAddress: address('DestAddress'),
         lamports: 1000n,
         messageBytes: new Uint8Array([1, 2, 3])
       };
@@ -207,8 +209,8 @@ describe('dappHandlers security', () => {
     
     vi.spyOn(TransactionValidator.prototype, 'validateExternalTransaction').mockImplementation(() => {
       return {
-        sourceAddress: 'Account0Address',
-        destinationAddress: 'DestAddress',
+        sourceAddress: address('Account0Address'),
+        destinationAddress: address('DestAddress'),
         lamports: 1000n,
         messageBytes: mutableBytes
       };
@@ -245,8 +247,8 @@ describe('dappHandlers security', () => {
 
     vi.spyOn(TransactionValidator.prototype, 'validateExternalTransaction').mockImplementation(() => {
       return {
-        sourceAddress: 'Account0Address',
-        destinationAddress: 'DestAddress',
+        sourceAddress: address('Account0Address'),
+        destinationAddress: address('DestAddress'),
         lamports: 1000n,
         messageBytes: new Uint8Array([1, 2, 3])
       };
@@ -289,3 +291,7 @@ describe('dappHandlers security', () => {
     expect((globalThis as any).txClient.signTransaction).toHaveBeenCalledWith(0, new Uint8Array([1, 2, 3]));
   });
 });
+
+
+
+

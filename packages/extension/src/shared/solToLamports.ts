@@ -16,7 +16,7 @@ export function parseSolToLamports(solAmount: string): string {
 
   const parts = trimmed.split('.');
   const integerPart = parts[0];
-  const fractionalPart = parts.length > 1 ? parts[1] : '';
+  const fractionalPart = parts.length > 1 && parts[1] !== undefined ? parts[1] : '';
 
   // Pad fractional part to exactly 9 digits
   const paddedFractional = fractionalPart.padEnd(9, '0');
@@ -31,3 +31,4 @@ export function parseSolToLamports(solAmount: string): string {
 
   return lamportsStr;
 }
+

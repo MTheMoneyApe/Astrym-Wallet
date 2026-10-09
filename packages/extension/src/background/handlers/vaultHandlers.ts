@@ -127,7 +127,7 @@ export function createResetWalletHandler(vaultService: VaultService) {
       } catch (e) {
         // Read back
         const marker = await browser.storage.local.get('solanym_reset_in_progress').catch(() => ({}));
-        if (marker.solanym_reset_in_progress !== true) {
+        if ((marker as Record<string, unknown>)['solanym_reset_in_progress'] !== true) {
           stateCoordinator.enterErrorState();
           throw new Error('Failed to set reset marker');
         }
@@ -135,7 +135,7 @@ export function createResetWalletHandler(vaultService: VaultService) {
 
       // Verify marker strictly
       const verify = await browser.storage.local.get('solanym_reset_in_progress');
-      if (verify.solanym_reset_in_progress !== true) {
+      if ((verify as Record<string, unknown>)['solanym_reset_in_progress'] !== true) {
         stateCoordinator.enterErrorState();
         throw new Error('Reset marker verification failed');
       }
@@ -159,6 +159,8 @@ export function createResetWalletHandler(vaultService: VaultService) {
     }
   };
 }
+
+
 
 
 

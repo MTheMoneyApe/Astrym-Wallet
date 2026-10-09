@@ -53,8 +53,8 @@ export function createAddAccountHandler(keyManager: KeyManager) {
       const accounts = await keyManager.getAccounts();
       const updated = accounts.find(a => a.index === account.index);
       
-      const { getBase58Encoder } = await import('@solana/kit');
-      const address = getBase58Encoder().encode(updated!.publicKey);
+      const { getBase58Decoder } = await import('@solana/kit');
+      const address = getBase58Decoder().decode(updated!.publicKey);
 
       return {
         account: {
@@ -121,3 +121,4 @@ export function createRenameAccountHandler(keyManager: KeyManager) {
     }
   };
 }
+

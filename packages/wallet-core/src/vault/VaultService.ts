@@ -231,10 +231,35 @@ export class VaultService {
    * unlock() or tryRestoreFromSession() succeeds.
    */
   async deleteVault(): Promise<void> {
-    await this._persistent.clearBlob();
-    await this._session.clearKey();
+    // 1. Invalidar material sensible en memoria de inmediato
     this._contents = null;
-    await this._cancelAlarm();
+
+    const errors: Error[] = [];
+
+    // 2. Intentar purgar blob persistente
+    try {
+      await this._persistent.clearBlob();
+    } catch (e) {
+      errors.push(e instanceof Error ? e : new Error(String(e)));
+    }
+
+    // 3. Intentar purgar llave de sesión, independientemente del disco
+    try {
+      await this._session.clearKey();
+    } catch (e) {
+      errors.push(e instanceof Error ? e : new Error(String(e)));
+    }
+
+    // 4. Cancelar alarma
+    try {
+      await this._cancelAlarm();
+    } catch (e) {
+      errors.push(e instanceof Error ? e : new Error(String(e)));
+    }
+
+    if (errors.length > 0) {
+      throw new Error(`deleteVault partially failed: ${errors.map(e => e.message).join('; ')}`);
+    }
   }
 
   async lock(): Promise<void> {

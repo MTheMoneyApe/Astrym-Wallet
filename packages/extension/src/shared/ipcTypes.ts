@@ -68,3 +68,12 @@ export type MessageTypes = keyof typeof MessageSchemas;
 
 export type ValidatedRequestPayload<T extends MessageTypes> = z.infer<typeof MessageSchemas[T]['request']>;
 export type ValidatedResponsePayload<T extends MessageTypes> = z.infer<typeof MessageSchemas[T]['response']>;
+
+export type AddAccountRequest = z.infer<typeof import('./ipcSchemas.js').AddAccountRequestSchema>;
+export type AddAccountResponse = z.infer<typeof import('./ipcSchemas.js').AddAccountResponseSchema>;
+export type SetActiveAccountRequest = z.infer<typeof import('./ipcSchemas.js').SetActiveAccountRequestSchema>;
+export type SetActiveAccountResponse = z.infer<typeof import('./ipcSchemas.js').SetActiveAccountResponseSchema>;
+export type RenameAccountRequest = z.infer<typeof import('./ipcSchemas.js').RenameAccountRequestSchema>;
+export type RenameAccountResponse = z.infer<typeof import('./ipcSchemas.js').RenameAccountResponseSchema>;
+export type ResetWalletRequest = z.infer<typeof import('./ipcSchemas.js').ResetWalletRequestSchema>;
+export type ResetWalletResponse = z.infer<typeof import('./ipcSchemas.js').ResetWalletResponseSchema>;

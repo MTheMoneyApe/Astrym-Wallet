@@ -60,7 +60,7 @@ export async function handleDappConnect(payload: DappConnectRequest, sender?: br
   }
 
   const accountService = (globalThis as any).accountService as AccountService;
-  const isLocked = (stateCoordinator.state !== 'READY' && stateCoordinator.state !== 'READY_WITH_MUTATION_LOCK');
+  const isLocked = (stateCoordinator.state !== 'READY' );
   const isTrusted = await permissionManager.isTrusted(origin);
 
   if (payload.onlyIfTrusted) {
@@ -216,3 +216,4 @@ export async function handleApprovePendingRequest(payload: ApprovePendingRequest
 
   throw new Error('Pending request not found');
 }
+
