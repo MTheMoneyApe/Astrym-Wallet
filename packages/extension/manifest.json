@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Solanym Wallet",
+  "version": "0.1.0",
+  "description": "Secure Solana Wallet",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Solanym"
+  },
+  "permissions": [
+    "alarms",
+    "storage"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["provider.js"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ]
+}

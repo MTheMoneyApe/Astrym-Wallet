@@ -1,0 +1,9 @@
+packages:
+  - 'packages/*'
+
+# Allow native build scripts for transitive Solana SDK dependencies.
+# These three packages compile C++ bindings and must run their install scripts.
+allowBuilds:
+  bigint-buffer: true
+  bufferutil: true
+  utf-8-validate: true
