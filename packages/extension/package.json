@@ -4,6 +4,7 @@
   "type": "module",
   "private": true,
   "dependencies": {
+    "@nymproject/mix-fetch": "3.0.0",
     "@solana/kit": "^2.3.0",
     "@solanym/wallet-core": "workspace:*",
     "react": "^19.3.0",

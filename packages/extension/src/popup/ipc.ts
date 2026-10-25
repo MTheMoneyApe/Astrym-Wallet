@@ -13,6 +13,12 @@ export async function sendIpcMessage<T extends MessageTypes>(
     payload
   });
 
+  if (!response) {
+    const error = new Error('No response received from background script. The extension service worker might be restarting or crashed.');
+    error.name = 'IpcConnectionError';
+    throw error;
+  }
+
   if (response.error) {
     const error = new Error(response.error.message);
     error.name = response.error.name;

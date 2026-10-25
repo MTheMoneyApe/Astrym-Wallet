@@ -104,6 +104,20 @@ export function createLockVaultHandler(vaultService: VaultService) {
   };
 }
 
+export function createRevealRecoveryPhraseHandler(vaultService: VaultService) {
+  return async (payload: { auth: string }): Promise<{ recoveryPhrase: string[] }> => {
+    await stateCoordinator.mutex.acquire();
+    try {
+      if (stateCoordinator.isResetting) throw new Error('Reset in progress');
+      await vaultService.unlock(payload.auth);
+      const phrase = vaultService.getMnemonic();
+      return { recoveryPhrase: phrase.split(' ') };
+    } finally {
+      stateCoordinator.mutex.release();
+    }
+  };
+}
+
 export function createResetWalletHandler(vaultService: VaultService) {
   return async (payload: ResetWalletRequest, sender?: browser.Runtime.MessageSender): Promise<ResetWalletResponse> => {
     // 1. Strict Allowlist MV3 sender check
@@ -159,6 +173,12 @@ export function createResetWalletHandler(vaultService: VaultService) {
     }
   };
 }
+
+
+
+
+
+
 
 
 

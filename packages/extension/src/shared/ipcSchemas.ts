@@ -159,6 +159,8 @@ export const ResetWalletRequestSchema = z.object({
 export const ResetWalletResponseSchema = z.object({
   success: z.boolean()
 });
+export const RevealRecoveryPhraseRequestSchema = z.object({ auth: z.string() });
+export const RevealRecoveryPhraseResponseSchema = z.object({ recoveryPhrase: z.array(z.string()) });
 
 export const AddAccountRequestSchema = z.object({
   idempotencyUuid: z.string().uuid(),
@@ -244,6 +246,7 @@ export const MessageSchemas = {
     request: SendTransferRequestSchema,
     response: SendTransferResponseSchema,
   },
+  REVEAL_RECOVERY_PHRASE: { request: RevealRecoveryPhraseRequestSchema, response: RevealRecoveryPhraseResponseSchema },
   RESET_WALLET: {
     request: ResetWalletRequestSchema,
     response: ResetWalletResponseSchema,
@@ -261,4 +264,9 @@ export const MessageSchemas = {
     response: RenameAccountResponseSchema,
   }
 } as const;
+
+
+
+
+
 

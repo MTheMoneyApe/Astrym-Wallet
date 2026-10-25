@@ -142,3 +142,31 @@ describe('MessageRouter', () => {
     });
   });
 });
+
+describe('IPC safety — absent response guard (sendIpcMessage contract)', () => {
+  // The background listener is async. Chrome MV3 Service Workers can return
+  // undefined when woken up: the popup must not crash on a missing response.
+
+  it('routeMessage always returns a structured envelope (never undefined)', async () => {
+    // Even with malformed input, routeMessage must return an envelope
+    const router = new MessageRouter();
+    const result = await router.routeMessage(null, mockTrustedSender);
+    expect(result).toBeDefined();
+    expect(typeof result).toBe('object');
+    expect(result.error).toBeDefined();
+  });
+
+  it('routeMessage returns error envelope when handler rejects during init', async () => {
+    const router = new MessageRouter();
+    const failHandler = vi.fn().mockRejectedValue(new Error('Service not ready'));
+    router.registerHandler('GET_WALLET_STATE', failHandler as any);
+    const result = await router.routeMessage(
+      { id: 'init-race', type: 'GET_WALLET_STATE', payload: {} },
+      mockTrustedSender
+    );
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('Service not ready');
+    // The error must never include stack traces
+    expect((result.error as any)?.stack).toBeUndefined();
+  });
+});

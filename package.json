@@ -12,6 +12,7 @@
   "devDependencies": {
     "@eslint/js": "latest",
     "eslint": "latest",
+    "patch-package": "^8.0.1",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.0",

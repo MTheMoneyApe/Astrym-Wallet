@@ -8,13 +8,66 @@ import { ApproveSign } from './ApproveSign.js';
 
 export type AppState = 'LOADING' | 'ONBOARDING' | 'LOCKED' | 'DASHBOARD' | 'APPROVE_CONNECT' | 'APPROVE_SIGN';
 
+export const THEME_PRESETS = {
+  midnight: {
+    '--bg-color': '#11151B',
+    '--surface-color': '#1B222B',
+    '--accent-color': '#8FE8D0',
+    '--text-main': '#F4F7F8',
+    '--text-sec': '#A4ADBA',
+  },
+  lightmint: {
+    '--bg-color': '#F7FAF8',
+    '--surface-color': '#FFFFFF',
+    '--accent-color': '#168B68',
+    '--text-main': '#17211D',
+    '--text-sec': '#64736B',
+  },
+  forest: {
+    '--bg-color': '#10251D',
+    '--surface-color': '#18362A',
+    '--accent-color': '#8FE8A8',
+    '--text-main': '#F1FFF5',
+    '--text-sec': '#A9C8B4',
+  }
+};
+
 export function App() {
   const [appState, setAppState] = useState<AppState>('LOADING');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Load theme
+    chrome.storage.local.get(['themePreset', 'customColors'], (res) => {
+      let presetId = res.themePreset || 'midnight';
+      let colors = THEME_PRESETS[presetId as keyof typeof THEME_PRESETS] || THEME_PRESETS.midnight;
+      if (presetId === 'custom' && res.customColors) {
+        colors = res.customColors;
+      }
+      applyColors(colors);
+    });
+
     checkWalletState();
   }, []);
+
+  const applyColors = (colors: any) => {
+    const root = document.documentElement;
+    if (colors['--bg-color']) root.style.setProperty('--bg-color', colors['--bg-color']);
+    if (colors['--surface-color']) root.style.setProperty('--surface-color', colors['--surface-color']);
+    if (colors['--accent-color']) root.style.setProperty('--accent-color', colors['--accent-color']);
+    if (colors['--text-main']) root.style.setProperty('--text-main', colors['--text-main']);
+    if (colors['--text-sec']) root.style.setProperty('--text-sec', colors['--text-sec']);
+    
+    // Auto-derive border colors based on bg
+    // For simplicity, we just keep the default border colors or they can be overridden
+    if (colors['--bg-color'] === '#F7FAF8') {
+       root.style.setProperty('--border-color', '#E5E7EB');
+       root.style.setProperty('--border-dark', '#D1D5DB');
+    } else {
+       root.style.setProperty('--border-color', '#2A323C');
+       root.style.setProperty('--border-dark', '#333333');
+    }
+  };
 
   const checkWalletState = async () => {
     try {
@@ -24,7 +77,6 @@ export function App() {
       } else if (state.isLocked) {
         setAppState('LOCKED');
       } else {
-        // Unlocked. Check if there are pending approvals
         const pending = await sendIpcMessage('GET_PENDING_APPROVALS', {});
         if (pending.connectRequest) {
           setAppState('APPROVE_CONNECT');
@@ -51,7 +103,7 @@ export function App() {
 
   switch (appState) {
     case 'LOADING':
-      return <div style={{ padding: 20 }}>Loading Solanym...</div>;
+      return <div className="center-content">Loading Solanym...</div>;
     case 'ONBOARDING':
       return <Onboarding onComplete={checkWalletState} />;
     case 'LOCKED':

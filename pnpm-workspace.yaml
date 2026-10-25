@@ -7,3 +7,6 @@ allowBuilds:
   bigint-buffer: true
   bufferutil: true
   utf-8-validate: true
+
+patchedDependencies:
+  '@nymproject/mix-tunnel@0.3.0': patches/@nymproject__mix-tunnel@0.3.0.patch

@@ -52,7 +52,7 @@ export const ALLOWED_RPC_METHODS = Object.freeze([
 /** Union of the approved RPC method names. */
 export type AllowedRpcMethod = (typeof ALLOWED_RPC_METHODS)[number];
 
-const ALLOWED_METHOD_SET: ReadonlySet<string> = new Set<string>(ALLOWED_RPC_METHODS);
+export const ALLOWED_METHOD_SET: ReadonlySet<string> = new Set<string>(ALLOWED_RPC_METHODS);
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 
@@ -157,3 +157,4 @@ export function createHttpTransport(
   // Kit's '~cluster' tag is type-only; the runtime function never carries it.
   return guarded as DevnetRpcTransport;
 }
+

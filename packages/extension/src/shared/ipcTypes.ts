@@ -76,4 +76,8 @@ export type SetActiveAccountResponse = z.infer<typeof import('./ipcSchemas.js').
 export type RenameAccountRequest = z.infer<typeof import('./ipcSchemas.js').RenameAccountRequestSchema>;
 export type RenameAccountResponse = z.infer<typeof import('./ipcSchemas.js').RenameAccountResponseSchema>;
 export type ResetWalletRequest = z.infer<typeof import('./ipcSchemas.js').ResetWalletRequestSchema>;
+export type RevealRecoveryPhraseRequest = z.infer<typeof import('./ipcSchemas.js').RevealRecoveryPhraseRequestSchema>;
+export type RevealRecoveryPhraseResponse = z.infer<typeof import('./ipcSchemas.js').RevealRecoveryPhraseResponseSchema>;
 export type ResetWalletResponse = z.infer<typeof import('./ipcSchemas.js').ResetWalletResponseSchema>;
+
+

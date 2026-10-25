@@ -1,8 +1,6 @@
-import browser from 'webextension-polyfill';
-
 // Inject the provider script into the page
 const script = document.createElement('script');
-script.src = browser.runtime.getURL('provider.js'); // Assuming vite builds it to provider.js
+script.src = chrome.runtime.getURL('provider.js');
 script.onload = () => script.remove();
 (document.head || document.documentElement).appendChild(script);
 
@@ -14,8 +12,8 @@ window.addEventListener('message', async (event) => {
   }
 
   try {
-    // Forward to background
-    const response = await browser.runtime.sendMessage(event.data.message);
+    // Forward to background using native chrome API
+    const response = await chrome.runtime.sendMessage(event.data.message);
     
     // Send response back to provider
     window.postMessage({
