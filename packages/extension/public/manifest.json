@@ -18,8 +18,7 @@
                },
     "permissions":  [
                         "alarms",
-                        "storage",
-                        "offscreen"
+                        "storage"
                     ],
     "content_scripts":  [
                             {

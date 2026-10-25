@@ -8,7 +8,7 @@ import { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import { SoftwareSigner } from '@solanym/wallet-core/src/signer/SoftwareSigner.js';
 import { ChromeAccountStorage } from '@solanym/wallet-core/src/keyManager/ChromeAccountStorage.js';
 import { AccountService } from '@solanym/wallet-core/src/solana/accounts/AccountService.js';
-import { createOffscreenNymTransport } from './transport/OffscreenNymTransport.js';
+import { createHttpTransport } from '@solanym/wallet-core/src/solana/transport/HttpTransport.js';
 import { resolveNetworkConfig } from '@solanym/wallet-core/src/solana/rpc/endpoints.js';
 import { createRpcClient } from '@solanym/wallet-core/src/solana/rpc/RpcClient.js';
 import { SolanaReadClient } from '@solanym/wallet-core/src/solana/read/SolanaReadClient.js';
@@ -58,7 +58,7 @@ function initBackgroundSynchronous() {
   const accountService = new AccountService(keyManager);
   
   const config = resolveNetworkConfig('https://api.devnet.solana.com');
-  const transport = createOffscreenNymTransport(config);
+  const transport = createHttpTransport(config);
   const rpcClient = createRpcClient(transport);
   const readClient = new SolanaReadClient(rpcClient);
 

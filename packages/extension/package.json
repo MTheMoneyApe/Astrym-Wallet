@@ -13,7 +13,6 @@
     "zod": "^4.6.5"
   },
   "scripts": {
-    "prepare-nym": "node ../../scripts/extract-nym-worker.mjs",
     "build": "vite build",
     "test": "vitest run",
     "test:watch": "vitest",
