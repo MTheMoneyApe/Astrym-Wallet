@@ -5,6 +5,10 @@ node_modules/
 dist/
 build/
 
+# Generated SPP SDK assets for extension packaging (Fase 1 — do not commit ~277MB)
+packages/extension/public/spp/
+packages/extension/public/nym-mixfetch/
+
 # Environment / secrets — NEVER commit
 .env
 .env.*
@@ -13,14 +17,18 @@ build/
 *.p12
 *.pfx
 
-# Editor
+# Editor / local agent tooling
 .vscode/
 .idea/
+.cursor/
+.continue/
 *.swp
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Test coverage
+# Test coverage / caches
 coverage/
+packages/extension/.vitest/
+**/.vitest/

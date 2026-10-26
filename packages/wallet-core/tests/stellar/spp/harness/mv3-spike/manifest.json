@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Solanym SPP RO-1 Host Spike (TEST ONLY)",
+  "version": "0.0.36",
+  "description": "Fase 2.36 isolated MV3 spike — NOT production wallet. RO-1 only. No vault/keys/signing.",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "SPP RO-1 Spike 2.36",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' http://127.0.0.1:8765; worker-src 'self'"
+  },
+  "web_accessible_resources": []
+}

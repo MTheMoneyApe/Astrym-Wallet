@@ -1,0 +1,19 @@
+{
+  "name": "stellar-private-payments",
+  "version": "0.2.1",
+  "resolvedFrom": "C:\\Users\\M\\Downloads\\Stellar privacy project\\packages\\wallet-core\\node_modules\\stellar-private-payments",
+  "copiedAt": "2026-10-26T01:20:28.040Z",
+  "files": [
+    {
+      "destName": "dist",
+      "ok": true,
+      "src": "C:\\Users\\M\\Downloads\\Stellar privacy project\\packages\\wallet-core\\node_modules\\stellar-private-payments\\dist"
+    },
+    {
+      "destName": "js",
+      "ok": true,
+      "src": "C:\\Users\\M\\Downloads\\Stellar privacy project\\packages\\wallet-core\\node_modules\\stellar-private-payments\\js"
+    }
+  ],
+  "note": "Harness spike only — never ship as production wallet package"
+}

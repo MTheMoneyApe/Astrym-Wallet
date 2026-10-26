@@ -1,16 +1,22 @@
-import type { AccountService } from '@solanym/wallet-core/src/solana/accounts/AccountService.js';
 import type { SolanaReadClient } from '@solanym/wallet-core/src/solana/read/SolanaReadClient.js';
 import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
+import type { StellarReadClient } from '@solanym/wallet-core/src/stellar/read/StellarReadClient.js';
+import { StrKey } from '@solanym/wallet-core';
+import { getBase58Decoder } from '@solana/kit';
 import type { 
-  GetAccountsRequest, GetAccountsResponse, GetBalanceRequest, GetBalanceResponse,
+  GetAccountsRequest, GetAccountsResponse,
+  GetActiveAccountRequest, GetActiveAccountResponse,
+  GetBalanceRequest, GetBalanceResponse,
+  GetStellarBalanceRequest, GetStellarBalanceResponse,
+  FundStellarTestnetRequest, FundStellarTestnetResponse,
   AddAccountRequest, AddAccountResponse,
   SetActiveAccountRequest, SetActiveAccountResponse,
   RenameAccountRequest, RenameAccountResponse
 } from '../../shared/ipcTypes.js';
 import { stateCoordinator } from '../StateCoordinator.js';
-import { activeAccountManager } from '../accounts/ActiveAccountManager.js';
+import { activeAccountManager, type IAccountService } from '../accounts/ActiveAccountManager.js';
 
-export function createGetAccountsHandler(accountService: AccountService) {
+export function createGetAccountsHandler(accountService: IAccountService) {
   return async (_payload: GetAccountsRequest): Promise<GetAccountsResponse> => {
     // Allows reading even if state is READY_WITH_MUTATION_LOCK
     if (stateCoordinator.state === 'ERROR_STATE' || stateCoordinator.state === 'RESET_BLOCKED') {
@@ -25,12 +31,50 @@ export function createGetAccountsHandler(accountService: AccountService) {
   };
 }
 
+export function createGetActiveAccountHandler(accountService: IAccountService) {
+  return async (_payload: GetActiveAccountRequest): Promise<GetActiveAccountResponse> => {
+    if (stateCoordinator.state === 'ERROR_STATE' || stateCoordinator.state === 'RESET_BLOCKED') {
+      throw new Error('System in degraded state');
+    }
+
+    const accounts = await accountService.getAccounts();
+    if (accounts.length === 0) {
+      return { status: 'NONE', index: null };
+    }
+
+    try {
+      const activeIndex = activeAccountManager.getActiveAccountIndex();
+      const isValid = accounts.some((account) => account.index === activeIndex);
+
+      if (!isValid) {
+        return { status: 'INVALID', index: null };
+      }
+
+      return { status: 'VALID', index: activeIndex };
+    } catch {
+      return { status: 'INVALID', index: null };
+    }
+  };
+}
+
 export function createGetBalanceHandler(readClient: SolanaReadClient) {
   return async (payload: GetBalanceRequest): Promise<GetBalanceResponse> => {
     const balance = await readClient.getSolBalance(payload.address);
     return {
       lamports: balance.lamports.toString()
     };
+  };
+}
+
+export function createGetStellarBalanceHandler(readClient: StellarReadClient) {
+  return async (payload: GetStellarBalanceRequest): Promise<GetStellarBalanceResponse> => {
+    return await readClient.getBalance(payload.address);
+  };
+}
+
+export function createFundStellarTestnetHandler(readClient: StellarReadClient) {
+  return async (payload: FundStellarTestnetRequest): Promise<FundStellarTestnetResponse> => {
+    return await readClient.fundTestnetAccount(payload.address);
   };
 }
 
@@ -47,14 +91,12 @@ export function createAddAccountHandler(keyManager: KeyManager) {
 
       const account = await keyManager.addAccount(payload.idempotencyUuid, payload.label);
       
-      // We must encode the Uint8Array to base58 for IPC. KeyManager returns Uint8Array publicKey.
-      // AccountService has getAccounts which formats to address. For this handler, we can rely on formatting here.
-      // We will need a local base58 encoder for the response. Or we can just fetch from accountService.
       const accounts = await keyManager.getAccounts();
       const updated = accounts.find(a => a.index === account.index);
       
-      const { getBase58Decoder } = await import('@solana/kit');
-      const address = getBase58Decoder().decode(updated!.publicKey);
+      const address = updated?.chain === 'stellar'
+        ? StrKey.encodeEd25519PublicKey(updated.publicKey)
+        : getBase58Decoder().decode(updated!.publicKey);
 
       return {
         account: {
@@ -74,7 +116,7 @@ export function createAddAccountHandler(keyManager: KeyManager) {
   };
 }
 
-export function createSetActiveAccountHandler(accountService: AccountService) {
+export function createSetActiveAccountHandler(accountService: IAccountService) {
   return async (payload: SetActiveAccountRequest): Promise<SetActiveAccountResponse> => {
     await stateCoordinator.mutex.acquire();
     try {

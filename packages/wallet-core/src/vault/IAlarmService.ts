@@ -20,15 +20,15 @@ export const LOCK_ALARM_NAME = 'solanym_auto_lock' as const;
 /** Auto-lock inactivity timeout in minutes (matches plan constant). */
 export const LOCK_TIMEOUT_MINUTES = 5 as const;
 
+export const LOCK_TIMEOUT_OPTIONS_MINUTES = [1, 5, 10, 15, 30] as const;
+export type LockTimeoutMinutes = (typeof LOCK_TIMEOUT_OPTIONS_MINUTES)[number];
+
 export interface IAlarmService {
   /**
-   * Schedule (or reschedule) the auto-lock alarm to fire after
-   * LOCK_TIMEOUT_MINUTES of inactivity.
-   *
-   * Calling schedule() while an alarm is already pending replaces it,
-   * effectively resetting the inactivity timer.
+   * Schedule the auto-lock alarm from the last real user-activity timestamp.
+   * Omitting the timestamp preserves the persisted activity time.
    */
-  schedule(): Promise<void>;
+  schedule(lastActivityAt?: number): Promise<void>;
 
   /**
    * Cancel any pending auto-lock alarm.

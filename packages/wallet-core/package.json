@@ -8,17 +8,19 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:testnet-live": "vitest run tests/stellar/stellarTestnetLive.smoke.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests"
   },
   "dependencies": {
     "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0",
-    "@nymproject/mix-fetch": "3.0.0",
-    "@nymproject/mix-tunnel": "0.3.0",
+    "@nymproject/mix-fetch": "1.4.2",
     "@scure/bip39": "2.4.0",
     "@solana/kit": "8.3.0",
-    "@solana/spl-token": "0.4.15"
+    "@solana/spl-token": "0.4.15",
+    "@stellar/stellar-sdk": "^17.3.0",
+    "stellar-private-payments": "0.2.1"
   },
   "devDependencies": {
     "@types/node": "22.15.0",

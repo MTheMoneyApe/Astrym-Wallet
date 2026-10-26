@@ -72,4 +72,25 @@ describe('ActiveAccountManager', () => {
     const addr = await manager.getActiveAccountPublicKey(mockAccountService);
     expect(addr).toBe('addr1');
   });
+
+  it('reads the persisted index after a new manager instance initializes', async () => {
+    vi.spyOn(browser.storage.local, 'get').mockResolvedValue({ solanym_active_index: 2 });
+    await manager.initialize();
+    await manager.setActiveAccountIndex(1, mockAccountService);
+
+    vi.spyOn(browser.storage.local, 'get').mockResolvedValue({ solanym_active_index: 1 });
+    const restartedManager = new (ActiveAccountManager as any)() as ActiveAccountManager;
+    await restartedManager.initialize();
+
+    expect(restartedManager.getActiveAccountIndex()).toBe(1);
+  });
+
+  it('does not claim an index was persisted when storage write rejects', async () => {
+    vi.spyOn(browser.storage.local, 'get').mockResolvedValue({ solanym_active_index: 2 });
+    await manager.initialize();
+    vi.spyOn(browser.storage.local, 'set').mockRejectedValue(new Error('storage unavailable'));
+
+    await expect(manager.setActiveAccountIndex(1, mockAccountService)).rejects.toThrow('storage unavailable');
+    expect(manager.getActiveAccountIndex()).toBe(2);
+  });
 });

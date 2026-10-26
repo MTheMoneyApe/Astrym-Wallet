@@ -8,10 +8,13 @@
 
 export type AccountIndex = number;
 
+export type SupportedAccountChain = 'solana' | 'stellar';
+
 export interface AccountInfo {
   readonly index: AccountIndex;
   readonly publicKey: Uint8Array;
   readonly label: string;
+  readonly chain?: SupportedAccountChain | undefined;
 }
 
 export interface V2AccountState {

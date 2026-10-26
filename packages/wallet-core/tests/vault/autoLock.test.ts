@@ -11,7 +11,7 @@
  * Test categories:
  *   1. Alarm is scheduled after unlock
  *   2. Alarm fires → vault locks, session key removed
- *   3. Activity resets the timer (cancel + re-schedule)
+ *   3. Explicit activity resets the persisted deadline and alarm
  *   4. lock() cancels the alarm
  *   5. resetActivityTimer() has no effect when locked
  *   6. Alarm is scheduled after createVault
@@ -36,14 +36,18 @@ import { VaultService } from '../../src/vault/VaultService.js';
 class MockAlarmService implements IAlarmService {
   scheduleCalls = 0;
   cancelCalls = 0;
+  scheduleError: Error | null = null;
+  cancelError: Error | null = null;
   private _callback: (() => Promise<void>) | null = null;
 
   async schedule(): Promise<void> {
     this.scheduleCalls++;
+    if (this.scheduleError) throw this.scheduleError;
   }
 
   async cancel(): Promise<void> {
     this.cancelCalls++;
+    if (this.cancelError) throw this.cancelError;
   }
 
   onAlarm(callback: () => Promise<void>): void {
@@ -75,9 +79,13 @@ class MemPersistent implements IPersistentStorage {
 
 class MemSession implements ISessionStorage {
   private _key: CryptoKey | null = null;
+  clearError: Error | null = null;
   async loadKey() { return this._key; }
   async saveKey(key: CryptoKey) { this._key = key; }
-  async clearKey() { this._key = null; }
+  async clearKey() {
+    if (this.clearError) throw this.clearError;
+    this._key = null;
+  }
   get raw() { return this._key; }
 }
 
@@ -177,7 +185,7 @@ describe('auto-lock — resetActivityTimer() resets the countdown', () => {
 
     await svc.resetActivityTimer();
 
-    expect(alarm.cancelCalls).toBe(1);
+    expect(alarm.cancelCalls).toBe(0);
     expect(alarm.scheduleCalls).toBe(1);
   });
 
@@ -190,7 +198,7 @@ describe('auto-lock — resetActivityTimer() resets the countdown', () => {
     await svc.resetActivityTimer();
     await svc.resetActivityTimer();
 
-    expect(alarm.cancelCalls).toBe(3);
+    expect(alarm.cancelCalls).toBe(0);
     expect(alarm.scheduleCalls).toBe(3);
   });
 });
@@ -216,6 +224,69 @@ describe('auto-lock — lock() cancels the alarm', () => {
     await svc.lock();
 
     expect(alarm.scheduleCalls).toBe(0);
+  });
+
+  it('reports a session-key deletion failure but still cancels the alarm', async () => {
+    const { svc, alarm, session } = makeAll();
+    await svc.createVault(PASSWORD, PHRASE);
+    const failure = new Error('session remove failed');
+    session.clearError = failure;
+
+    await expect(svc.lock()).rejects.toMatchObject({
+      name: 'AggregateError',
+      message: 'Wallet lock could not be confirmed',
+      errors: [expect.objectContaining({ message: 'Session key removal failed' })],
+    });
+
+    expect(svc.isLocked).toBe(true);
+    expect(session.raw).not.toBeNull();
+    expect(alarm.cancelCalls).toBe(1);
+    await expect(svc.tryRestoreFromSession()).resolves.toBe(false);
+  });
+
+  it('reports an alarm cancellation failure after deleting the session key', async () => {
+    const { svc, alarm, session } = makeAll();
+    await svc.createVault(PASSWORD, PHRASE);
+    alarm.cancelError = new Error('alarm clear failed');
+
+    await expect(svc.lock()).rejects.toMatchObject({
+      name: 'AggregateError',
+      message: 'Wallet lock could not be confirmed',
+      errors: [expect.objectContaining({ message: 'Auto-lock alarm cancellation failed' })],
+    });
+
+    expect(svc.isLocked).toBe(true);
+    expect(session.raw).toBeNull();
+    expect(alarm.cancelCalls).toBe(1);
+  });
+
+  it('reports both failures and will not restore after a worker restart cleanup failure', async () => {
+    const { svc, alarm, persistent, session } = makeAll();
+    await svc.createVault(PASSWORD, PHRASE);
+    session.clearError = new Error('session remove failed');
+    alarm.cancelError = new Error('alarm clear failed');
+
+    await expect(svc.lock()).rejects.toMatchObject({
+      name: 'AggregateError',
+      message: 'Wallet lock could not be confirmed',
+      errors: [
+        expect.objectContaining({ message: 'Session key removal failed' }),
+        expect.objectContaining({ message: 'Auto-lock alarm cancellation failed' }),
+      ],
+    });
+    expect(session.raw).not.toBeNull();
+    expect(alarm.cancelCalls).toBe(1);
+
+    const restartedService = new VaultService(
+      new PasswordUnlocker(),
+      persistent,
+      session,
+      alarm,
+    );
+    await expect(restartedService.lock()).rejects.toThrow(
+      'Wallet lock could not be confirmed',
+    );
+    await expect(restartedService.tryRestoreFromSession()).resolves.toBe(false);
   });
 });
 
@@ -255,6 +326,29 @@ describe('auto-lock — alarm scheduled after createVault', () => {
     await svc.createVault(PASSWORD, PHRASE);
 
     expect(alarm.scheduleCalls).toBe(1);
+  });
+
+  it('discards a new vault if its auto-lock alarm cannot be armed', async () => {
+    const { svc, alarm, persistent, session } = makeAll();
+    alarm.scheduleError = new Error('alarm unavailable');
+
+    await expect(svc.createVault(PASSWORD, PHRASE)).rejects.toThrow('alarm unavailable');
+
+    expect(svc.isLocked).toBe(true);
+    expect(await persistent.loadBlob()).toBeNull();
+    expect(session.raw).toBeNull();
+  });
+
+  it('clears the session key and keeps the wallet locked if unlock cannot arm the alarm', async () => {
+    const { svc, alarm, session } = makeAll();
+    await svc.createVault(PASSWORD, PHRASE);
+    await svc.lock();
+    alarm.scheduleError = new Error('alarm unavailable');
+
+    await expect(svc.unlock(PASSWORD)).rejects.toThrow('alarm unavailable');
+
+    expect(svc.isLocked).toBe(true);
+    expect(session.raw).toBeNull();
   });
 });
 
@@ -323,5 +417,3 @@ describe('auto-lock — null alarm service (existing tests compatibility)', () =
     await expect(svc.resetActivityTimer()).resolves.toBeUndefined();
   });
 });
-
-

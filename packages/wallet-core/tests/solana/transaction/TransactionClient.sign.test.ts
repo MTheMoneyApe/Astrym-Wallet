@@ -32,6 +32,8 @@ describe('TransactionClient - signTransaction', () => {
     mockRpc = {
       sendTransaction: vi.fn(),
       getLatestBlockhash: vi.fn(),
+      getFeeForMessage: vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue({ value: 5000n }) }),
+      getBalance: vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue({ value: 1_000_000n }) }),
     };
 
     mockKeyManager = {
@@ -147,5 +149,52 @@ describe('TransactionClient - signTransaction', () => {
     
     expect(result).toBe('fake_signature');
     expect(mockRpc.sendTransaction).toHaveBeenCalled();
+  });
+
+  it('does not return a dapp signature when authorization expires during signing', async () => {
+    const messageBytes = new Uint8Array(createValidMessageBytes(sourceAddr));
+    let resolveSigning!: (signature: Uint8Array) => void;
+    mockSigner.sign.mockImplementation(() => new Promise((resolve) => {
+      resolveSigning = resolve;
+    }));
+
+    let authorized = true;
+    const signing = client.signTransaction(0, messageBytes, () => {
+      if (!authorized) throw new Error('authorization expired');
+    });
+    await vi.waitFor(() => expect(mockSigner.sign).toHaveBeenCalledOnce());
+
+    authorized = false;
+    resolveSigning(new Uint8Array(64).fill(1));
+
+    await expect(signing).rejects.toThrow('authorization expired');
+  });
+
+  it('does not broadcast when authorization expires during signing', async () => {
+    mockRpc.getLatestBlockhash.mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        value: { blockhash: dummyBlockhash as Blockhash, lastValidBlockHeight: 123n },
+      }),
+    });
+    let resolveSigning!: (signature: Uint8Array) => void;
+    mockSigner.sign.mockImplementation(() => new Promise((resolve) => {
+      resolveSigning = resolve;
+    }));
+
+    let authorized = true;
+    const sending = client.sendSol({
+      sourceAccountIndex: 0,
+      destination: destAddr,
+      lamports: 100n,
+    }, () => {
+      if (!authorized) throw new Error('authorization expired');
+    });
+    await vi.waitFor(() => expect(mockSigner.sign).toHaveBeenCalledOnce());
+
+    authorized = false;
+    resolveSigning(new Uint8Array(64).fill(1));
+
+    await expect(sending).rejects.toThrow('authorization expired');
+    expect(mockRpc.sendTransaction).not.toHaveBeenCalled();
   });
 });

@@ -5,7 +5,8 @@ vi.mock('webextension-polyfill', () => {
   return {
     default: {
       runtime: {
-        id: 'test-extension-id'
+        id: 'test-extension-id',
+        getURL: (path: string) => `chrome-extension://test-extension-id${path}`,
       }
     }
   };
@@ -140,10 +141,51 @@ describe('MessageRouter', () => {
       const result = await router.routeMessage({ id: '3', type: 'REVIEW_TRANSFER', payload: { accountIndex: 0, destination: '11111111111111111111111111111111', lamports: '1000' } }, mockTrustedSender);
       expect(result.error?.name).toBe('UnknownMessageTypeError'); // Correctly authorized, but handler missing in test
     });
+
+    describe('recovery phrase reveal authorization', () => {
+      const validRevealRequest = {
+        id: 'reveal-1',
+        type: 'REVEAL_RECOVERY_PHRASE',
+        payload: { auth: 'user-password' },
+      };
+
+      it.each([
+        { id: 'other-extension', url: 'chrome-extension://test-extension-id/popup.html' },
+        { id: 'test-extension-id', url: 'chrome-extension://test-extension-id/options.html' },
+        { id: 'test-extension-id', url: 'https://example.com/popup.html' },
+      ])('rejects a non-popup sender without invoking the handler: %j', async (sender) => {
+        const router = new MessageRouter();
+        const handler = vi.fn().mockResolvedValue({
+          recoveryPhrase: Array.from({ length: 24 }, (_, index) => `synthetic-${index}`),
+        });
+        router.registerHandler('REVEAL_RECOVERY_PHRASE', handler);
+
+        const result = await router.routeMessage(validRevealRequest, sender as any);
+
+        expect(result.error?.name).toBe('UnauthorizedSenderError');
+        expect(handler).not.toHaveBeenCalled();
+      });
+
+      it('allows the exact popup context to invoke the registered handler', async () => {
+        const router = new MessageRouter();
+        const handler = vi.fn().mockResolvedValue({
+          recoveryPhrase: Array.from({ length: 24 }, (_, index) => `synthetic-${index}`),
+        });
+        router.registerHandler('REVEAL_RECOVERY_PHRASE', handler);
+
+        const result = await router.routeMessage(validRevealRequest, mockTrustedSender);
+
+        expect(handler).toHaveBeenCalledWith(validRevealRequest.payload, mockTrustedSender);
+        expect(result.error).toBeUndefined();
+        expect(result.payload).toEqual({
+          recoveryPhrase: Array.from({ length: 24 }, (_, index) => `synthetic-${index}`),
+        });
+      });
+    });
   });
 });
 
-describe('IPC safety — absent response guard (sendIpcMessage contract)', () => {
+describe('IPC safety ï¿½ absent response guard (sendIpcMessage contract)', () => {
   // The background listener is async. Chrome MV3 Service Workers can return
   // undefined when woken up: the popup must not crash on a missing response.
 

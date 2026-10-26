@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createImportVaultHandler } from '../../../src/background/handlers/vaultHandlers.js';
 import type { VaultService } from '@solanym/wallet-core/src/vault/VaultService.js';
 import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
+import type { AccountService } from '@solanym/wallet-core/src/solana/accounts/AccountService.js';
 import { validateSeedPhrase } from '@solanym/wallet-core/src/crypto/mnemonic.js';
 import { makeSeedPhrase } from '@solanym/wallet-core/src/crypto/types.js';
 
@@ -22,10 +23,12 @@ describe('createImportVaultHandler', () => {
     } as unknown as VaultService;
     
     const mockKeyManager = {
-      addAccount: vi.fn().mockResolvedValue(undefined)
+      addAccount: vi.fn().mockResolvedValue({ index: 6 })
     } as unknown as KeyManager;
+    const mockAccountService = { getAccounts: vi.fn() } as unknown as AccountService;
+    const activeIndexWriter = { setActiveAccountIndex: vi.fn().mockResolvedValue(undefined) };
 
-    const handler = createImportVaultHandler(mockVaultService, mockKeyManager);
+    const handler = createImportVaultHandler(mockVaultService, mockKeyManager, mockAccountService, activeIndexWriter);
     
     // Standard test vector for 12 words (abandon x 11 + about)
     const valid12Word = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'.split(' ');
@@ -34,6 +37,7 @@ describe('createImportVaultHandler', () => {
 
     expect(mockVaultService.createVault).toHaveBeenCalledWith('my-password', makeSeedPhrase(valid12Word.join(' ')));
     expect(mockKeyManager.addAccount).toHaveBeenCalledWith(expect.any(String), 'Account 1');
+    expect(activeIndexWriter.setActiveAccountIndex).toHaveBeenCalledWith(6, mockAccountService);
     expect(result).toEqual({ success: true });
   });
 
@@ -44,10 +48,12 @@ describe('createImportVaultHandler', () => {
     } as unknown as VaultService;
     
     const mockKeyManager = {
-      addAccount: vi.fn().mockResolvedValue(undefined)
+      addAccount: vi.fn().mockResolvedValue({ index: 9 })
     } as unknown as KeyManager;
+    const mockAccountService = { getAccounts: vi.fn() } as unknown as AccountService;
+    const activeIndexWriter = { setActiveAccountIndex: vi.fn().mockResolvedValue(undefined) };
 
-    const handler = createImportVaultHandler(mockVaultService, mockKeyManager);
+    const handler = createImportVaultHandler(mockVaultService, mockKeyManager, mockAccountService, activeIndexWriter);
     
     // Standard test vector for 24 words
     const valid24Word = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art'.split(' ');
@@ -56,6 +62,28 @@ describe('createImportVaultHandler', () => {
 
     expect(result).toEqual({ success: true });
     expect(mockVaultService.createVault).toHaveBeenCalledWith('my-password', makeSeedPhrase(valid24Word.join(' ')));
+    expect(activeIndexWriter.setActiveAccountIndex).toHaveBeenCalledWith(9, mockAccountService);
+  });
+
+  it('does not report import success when the first active index cannot be persisted', async () => {
+    const mockVaultService = {
+      createVault: vi.fn().mockResolvedValue(undefined),
+      deleteVault: vi.fn().mockResolvedValue(undefined),
+    } as unknown as VaultService;
+    const mockKeyManager = {
+      addAccount: vi.fn().mockResolvedValue({ index: 5 }),
+    } as unknown as KeyManager;
+    const mockAccountService = { getAccounts: vi.fn() } as unknown as AccountService;
+    const activeIndexWriter = {
+      setActiveAccountIndex: vi.fn().mockRejectedValue(new Error('storage unavailable')),
+    };
+    const handler = createImportVaultHandler(mockVaultService, mockKeyManager, mockAccountService, activeIndexWriter);
+    const valid12Word = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'.split(' ');
+
+    await expect(handler({ password: 'my-password', recoveryPhrase: valid12Word }))
+      .rejects.toThrow('active account index could not be saved');
+    expect(activeIndexWriter.setActiveAccountIndex).toHaveBeenCalledWith(5, mockAccountService);
+    expect(mockVaultService.deleteVault).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid phrase (wrong checksum) before calling createVault', async () => {
@@ -65,10 +93,12 @@ describe('createImportVaultHandler', () => {
     } as unknown as VaultService;
     
     const mockKeyManager = {
-      addAccount: vi.fn().mockResolvedValue(undefined)
+      addAccount: vi.fn().mockResolvedValue({ index: 0 })
     } as unknown as KeyManager;
+    const mockAccountService = { getAccounts: vi.fn() } as unknown as AccountService;
+    const activeIndexWriter = { setActiveAccountIndex: vi.fn().mockResolvedValue(undefined) };
 
-    const handler = createImportVaultHandler(mockVaultService, mockKeyManager);
+    const handler = createImportVaultHandler(mockVaultService, mockKeyManager, mockAccountService, activeIndexWriter);
     
     // Invalid checksum (abandon x 12 is invalid)
     const invalid12Word = Array(12).fill('abandon');
@@ -87,10 +117,12 @@ describe('createImportVaultHandler', () => {
     } as unknown as VaultService;
     
     const mockKeyManager = {
-      addAccount: vi.fn().mockResolvedValue(undefined)
+      addAccount: vi.fn().mockResolvedValue({ index: 0 })
     } as unknown as KeyManager;
+    const mockAccountService = { getAccounts: vi.fn() } as unknown as AccountService;
+    const activeIndexWriter = { setActiveAccountIndex: vi.fn().mockResolvedValue(undefined) };
 
-    const handler = createImportVaultHandler(mockVaultService, mockKeyManager);
+    const handler = createImportVaultHandler(mockVaultService, mockKeyManager, mockAccountService, activeIndexWriter);
     
     const invalidWords = 'notaword notaword notaword notaword notaword notaword notaword notaword notaword notaword notaword notaword'.split(' ');
     
@@ -109,8 +141,10 @@ describe('createImportVaultHandler', () => {
     const mockKeyManager = {
       addAccount: vi.fn().mockRejectedValue(new Error('Storage failure'))
     } as unknown as KeyManager;
+    const mockAccountService = { getAccounts: vi.fn() } as unknown as AccountService;
+    const activeIndexWriter = { setActiveAccountIndex: vi.fn() };
 
-    const handler = createImportVaultHandler(mockVaultService, mockKeyManager);
+    const handler = createImportVaultHandler(mockVaultService, mockKeyManager, mockAccountService, activeIndexWriter);
     const valid12Word = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'.split(' ');
     
     await expect(handler({ password: 'my-password', recoveryPhrase: valid12Word }))
@@ -129,10 +163,12 @@ describe('createImportVaultHandler', () => {
     } as unknown as VaultService;
     
     const mockKeyManager = {
-      addAccount: vi.fn().mockResolvedValue(undefined)
+      addAccount: vi.fn().mockResolvedValue({ index: 0 })
     } as unknown as KeyManager;
+    const mockAccountService = { getAccounts: vi.fn() } as unknown as AccountService;
+    const activeIndexWriter = { setActiveAccountIndex: vi.fn().mockResolvedValue(undefined) };
 
-    const handler = createImportVaultHandler(mockVaultService, mockKeyManager);
+    const handler = createImportVaultHandler(mockVaultService, mockKeyManager, mockAccountService, activeIndexWriter);
     const valid12Word = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'.split(' ');
     
     await expect(handler({ password: 'my-password', recoveryPhrase: valid12Word }))
@@ -152,8 +188,10 @@ describe('createImportVaultHandler', () => {
     const mockKeyManager = {
       addAccount: vi.fn().mockRejectedValue(new Error('Storage failure'))
     } as unknown as KeyManager;
+    const mockAccountService = { getAccounts: vi.fn() } as unknown as AccountService;
+    const activeIndexWriter = { setActiveAccountIndex: vi.fn().mockResolvedValue(undefined) };
 
-    const handler = createImportVaultHandler(mockVaultService, mockKeyManager);
+    const handler = createImportVaultHandler(mockVaultService, mockKeyManager, mockAccountService, activeIndexWriter);
     const valid12Word = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'.split(' ');
     
     await expect(handler({ password: 'my-password', recoveryPhrase: valid12Word }))

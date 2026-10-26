@@ -1,0 +1,536 @@
+{
+  "phase": "2.36",
+  "artifactVersion": "0.0.36",
+  "sessionId": "mv3-36-1792982674264",
+  "previousSessionId": null,
+  "previousSessionRecoverable": false,
+  "previousSessionSummary": null,
+  "notWalletIntegration": true,
+  "chromeDesktopExecution": "OPERATOR_EXPORT",
+  "startedAt": "2026-10-26T02:44:34.264Z",
+  "context": {
+    "protocol": "chrome-extension:",
+    "href": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/host/spp-ro1-host.html",
+    "isExtensionPage": true
+  },
+  "chrome": {
+    "version": null,
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+  },
+  "extension": {
+    "id": "kloekcmhonhmmlfcbmpedeehcciffagk",
+    "manifestVersion": 3,
+    "name": "Solanym SPP RO-1 Host Spike (TEST ONLY)",
+    "version": "0.0.36"
+  },
+  "csp": {
+    "manifestExtensionPages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' http://127.0.0.1:8765; worker-src 'self'",
+    "note": "MV3 effective page/worker CSP is the extension_pages string; meta CSP is ignored on extension pages",
+    "workerScriptHeaders": [
+      {
+        "path": "dist/workers/storage-worker.js",
+        "status": 200,
+        "cspHeader": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' http://127.0.0.1:8765; worker-src 'self'",
+        "note": "Header present"
+      },
+      {
+        "path": "dist/workers/prover-worker.js",
+        "status": 200,
+        "cspHeader": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' http://127.0.0.1:8765; worker-src 'self'",
+        "note": "Header present"
+      }
+    ],
+    "documentFetchInvalid": {
+      "target": "https://csp-probe.invalid/",
+      "fetchResult": {
+        "kind": "threw",
+        "message": "Failed to fetch"
+      },
+      "violations": [
+        {
+          "blockedURI": "https://csp-probe.invalid/",
+          "violatedDirective": "connect-src",
+          "effectiveDirective": "connect-src"
+        }
+      ],
+      "classification": "PASS_CSP_CONFIRMED"
+    }
+  },
+  "sdk": {
+    "package": "stellar-private-payments",
+    "expectedVersion": "0.2.1",
+    "resolvedVersion": "0.2.1",
+    "vendor": {
+      "version": "0.2.1",
+      "copiedAt": "2026-10-26T01:20:28.040Z"
+    }
+  },
+  "rpc": {
+    "endpoint": "http://127.0.0.1:8765/rpc-ro1",
+    "allowlist": [
+      "getLedgerEntries"
+    ],
+    "observed": [
+      {
+        "at": "2026-10-26T02:45:41.663Z",
+        "method": "getLedgerEntries",
+        "id": 1,
+        "outcome": "synthetic_getLedgerEntries_allContractsMinimal_ro1",
+        "synthetic": true
+      },
+      {
+        "at": "2026-10-26T02:45:41.676Z",
+        "method": "getLedgerEntries",
+        "id": 1,
+        "outcome": "synthetic_getLedgerEntries_allContractsMinimal_ro1",
+        "synthetic": true
+      }
+    ],
+    "deniedProbes": [
+      {
+        "method": "sync",
+        "ok": false,
+        "reason": "RO-1 deny: sync"
+      },
+      {
+        "method": "backgroundSync",
+        "ok": false,
+        "reason": "RO-1 deny: backgroundSync"
+      },
+      {
+        "method": "deposit",
+        "ok": false,
+        "reason": "RO-1 deny: deposit"
+      },
+      {
+        "method": "transfer",
+        "ok": false,
+        "reason": "RO-1 deny: transfer"
+      },
+      {
+        "method": "withdraw",
+        "ok": false,
+        "reason": "RO-1 deny: withdraw"
+      },
+      {
+        "method": "signTransaction",
+        "ok": false,
+        "reason": "RO-1 deny: signTransaction"
+      },
+      {
+        "method": "sendTransaction",
+        "ok": false,
+        "reason": "RO-1 deny: sendTransaction"
+      },
+      {
+        "method": "simulateTransaction",
+        "ok": false,
+        "reason": "RO-1 deny: simulateTransaction"
+      },
+      {
+        "method": "prove",
+        "ok": false,
+        "reason": "RO-1 deny: prove"
+      },
+      {
+        "method": "ensure_synced",
+        "ok": false,
+        "reason": "RO-1 deny: ensure_synced"
+      },
+      {
+        "rpcMethod": "sendTransaction",
+        "responseError": {
+          "code": -32601,
+          "message": "RO-1 mock: method not allowlisted (sendTransaction) — only getLedgerEntries permitted"
+        },
+        "rejected": true
+      },
+      {
+        "rpcMethod": "simulateTransaction",
+        "responseError": {
+          "code": -32601,
+          "message": "RO-1 mock: method not allowlisted (simulateTransaction) — only getLedgerEntries permitted"
+        },
+        "rejected": true
+      },
+      {
+        "rpcMethod": "getEvents",
+        "responseError": {
+          "code": -32601,
+          "message": "RO-1 mock: method not allowlisted (getEvents) — only getLedgerEntries permitted"
+        },
+        "rejected": true
+      },
+      {
+        "rpcMethod": "getHealth",
+        "responseError": {
+          "code": -32601,
+          "message": "RO-1 mock: method not allowlisted (getHealth) — only getLedgerEntries permitted"
+        },
+        "rejected": true
+      }
+    ],
+    "onlyGetLedgerEntries": true
+  },
+  "events": [
+    {
+      "tRelMs": 325,
+      "at": "2026-10-26T02:44:34.589Z",
+      "type": "session_persisted",
+      "reason": "boot",
+      "sessionId": "mv3-36-1792982674264"
+    },
+    {
+      "tRelMs": 67111,
+      "at": "2026-10-26T02:45:41.375Z",
+      "type": "ro1_begin",
+      "requestId": "ro1-1792982741375-11e36b9b"
+    },
+    {
+      "tRelMs": 67186,
+      "at": "2026-10-26T02:45:41.450Z",
+      "type": "wasm_ok"
+    },
+    {
+      "tRelMs": 67312,
+      "at": "2026-10-26T02:45:41.577Z",
+      "type": "storage_open",
+      "workers": [
+        "storage-worker.js"
+      ]
+    },
+    {
+      "tRelMs": 67384,
+      "at": "2026-10-26T02:45:41.648Z",
+      "type": "client_new",
+      "workers": [
+        {
+          "workerId": "w-1",
+          "script": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/vendor/dist/workers/storage-worker.js",
+          "class": "SDK_REAL",
+          "sessionId": "mv3-36-1792982674264",
+          "terminated": false,
+          "terminateCalls": 0,
+          "type": "module",
+          "at": "2026-10-26T02:45:41.465Z"
+        },
+        {
+          "workerId": "w-2",
+          "script": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/vendor/dist/workers/prover-worker.js",
+          "class": "SDK_REAL",
+          "sessionId": "mv3-36-1792982674264",
+          "terminated": false,
+          "terminateCalls": 0,
+          "type": "module",
+          "at": "2026-10-26T02:45:41.607Z"
+        }
+      ]
+    },
+    {
+      "tRelMs": 67422,
+      "at": "2026-10-26T02:45:41.686Z",
+      "type": "ro1_complete",
+      "onlyGetLedgerEntries": true
+    },
+    {
+      "tRelMs": 67424,
+      "at": "2026-10-26T02:45:41.689Z",
+      "type": "session_persisted",
+      "reason": "ro1_complete",
+      "sessionId": "mv3-36-1792982674264"
+    },
+    {
+      "tRelMs": 351234,
+      "at": "2026-10-26T02:50:25.499Z",
+      "type": "egress_recorded"
+    },
+    {
+      "tRelMs": 351247,
+      "at": "2026-10-26T02:50:25.511Z",
+      "type": "session_persisted",
+      "reason": "egress",
+      "sessionId": "mv3-36-1792982674264"
+    },
+    {
+      "tRelMs": 526102,
+      "at": "2026-10-26T02:53:20.366Z",
+      "type": "egress_recorded"
+    },
+    {
+      "tRelMs": 526111,
+      "at": "2026-10-26T02:53:20.376Z",
+      "type": "session_persisted",
+      "reason": "egress",
+      "sessionId": "mv3-36-1792982674264"
+    },
+    {
+      "tRelMs": 562832,
+      "at": "2026-10-26T02:53:57.097Z",
+      "type": "emergency_close",
+      "reason": "operator_close",
+      "terminatedNow": 2
+    },
+    {
+      "tRelMs": 562840,
+      "at": "2026-10-26T02:53:57.104Z",
+      "type": "session_persisted",
+      "reason": "emergency_close:operator_close",
+      "sessionId": "mv3-36-1792982674264"
+    },
+    {
+      "tRelMs": 854300,
+      "at": "2026-10-26T02:58:48.564Z",
+      "type": "postclose_recorded"
+    },
+    {
+      "tRelMs": 854311,
+      "at": "2026-10-26T02:58:48.575Z",
+      "type": "session_persisted",
+      "reason": "postclose",
+      "sessionId": "mv3-36-1792982674264"
+    },
+    {
+      "tRelMs": 906334,
+      "at": "2026-10-26T02:59:40.598Z",
+      "type": "session_persisted",
+      "reason": "export",
+      "sessionId": "mv3-36-1792982674264"
+    },
+    {
+      "tRelMs": 906346,
+      "at": "2026-10-26T02:59:40.610Z",
+      "type": "evidence_downloaded",
+      "sessionId": "mv3-36-1792982674264"
+    },
+    {
+      "tRelMs": 1073591,
+      "at": "2026-10-26T03:02:27.855Z",
+      "type": "egress_recorded"
+    },
+    {
+      "tRelMs": 1073600,
+      "at": "2026-10-26T03:02:27.864Z",
+      "type": "session_persisted",
+      "reason": "egress",
+      "sessionId": "mv3-36-1792982674264"
+    },
+    {
+      "tRelMs": 1091376,
+      "at": "2026-10-26T03:02:45.640Z",
+      "type": "session_persisted",
+      "reason": "export",
+      "sessionId": "mv3-36-1792982674264"
+    }
+  ],
+  "workers": {
+    "registered": [
+      {
+        "workerId": "w-1",
+        "script": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/vendor/dist/workers/storage-worker.js",
+        "class": "SDK_REAL",
+        "sessionId": "mv3-36-1792982674264",
+        "terminated": false,
+        "terminateCalls": 0,
+        "type": "module",
+        "at": "2026-10-26T02:45:41.465Z"
+      },
+      {
+        "workerId": "w-2",
+        "script": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/vendor/dist/workers/prover-worker.js",
+        "class": "SDK_REAL",
+        "sessionId": "mv3-36-1792982674264",
+        "terminated": false,
+        "terminateCalls": 0,
+        "type": "module",
+        "at": "2026-10-26T02:45:41.607Z"
+      }
+    ],
+    "terminated": [
+      {
+        "workerId": "w-1",
+        "script": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/vendor/dist/workers/storage-worker.js",
+        "class": "SDK_REAL",
+        "sessionId": "mv3-36-1792982674264",
+        "terminated": true,
+        "terminateCalls": 1,
+        "type": "module",
+        "at": "2026-10-26T02:45:41.465Z"
+      },
+      {
+        "workerId": "w-2",
+        "script": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/vendor/dist/workers/prover-worker.js",
+        "class": "SDK_REAL",
+        "sessionId": "mv3-36-1792982674264",
+        "terminated": true,
+        "terminateCalls": 1,
+        "type": "module",
+        "at": "2026-10-26T02:45:41.607Z"
+      }
+    ]
+  },
+  "brokerTests": {},
+  "egressAttempts": [
+    {
+      "tRelMs": 351234,
+      "at": "2026-10-26T02:50:25.498Z",
+      "worker": "storage-worker.js",
+      "classification": "PASS_CSP_CONFIRMED",
+      "notes": "connect-src blocked csp-probe.invalid (worker context confirmed)",
+      "technique": "devtools_worker_console_fetch_invalid_no_sdk_substitute"
+    },
+    {
+      "tRelMs": 526102,
+      "at": "2026-10-26T02:53:20.366Z",
+      "worker": "storage-worker.js",
+      "classification": "PASS_CSP_CONFIRMED",
+      "notes": "connect-src blocked csp-probe.invalid (worker context confirmed)",
+      "technique": "devtools_worker_console_fetch_invalid_no_sdk_substitute"
+    },
+    {
+      "tRelMs": 1073591,
+      "at": "2026-10-26T03:02:27.855Z",
+      "worker": "prover-worker.js",
+      "classification": "PASS_CSP_CONFIRMED",
+      "notes": "connect-src blocked csp-probe.invalid (worker context confirmed)",
+      "technique": "devtools_worker_console_fetch_invalid_no_sdk_substitute"
+    }
+  ],
+  "postClose": {
+    "classification": "NO_ACTIVITY_OBSERVED",
+    "at": "2026-10-26T02:58:48.564Z",
+    "tRelMs": 854300,
+    "note": "Absence demonstrated only if classification is ABSENCE_DEMONSTRATED with proof; NO_ACTIVITY_OBSERVED ≠ proven absence"
+  },
+  "lifecycle": {
+    "operator_close": {
+      "afterDisposeLive": 2,
+      "close": {
+        "ok": true,
+        "idempotent": false,
+        "closeGeneration": 1,
+        "terminatedNow": 2,
+        "stillLive": [],
+        "snapshot": [
+          {
+            "workerId": "w-1",
+            "script": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/vendor/dist/workers/storage-worker.js",
+            "class": "SDK_REAL",
+            "sessionId": "mv3-36-1792982674264",
+            "terminated": true,
+            "terminateCalls": 1,
+            "type": "module",
+            "at": "2026-10-26T02:45:41.465Z"
+          },
+          {
+            "workerId": "w-2",
+            "script": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/vendor/dist/workers/prover-worker.js",
+            "class": "SDK_REAL",
+            "sessionId": "mv3-36-1792982674264",
+            "terminated": true,
+            "terminateCalls": 1,
+            "type": "module",
+            "at": "2026-10-26T02:45:41.607Z"
+          }
+        ],
+        "reason": "operator_close"
+      },
+      "idempotentRepeat": true,
+      "tRelMs": 562832
+    }
+  },
+  "vaultAccess": false,
+  "keysAccess": false,
+  "signingWired": false,
+  "gates": {
+    "G8": "FAIL",
+    "G9": "FAIL"
+  },
+  "gateEvaluation": {
+    "evaluatedAt": "2026-10-26T03:02:45.636Z",
+    "reasons": {
+      "G8": [
+        "spike artifact is not production wallet integration (G8 product criterion)"
+      ],
+      "G9": [
+        "postCloseAbsence: INSUFFICIENT_EVIDENCE — NO_ACTIVITY_OBSERVED ≠ proven absence (runbook)",
+        "nestedWorkers: INSUFFICIENT_EVIDENCE — nested workers outside host registry remain NOT DEMONSTRATED by design"
+      ]
+    },
+    "checklist": {
+      "extensionPageHost": {
+        "status": "PASS",
+        "detail": "chrome-extension:// host"
+      },
+      "ro1ReadPath": {
+        "status": "PASS",
+        "detail": "aspState + allContractsData ok"
+      },
+      "rpcAllowlistOnly": {
+        "status": "PASS",
+        "detail": "only getLedgerEntries observed"
+      },
+      "mutatorSurfaceDenied": {
+        "status": "PASS",
+        "detail": "denied probes present"
+      },
+      "noVaultKeysSigning": {
+        "status": "PASS",
+        "detail": "vault/keys/signing flags false"
+      },
+      "productionIntegration": {
+        "status": "FAIL",
+        "detail": "spike artifact is not production wallet integration (G8 product criterion)"
+      },
+      "workerEgressStorage": {
+        "status": "PASS",
+        "detail": "storage-worker.js: PASS_CSP_CONFIRMED (unique)"
+      },
+      "workerEgressProver": {
+        "status": "PASS",
+        "detail": "prover-worker.js: PASS_CSP_CONFIRMED (unique)"
+      },
+      "workersRegistered": {
+        "status": "PASS",
+        "detail": "2 SDK_REAL registered"
+      },
+      "hostTerminateAfterClose": {
+        "status": "PASS",
+        "detail": "host emergencyClose recorded"
+      },
+      "postCloseAbsence": {
+        "status": "INSUFFICIENT_EVIDENCE",
+        "detail": "NO_ACTIVITY_OBSERVED ≠ proven absence (runbook)"
+      },
+      "nestedWorkers": {
+        "status": "INSUFFICIENT_EVIDENCE",
+        "detail": "nested workers outside host registry remain NOT DEMONSTRATED by design"
+      }
+    },
+    "egressDedup": {
+      "totalRows": 3,
+      "uniqueRows": 2,
+      "duplicates": [
+        {
+          "index": 1,
+          "duplicateOf": 0,
+          "worker": "storage-worker.js"
+        }
+      ]
+    },
+    "note": "PASS_CSP_CONFIRMED alone does not flip G8/G9; all checklist criteria required"
+  },
+  "ok": true,
+  "stages": {
+    "aspState": {
+      "ok": true,
+      "keys": [
+        "__wbg_ptr"
+      ]
+    },
+    "allContractsData": {
+      "ok": true,
+      "poolCount": 1
+    }
+  },
+  "finishedAt": "2026-10-26T03:02:45.636Z"
+}

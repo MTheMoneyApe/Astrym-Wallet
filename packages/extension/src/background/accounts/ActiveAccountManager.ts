@@ -1,5 +1,8 @@
-import type { AccountService } from '@solanym/wallet-core/src/solana/accounts/AccountService.js';
 import browser from 'webextension-polyfill';
+
+export interface IAccountService {
+  getAccounts(): Promise<Array<{ index: number; address: string; label: string }>>;
+}
 
 export class ActiveAccountManager {
   private _activeAccountIndex: number | undefined;
@@ -25,7 +28,7 @@ export class ActiveAccountManager {
     return this._activeAccountIndex;
   }
 
-  public async getActiveAccountPublicKey(accountService: AccountService): Promise<string> {
+  public async getActiveAccountPublicKey(accountService: IAccountService): Promise<string> {
     const index = this.getActiveAccountIndex();
     
     // Check against real existing accounts to ensure identity is valid
@@ -39,7 +42,7 @@ export class ActiveAccountManager {
     return activeAccount.address;
   }
 
-  public async setActiveAccountIndex(index: number, accountService: AccountService): Promise<void> {
+  public async setActiveAccountIndex(index: number, accountService: IAccountService): Promise<void> {
     if (!this._isInitialized) {
       throw new Error('ActiveAccountManager not initialized');
     }

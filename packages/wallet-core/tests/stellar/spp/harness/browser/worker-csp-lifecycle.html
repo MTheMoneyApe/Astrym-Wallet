@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      Document CSP: governs the page + blob: workers (inherit).
+      Dedicated workers loaded from http(s) use CSP from *their* script response
+      (see serve.mjs), not this meta — Chromium / HTML policy container.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; base-uri 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; worker-src 'self' blob:; img-src 'none'; font-src 'none'; object-src 'none'; frame-src 'none'; form-action 'none'"
+    />
+    <title>SOLANYM SPP 2.32 — Worker CSP &amp; lifecycle (TEST ONLY)</title>
+    <link rel="stylesheet" href="./fase-2.30-probe.css" />
+  </head>
+  <body>
+    <div class="banner">
+      <strong>SPIKE DE TEST — NO ES INTEGRACIÓN DE WALLET.</strong>
+      DedicatedWorker CSP vía cabeceras del script; probes
+      <code>*.invalid</code> solamente. G8/G9 = FAIL.
+    </div>
+    <h1>Fase 2.32 — Worker CSP &amp; session lifecycle</h1>
+    <p class="meta">
+      Experimentos: classic/module con CSP de respuesta, control sin CSP, blob heredado,
+      cabeceras de workers SPP (sin inyectar red en el protocolo SDK), terminate() del host.
+    </p>
+    <p id="status">Starting…</p>
+    <pre id="report">{}</pre>
+    <script type="module" src="./worker-csp-lifecycle.mjs"></script>
+  </body>
+</html>

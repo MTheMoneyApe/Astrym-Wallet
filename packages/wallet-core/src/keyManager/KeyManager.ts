@@ -10,6 +10,7 @@ import {
   UncertainCommitStateError,
   type AccountIndex,
   type AccountInfo,
+  type SupportedAccountChain,
   type V2AccountState,
 } from './types.js';
 
@@ -28,6 +29,7 @@ function copyAccountInfo(account: AccountInfo): AccountInfo {
     index: account.index,
     publicKey: account.publicKey.slice(),
     label: account.label,
+    chain: account.chain,
   };
 }
 
@@ -42,7 +44,7 @@ export class KeyManager {
     return state.accounts.map(copyAccountInfo);
   }
 
-  async addAccount(uuid: string, label?: string): Promise<AccountInfo> {
+  async addAccount(uuid: string, label?: string, chain?: SupportedAccountChain): Promise<AccountInfo> {
     const resolvedLabel = label !== undefined ? label : undefined;
     if (resolvedLabel !== undefined) validateLabel(resolvedLabel);
 
@@ -70,11 +72,13 @@ export class KeyManager {
     const nextIndex: AccountIndex = state.accounts.length;
     const rawPublicKey = await this._signer.getPublicKey(nextIndex);
     const publicKey = rawPublicKey.slice();
+    const resolvedChain: SupportedAccountChain = chain ?? (this._signer.chain ?? 'solana');
 
     const newAccount: AccountInfo = {
       index: nextIndex,
       publicKey,
       label: resolvedLabel ?? defaultLabel(nextIndex),
+      chain: resolvedChain,
     };
 
     state.accounts.push(newAccount);

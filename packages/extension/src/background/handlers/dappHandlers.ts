@@ -173,9 +173,9 @@ export async function handleApprovePendingRequest(payload: ApprovePendingRequest
     const client = (globalThis as any).txClient;
     
     // Attempt to authorize signature with global coordinator
-    let startEpoch: number;
+    let authorization: ReturnType<typeof stateCoordinator.authorizeSignature>;
     try {
-      startEpoch = stateCoordinator.authorizeSignature();
+      authorization = stateCoordinator.authorizeSignature();
     } catch (e: any) {
       pendingManager.rejectSign(e, payload.id);
       return { success: true };
@@ -195,11 +195,15 @@ export async function handleApprovePendingRequest(payload: ApprovePendingRequest
       }
 
       // 2. Compute signature
-      const result = await client.signTransaction(signReq.accountIndex, signReq.messageBytes);
+      const result = await client.signTransaction(
+        signReq.accountIndex,
+        signReq.messageBytes,
+        () => stateCoordinator.assertSignatureActive(authorization),
+      );
 
       // 3. Synchronous Exit Barrier & Commitment Point
       // NO YIELD ALLOWED BETWEEN VALIDATION AND DELIVERY INVOCATION
-      if (!stateCoordinator.validateExit(startEpoch)) {
+      if (!stateCoordinator.validateExit(authorization)) {
         throw new Error('Signature aborted: Wallet state changed (e.g., reset) before delivery');
       }
       
@@ -209,11 +213,10 @@ export async function handleApprovePendingRequest(payload: ApprovePendingRequest
     } catch (e: any) {
       pendingManager.rejectSign(e, payload.id);
     } finally {
-      stateCoordinator.endSignature();
+      stateCoordinator.endSignature(authorization);
     }
     return { success: true };
   }
 
   throw new Error('Pending request not found');
 }
-

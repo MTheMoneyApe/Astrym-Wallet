@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; base-uri 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; worker-src 'self' blob:; img-src 'none'; font-src 'none'; object-src 'none'; frame-src 'none'; form-action 'none'"
+    />
+    <title>SOLANYM SPP 2.34 — Host worker containment (TEST ONLY)</title>
+    <link rel="stylesheet" href="./fase-2.30-probe.css" />
+  </head>
+  <body>
+    <div class="banner">
+      <strong>SPIKE DE TEST — NO ES INTEGRACIÓN DE WALLET.</strong>
+      Host registry + emergencyClose + terminate() de workers SDK_REAL.
+      No depende de dispose(). CSP egress = NOT DEMONSTRATED. G8/G9 = FAIL.
+    </div>
+    <h1>Fase 2.34 — Host-owned worker containment</h1>
+    <p class="meta">
+      Instrumentación <code>window.Worker</code> antes del SDK. Cierre de emergencia
+      idempotente. Workers anidados en otros workers: fuera de cobertura.
+    </p>
+    <p id="status">Starting…</p>
+    <pre id="report">{}</pre>
+    <script type="module" src="./host-worker-containment.mjs"></script>
+  </body>
+</html>

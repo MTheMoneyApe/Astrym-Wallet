@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; base-uri 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; worker-src 'self'; img-src 'none'; font-src 'none'; object-src 'none'; frame-src 'none'; form-action 'none'"
+    />
+    <title>SOLANYM SPP 2.33 — Real worker egress &amp; disposal (TEST ONLY)</title>
+    <link rel="stylesheet" href="./fase-2.30-probe.css" />
+  </head>
+  <body>
+    <div class="banner">
+      <strong>SPIKE DE TEST — NO ES INTEGRACIÓN DE WALLET.</strong>
+      Workers reales SPP 0.2.1 + RO-1 + dispose audit. Sin Testnet. G8/G9 = FAIL.
+    </div>
+    <h1>Fase 2.33 — Real SPP worker egress &amp; disposal</h1>
+    <p class="meta">
+      Identifica storage/prover workers SDK_REAL. No sustituye scripts del SDK.
+      CSP in-worker del worker real: NOT_TESTED sin CDP de target worker.
+    </p>
+    <p id="status">Starting…</p>
+    <pre id="report">{}</pre>
+    <script type="module" src="./spp-real-worker-audit.mjs"></script>
+  </body>
+</html>

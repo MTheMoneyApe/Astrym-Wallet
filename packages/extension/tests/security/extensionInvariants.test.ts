@@ -51,11 +51,35 @@ describe('Extension Security — Static Invariants', () => {
     }
   });
 
-  it('no setInterval or setTimeout in extension code', () => {
+  it('timers: setInterval banned; setTimeout only on explicit allowlisted paths', () => {
+    // Policy:
+    // - Vault auto-lock / SW lifecycle MUST use chrome.alarms (IAlarmService), never setTimeout.
+    // - setInterval is banned everywhere in extension src.
+    // - setTimeout is banned by default; only the exact relative paths below are allowed,
+    //   each for a documented non-lifecycle reason. Do not broaden this set casually.
+    //
+    // Allowed:
+    // - background/StateCoordinator.ts — bounded signature-drain wait during lock (SIGNATURE_DRAIN_TIMEOUT_MS).
+    // - background/dapp/PendingRequestManager.ts — expire pending connect/sign requests in-memory.
+    // - popup/{Send,Dashboard,Onboarding}.tsx — short-lived clipboard/copy UI feedback only.
+    const setTimeoutAllowlist = new Set(
+      [
+        'background/StateCoordinator.ts',
+        'background/dapp/PendingRequestManager.ts',
+        'popup/Send.tsx',
+        'popup/Dashboard.tsx',
+        'popup/Onboarding.tsx',
+      ].map((rel) => path.normalize(rel)),
+    );
+
     for (const file of ALL_TS_FILES) {
-      // Message router / alarms should not use timers directly for lifecycle tasks
       const content = fs.readFileSync(file, 'utf8');
       expect(content).not.toMatch(/\WsetInterval\s*\(/);
+
+      const rel = path.normalize(path.relative(SRC_DIR, file));
+      if (setTimeoutAllowlist.has(rel)) {
+        continue;
+      }
       expect(content).not.toMatch(/\WsetTimeout\s*\(/);
     }
   });

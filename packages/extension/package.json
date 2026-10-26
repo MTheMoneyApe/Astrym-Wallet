@@ -4,7 +4,6 @@
   "type": "module",
   "private": true,
   "dependencies": {
-    "@nymproject/mix-fetch": "3.0.0",
     "@solana/kit": "^2.3.0",
     "@solanym/wallet-core": "workspace:*",
     "react": "^19.3.0",
@@ -13,7 +12,16 @@
     "zod": "^4.6.5"
   },
   "scripts": {
-    "build": "vite build",
+    "copy:spp": "node scripts/copy-spp-assets.mjs",
+    "copy:nym": "node scripts/copy-nym-mixfetch-assets.mjs",
+    "smoke:nym": "node scripts/smoke-nym-mixfetch-assets.mjs",
+    "smoke:nym:public": "node scripts/smoke-nym-mixfetch-assets.mjs --public",
+    "smoke:spp": "node scripts/smoke-spp-assets.mjs",
+    "smoke:spp:public": "node scripts/smoke-spp-assets.mjs --public",
+    "build": "node scripts/copy-spp-assets.mjs && node scripts/copy-nym-mixfetch-assets.mjs && vite build --config vite.config.ts && vite build --config vite.background.config.ts && node scripts/smoke-spp-assets.mjs && node scripts/smoke-nym-mixfetch-assets.mjs --dist",
+    "build:nym-dev": "node scripts/copy-nym-mixfetch-assets.mjs && vite build --config vite.config.ts && vite build --config vite.background.config.ts && node scripts/smoke-nym-mixfetch-assets.mjs --dist",
+    "build:nym-live-smoke": "node scripts/build-nym-live-smoke.mjs",
+    "build:spp-host": "vite build --config vite.spp-host.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

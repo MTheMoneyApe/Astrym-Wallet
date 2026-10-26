@@ -1,0 +1,41 @@
+Synthetic Soroban RPC fixtures for stellar-private-payments@0.2.1 harness.
+
+Provenance (Fase 2.4 / 2.5): npm 0.2.1 ↔ upstream commit
+  b79107cd24327198f8eb2dbaf4bdc65a8a1e8cf1
+  (SLSA; see docs/FASE-2.4 report in temp isolation dir and
+   docs/FASE-2.5-FIXTURE-VALIDATION.md).
+
+CLASSIFICATION:
+- getLatestLedger.result.json — SCHEMA-VALID against rpc.rs
+  GetLatestLedgerResponse { id, protocolVersion, sequence }.
+  Values are SYNTHETIC (not a real ledger). Safe for harness mock.
+  Fase 2.10: no safe WASM export invokes getLatestLedger without
+  event sync/catch-up — tip deser still unproven. See
+  docs/FASE-2.10-GET-LATEST-LEDGER.md.
+- getLedgerEntries.empty.result.json — SCHEMA-VALID empty archive.
+  Phase 2.8: WASM accepted empty success body then MissingRequiredContractKeys.
+- getLedgerEntries.aspMinimal.result.json — SYNTHETIC ASP Admin/NextIndex
+  (+ instance Levels/Root) for aspState(). Built offline via
+  buildAspLedgerFixture.mjs (@stellar/stellar-sdk) from source key/value
+  encodings. Fase 2.9: browser aspState OBSERVADO. Retained as archive;
+  mock now serves allContractsMinimal (Fase 2.12).
+  See docs/FASE-2.9-CONTRACT-ENTRY-VALIDATION.md.
+- getLedgerEntries.allContractsMinimal.result.json — SYNTHETIC pool
+  Admin + State (TreeState map) + instance Levels/MaximumDepositAmount/
+  Token/Verifier/ASPMembership/ASPNonMembership/PolicyFlags, plus ASP
+  entries from aspMinimal. Fase 2.12: mock serves this; allContractsData
+  path. NOT a real deployment / Testnet state.
+  See docs/FASE-2.12-ALL-CONTRACTS-DATA.md.
+
+BLOCKED (mock returns JSON-RPC error):
+- getEvents — no success fixture.
+- getTransaction — no success fixture.
+- simulateTransaction — no success fixture.
+- sendTransaction — PERMANENTLY fail-closed.
+
+Fase 2.6–2.8 notes: Node deser blocked; readTokenDecimals=simulate only;
+getLatestLedger still needs sync/catch_up — not probed.
+
+Request notes from source:
+- getLatestLedger params: {}
+- getLedgerEntries params: { keys: [base64 LedgerKey XDR, ...] }

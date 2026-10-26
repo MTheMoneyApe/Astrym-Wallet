@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SOLANYM SPP RO-1 spike 2.27 — TEST ONLY (not wallet integration)</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+      body {
+        margin: 1.5rem;
+        max-width: 56rem;
+        line-height: 1.45;
+      }
+      h1 {
+        font-size: 1.2rem;
+        margin: 0 0 0.35rem;
+      }
+      .banner {
+        background: #fff3cd;
+        border: 1px solid #c9a227;
+        padding: 0.75rem 1rem;
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+      }
+      .meta {
+        color: #444;
+        font-size: 0.9rem;
+        margin-bottom: 1rem;
+      }
+      pre {
+        background: #f4f4f5;
+        border: 1px solid #ddd;
+        padding: 0.75rem;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 0.78rem;
+      }
+      #status {
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="banner">
+      <strong>SPIKE DE TEST — NO ES INTEGRACIÓN DE WALLET.</strong>
+      Ejecuta stellar-private-payments@0.2.1 bajo mock RPC local RO-1.
+      Sin vault, sin claves, sin firma, sin sync, sin envío. G8/G9 siguen FAIL.
+    </div>
+    <h1>Fase 2.27 — Browser document host + SDK real (RO-1)</h1>
+    <p class="meta">
+      Interfaz estrecha: Storage.open → Client.new → aspState → allContractsData.
+      Client crudo no se expone en <code>window</code>. RPC:
+      <code>/rpc-ro1</code> (solo <code>getLedgerEntries</code>).
+    </p>
+    <p id="status">Running…</p>
+    <pre id="report">{}</pre>
+    <script type="module" src="./ro1-host.mjs"></script>
+  </body>
+</html>

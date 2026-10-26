@@ -22,6 +22,8 @@ function createMocks() {
         value: { blockhash: '2GkHjXXXXXXXXXXXXXXXXXXXXXXXXXXXX', lastValidBlockHeight: 100n },
       }),
     }),
+    getFeeForMessage: vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue({ value: 5000n }) }),
+    getBalance: vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue({ value: 10_000_000_000n }) }),
     sendTransaction: vi.fn().mockReturnValue({
       send: vi.fn().mockResolvedValue(SIGNATURE),
     }),
@@ -96,5 +98,69 @@ describe('TransactionClient — sendSol', () => {
         lamports: 1000n,
       })
     ).rejects.toThrow(/Failed to send transaction/);
+  });
+
+  it('does not call the signer when balance cannot cover amount and estimated fee', async () => {
+    const { rpc, keyManager, signer } = createMocks();
+    rpc.getBalance = vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue({ value: 5999n }) });
+    const client = new TransactionClient(rpc, keyManager, signer);
+
+    await expect(client.sendSol({
+      sourceAccountIndex: SOURCE_INDEX,
+      destination: DESTINATION,
+      lamports: 1000n,
+    })).rejects.toThrow('Insufficient SOL to cover the transfer and network fee');
+
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(rpc.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('does not sign when the RPC cannot estimate the fee for the final message', async () => {
+    const { rpc, keyManager, signer } = createMocks();
+    rpc.getFeeForMessage = vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue({ value: null }) });
+    const client = new TransactionClient(rpc, keyManager, signer);
+
+    await expect(client.sendSol({
+      sourceAccountIndex: SOURCE_INDEX,
+      destination: DESTINATION,
+      lamports: 1000n,
+    })).rejects.toThrow('Network fee estimate unavailable; transaction not signed');
+
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(rpc.sendTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('TransactionClient — reviewSolTransfer fee estimate', () => {
+  it('returns the exact-message fee and current source balance', async () => {
+    const { rpc, keyManager, signer } = createMocks();
+    const client = new TransactionClient(rpc, keyManager, signer);
+
+    const summary = await client.reviewSolTransfer({
+      sourceAccountIndex: SOURCE_INDEX,
+      destination: DESTINATION,
+      lamports: 25_000n,
+    });
+
+    expect(summary.sourceAddress).toBe(SOURCE_PUBKEY);
+    expect(summary.destinationAddress).toBe(DESTINATION);
+    expect(summary.lamports).toBe(25_000n);
+    expect(summary.feeLamports).toBe(5000n);
+    expect(summary.balanceLamports).toBe(10_000_000_000n);
+    expect(rpc.getFeeForMessage).toHaveBeenCalledWith(expect.any(String));
+    expect(rpc.getBalance).toHaveBeenCalledWith(SOURCE_PUBKEY);
+    expect(signer.sign).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the RPC returns no fee estimate', async () => {
+    const { rpc, keyManager, signer } = createMocks();
+    rpc.getFeeForMessage = vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue({ value: null }) });
+    const client = new TransactionClient(rpc, keyManager, signer);
+
+    await expect(client.reviewSolTransfer({
+      sourceAccountIndex: SOURCE_INDEX,
+      destination: DESTINATION,
+      lamports: 25_000n,
+    })).rejects.toThrow('Network fee estimate unavailable');
   });
 });

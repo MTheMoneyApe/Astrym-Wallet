@@ -25,6 +25,7 @@ export interface TransactionSummary {
   destinationAddress: Address;
   lamports: bigint;
   feeLamports: bigint | null;
+  balanceLamports: bigint;
 }
 
 /**

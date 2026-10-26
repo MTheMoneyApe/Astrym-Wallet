@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Solanym SPP Host (isolated)</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #11151b;
+        --surface: #1b222b;
+        --text: #f4f7f8;
+        --muted: #a4adba;
+        --accent: #8fe8d0;
+        --error: #ff6b6b;
+        --border: #2a323c;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.45;
+        padding: 1.25rem;
+      }
+      h1 {
+        font-size: 1.15rem;
+        margin: 0 0 0.35rem;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin-bottom: 1rem;
+      }
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.9rem 1rem;
+        margin-bottom: 0.75rem;
+      }
+      #spp-phase,
+      #spp-wasm-phase,
+      #spp-storage-lab-phase {
+        font-weight: 700;
+        color: var(--accent);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      #spp-phase[data-phase='error'],
+      #spp-wasm-phase[data-phase='error'],
+      #spp-storage-lab-phase[data-phase='error'],
+      #spp-storage-lab-phase[data-phase='blocked'],
+      #spp-storage-lab-phase[data-phase='not-run'] {
+        color: var(--error);
+      }
+      #spp-storage-lab-phase[data-phase='ready-for-lab'] {
+        color: var(--accent);
+      }
+      #spp-detail {
+        white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.75rem;
+        overflow-wrap: anywhere;
+      }
+      #spp-error {
+        color: var(--error);
+        white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.8rem;
+      }
+      .banner {
+        font-size: 0.8rem;
+        color: var(--muted);
+        border-left: 3px solid var(--accent);
+        padding-left: 0.65rem;
+        margin-bottom: 1rem;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+      button.spp-btn {
+        background: var(--accent);
+        color: #102018;
+        border: 0;
+        border-radius: 6px;
+        padding: 0.55rem 0.9rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button.spp-btn:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+      button.spp-btn.secondary {
+        background: transparent;
+        color: var(--accent);
+        border: 1px solid var(--accent);
+      }
+      ol.manual {
+        margin: 0.4rem 0 0;
+        padding-left: 1.2rem;
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Solanym — SPP host</h1>
+    <p class="meta">
+      Fase 5D · facade + WASM + gated Storage lab · default phase gate
+      <code>STORAGE_LAB_EXECUTION_AUTHORIZED=false</code> · no vault / signing / RPC / Client
+    </p>
+    <p class="banner">
+      Facade: <code>spp/js/index.js</code>. WASM:
+      <code>spp/dist/stellar_private_payments_web_bg.wasm</code> via
+      <code>default({ module_or_path })</code>. Real <code>Storage.open</code> requires phase auth +
+      lab profile + OPFS risk + diff review gates + one explicit click. No
+      <code>Client.new</code> / <code>SppSession</code> / Prover.
+    </p>
+    <div class="panel">
+      <div>Facade phase: <span id="spp-phase">uninitialized</span></div>
+      <div>WASM phase: <span id="spp-wasm-phase">not-started</span></div>
+      <div>
+        Session: <span id="spp-session-state">none</span>
+        <span class="meta" id="spp-session-gen"></span>
+      </div>
+      <div>
+        Storage lab phase: <span id="spp-storage-lab-phase">not-run</span>
+      </div>
+      <div id="spp-boot" class="meta">Idle</div>
+      <div class="actions">
+        <button id="spp-probe-btn" class="spp-btn" type="button">Comprobar SDK</button>
+        <button id="spp-wasm-btn" class="spp-btn secondary" type="button" disabled>
+          Inicializar WASM
+        </button>
+      </div>
+      <div class="panel" style="margin: 0.75rem 0 0; padding: 0.65rem 0.75rem">
+        <div class="meta" style="margin-bottom: 0.4rem">
+          Sesión SPP — construir sin <code>initialize()</code> (no Client / Storage / RPC)
+        </div>
+        <label class="meta" style="display: block; margin: 0.35rem 0">
+          rpcUrl (obligatorio, sin default)
+          <input
+            id="spp-session-rpc"
+            type="text"
+            spellcheck="false"
+            placeholder="http://127.0.0.1:…/rpc-lab-only"
+            style="width: 100%; margin-top: 0.25rem; box-sizing: border-box"
+          />
+        </label>
+        <label class="meta" style="display: block; margin: 0.35rem 0">
+          contractConfig JSON
+          <textarea
+            id="spp-session-contracts"
+            rows="2"
+            spellcheck="false"
+            style="width: 100%; margin-top: 0.25rem; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 0.75rem"
+          >{"labPlaceholder":true}</textarea>
+        </label>
+        <label class="meta" style="display: block; margin: 0.35rem 0">
+          circuitLock JSON
+          <textarea
+            id="spp-session-circuits"
+            rows="2"
+            spellcheck="false"
+            style="width: 100%; margin-top: 0.25rem; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 0.75rem"
+          >{"labPlaceholder":true}</textarea>
+        </label>
+        <div class="actions">
+          <button id="spp-session-construct-btn" class="spp-btn secondary" type="button" disabled>
+            Construir sesión (sin initialize)
+          </button>
+          <button id="spp-session-clear-btn" class="spp-btn secondary" type="button" disabled>
+            Soltar sesión (sin dispose)
+          </button>
+        </div>
+      </div>
+      <div class="panel" style="margin: 0.75rem 0 0; padding: 0.65rem 0.75rem">
+        <div class="meta" style="margin-bottom: 0.4rem">
+          Storage lab (Fase 5D) — run stays disabled while phase gate is false
+        </div>
+        <label style="display: block; font-size: 0.8rem; color: var(--muted); margin: 0.25rem 0">
+          <input id="spp-gate-lab-profile" type="checkbox" />
+          I confirm a dedicated lab Chrome profile (not daily use)
+        </label>
+        <label style="display: block; font-size: 0.8rem; color: var(--muted); margin: 0.25rem 0">
+          <input id="spp-gate-opfs-risk" type="checkbox" />
+          I accept OPFS <code>spp.db</code> may persist with no public wipe API
+        </label>
+        <label style="display: block; font-size: 0.8rem; color: var(--muted); margin: 0.25rem 0">
+          <input id="spp-gate-phase-diff" type="checkbox" />
+          I reviewed and authorize the Fase 5D execution diff for this lab session
+        </label>
+        <div class="actions">
+          <button id="spp-storage-eval-btn" class="spp-btn secondary" type="button">
+            Evaluar prep Storage
+          </button>
+          <button id="spp-storage-run-btn" class="spp-btn" type="button" disabled>
+            Ejecutar Storage.open (una vez)
+          </button>
+          <button id="spp-storage-free-btn" class="spp-btn secondary" type="button" disabled>
+            Intentar free()
+          </button>
+        </div>
+      </div>
+      <ol class="manual">
+        <li>Load unpacked <code>packages/extension/dist</code> in <code>chrome://extensions</code>.</li>
+        <li>Open <code>chrome-extension://&lt;ID&gt;/spp-host.html</code>.</li>
+        <li>Click <strong>Comprobar SDK</strong> → facade phase <code>ready</code>.</li>
+        <li>Click <strong>Inicializar WASM</strong> → WASM phase <code>ready</code> (init finished, not just HTTP 200).</li>
+        <li>
+          Confirm all three Storage gates, evaluate prep → <code>ready-for-lab</code>. Run enables only if
+          <code>STORAGE_LAB_EXECUTION_AUTHORIZED</code> is true (default false until post-review flip).
+        </li>
+        <li>
+          At most <strong>one open per controller instance</strong> (this page load). Reloading the page
+          creates a new instance and a new slot — there is <strong>no</strong> profile-scoped lock.
+        </li>
+        <li>
+          Watchdog flags slow opens but does <strong>not</strong> cancel SDK work. Optional free() may be
+          retried if it fails; it does not assert worker death or OPFS wipe. Never open Client.
+        </li>
+      </ol>
+    </div>
+    <div class="panel">
+      <pre id="spp-detail"></pre>
+    </div>
+    <div class="panel">
+      <pre id="spp-error" hidden></pre>
+    </div>
+    <script type="module" src="/src/spp-host/main.ts"></script>
+  </body>
+</html>

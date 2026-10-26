@@ -1,6 +1,7 @@
 import { generate24WordMnemonic } from '@solanym/wallet-core/src/crypto/mnemonic.js';
 import type { VaultService } from '@solanym/wallet-core/src/vault/VaultService.js';
 import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
+import type { IAccountService } from '../accounts/ActiveAccountManager.js';
 import type { 
   UnlockVaultRequest, UnlockVaultResponse, 
   LockVaultRequest, LockVaultResponse,
@@ -10,7 +11,27 @@ import type {
   ResetWalletRequest, ResetWalletResponse
 } from '../../shared/ipcTypes.js';
 import { stateCoordinator } from '../StateCoordinator.js';
+import { activeAccountManager, type ActiveAccountManager } from '../accounts/ActiveAccountManager.js';
 import browser from 'webextension-polyfill';
+
+type ActiveAccountIndexWriter = Pick<ActiveAccountManager, 'setActiveAccountIndex'>;
+
+async function persistInitialActiveAccount(
+  index: number,
+  accountService: IAccountService,
+  activeAccountIndexWriter: ActiveAccountIndexWriter,
+): Promise<void> {
+  try {
+    await activeAccountIndexWriter.setActiveAccountIndex(index, accountService);
+  } catch (cause) {
+    const error = new Error(
+      'The vault and first account were created, but the active account index could not be saved. Do not create another wallet; reopen this wallet and select an account manually.',
+      { cause },
+    );
+    error.name = 'ActiveAccountInitializationError';
+    throw error;
+  }
+}
 
 export function createGetWalletStateHandler(vaultService: VaultService) {
   return async (_payload: GetWalletStateRequest): Promise<GetWalletStateResponse> => {
@@ -21,7 +42,12 @@ export function createGetWalletStateHandler(vaultService: VaultService) {
   };
 }
 
-export function createCreateVaultHandler(vaultService: VaultService, keyManager: KeyManager) {
+export function createCreateVaultHandler(
+  vaultService: VaultService,
+  keyManager: KeyManager,
+  accountService: IAccountService,
+  activeAccountIndexWriter: ActiveAccountIndexWriter = activeAccountManager,
+) {
   return async (payload: CreateVaultRequest): Promise<CreateVaultResponse> => {
     await stateCoordinator.mutex.acquire();
     try {
@@ -29,12 +55,16 @@ export function createCreateVaultHandler(vaultService: VaultService, keyManager:
       await vaultService.createVault(payload.password, mnemonic);
       
       const uuid = crypto.randomUUID();
+      let firstAccount;
       try {
-        await keyManager.addAccount(uuid, 'Account 1');
+        firstAccount = await keyManager.addAccount(uuid, 'Account 1');
       } catch (e) {
         await vaultService.deleteVault();
         throw e;
       }
+
+      await persistInitialActiveAccount(firstAccount.index, accountService, activeAccountIndexWriter);
+      stateCoordinator.setUnlocked();
       
       return { recoveryPhrase: mnemonic.split(' ') };
     } finally {
@@ -46,7 +76,12 @@ export function createCreateVaultHandler(vaultService: VaultService, keyManager:
 import { makeSeedPhrase } from '@solanym/wallet-core/src/crypto/types.js';
 import { validateSeedPhrase } from '@solanym/wallet-core/src/crypto/mnemonic.js';
 
-export function createImportVaultHandler(vaultService: VaultService, keyManager: KeyManager) {
+export function createImportVaultHandler(
+  vaultService: VaultService,
+  keyManager: KeyManager,
+  accountService: IAccountService,
+  activeAccountIndexWriter: ActiveAccountIndexWriter = activeAccountManager,
+) {
   return async (payload: ImportVaultRequest): Promise<ImportVaultResponse> => {
     await stateCoordinator.mutex.acquire();
     try {
@@ -60,12 +95,16 @@ export function createImportVaultHandler(vaultService: VaultService, keyManager:
       await vaultService.createVault(payload.password, seedPhrase);
       
       const uuid = crypto.randomUUID();
+      let firstAccount;
       try {
-        await keyManager.addAccount(uuid, 'Account 1');
+        firstAccount = await keyManager.addAccount(uuid, 'Account 1');
       } catch (e) {
         await vaultService.deleteVault();
         throw e;
       }
+
+      await persistInitialActiveAccount(firstAccount.index, accountService, activeAccountIndexWriter);
+      stateCoordinator.setUnlocked();
       
       return { success: true };
     } finally {
@@ -90,22 +129,24 @@ export function createUnlockVaultHandler(vaultService: VaultService) {
 
 export function createLockVaultHandler(vaultService: VaultService) {
   return async (_payload: LockVaultRequest): Promise<LockVaultResponse> => {
-    await stateCoordinator.mutex.acquire();
-    try {
-      await vaultService.lock();
-      stateCoordinator.setLocked();
-      return { success: true };
-    } catch (e) {
-      stateCoordinator.enterErrorState();
-      throw e;
-    } finally {
-      stateCoordinator.mutex.release();
-    }
+    await stateCoordinator.runLockOperation(() => vaultService.lock());
+    return { success: true };
   };
 }
 
 export function createRevealRecoveryPhraseHandler(vaultService: VaultService) {
-  return async (payload: { auth: string }): Promise<{ recoveryPhrase: string[] }> => {
+  return async (
+    payload: { auth: string },
+    sender?: browser.Runtime.MessageSender,
+  ): Promise<{ recoveryPhrase: string[] }> => {
+    if (
+      !sender ||
+      sender.id !== browser.runtime.id ||
+      sender.url !== browser.runtime.getURL('/popup.html')
+    ) {
+      throw new Error('UnauthorizedSenderError: Recovery phrase reveal must originate from trusted popup UI');
+    }
+
     await stateCoordinator.mutex.acquire();
     try {
       if (stateCoordinator.isResetting) throw new Error('Reset in progress');
@@ -173,10 +214,6 @@ export function createResetWalletHandler(vaultService: VaultService) {
     }
   };
 }
-
-
-
-
 
 
 

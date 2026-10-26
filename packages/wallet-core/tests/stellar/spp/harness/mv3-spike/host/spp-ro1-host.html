@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SPP RO-1 MV3 Host — Fase 2.36 (TEST ONLY)</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 16px;
+        max-width: 1100px;
+      }
+      .banner {
+        background: #422;
+        color: #fcc;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+      }
+      button {
+        margin: 4px 6px 4px 0;
+        padding: 8px 10px;
+      }
+      pre {
+        background: #111;
+        color: #cfc;
+        padding: 12px;
+        overflow: auto;
+        font-size: 11px;
+        max-height: 420px;
+      }
+      .ok {
+        color: #2a6;
+      }
+      .bad {
+        color: #c33;
+      }
+      .meta {
+        font-size: 13px;
+        color: #444;
+      }
+      fieldset {
+        border: 1px solid #ccc;
+        margin: 12px 0;
+        padding: 10px;
+      }
+      label {
+        display: block;
+        margin: 6px 0;
+        font-size: 13px;
+      }
+      input,
+      select {
+        min-width: 280px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="banner">
+      <strong>TEST SPIKE 2.36 — NOT production wallet.</strong>
+      Dedicated extension page host. No vault / seeds / signing. Loopback RPC only. G8/G9 stay FAIL until Chrome Desktop evidence is filled.
+    </div>
+    <h1>Fase 2.36 — Chrome Desktop MV3 operator host</h1>
+    <p class="meta" id="context">Detecting context…</p>
+    <p class="meta" id="session-line">Session…</p>
+    <p id="status">Idle — press Run RO-1 after serve.mjs is up.</p>
+
+    <fieldset>
+      <legend>A — Session</legend>
+      <button id="btn-ro1" type="button">Run RO-1 (aspState + allContractsData)</button>
+      <button id="btn-close-init" type="button">Close before workers</button>
+      <button id="btn-close-after" type="button">Emergency close now</button>
+      <button id="btn-broker-tests" type="button">Broker adversarial (malformed / dup / unknown)</button>
+      <button id="btn-export" type="button">Download evidence JSON</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>B — Worker egress (operator DevTools — do not substitute SDK)</legend>
+      <p class="meta">
+        After RO-1 workers appear: DevTools → Sources → Threads → select
+        <code>storage-worker.js</code> or <code>prover-worker.js</code> → Console → run the probe
+        from OPERATOR-RUNBOOK.md. Then record the classification below. DNS-only failures are
+        <strong>not</strong> CSP proof.
+      </p>
+      <label>
+        Worker script
+        <select id="egress-worker">
+          <option value="storage-worker.js">storage-worker.js</option>
+          <option value="prover-worker.js">prover-worker.js</option>
+        </select>
+      </label>
+      <label>
+        Classification
+        <select id="egress-class">
+          <option value="NOT_TESTED">NOT_TESTED</option>
+          <option value="PASS_CSP_CONFIRMED">PASS_CSP_CONFIRMED (CSP violation attributed)</option>
+          <option value="DNS_OR_NETWORK_ONLY">DNS_OR_NETWORK_ONLY (no CSP attribution)</option>
+          <option value="NOT_DEMONSTRATED">NOT_DEMONSTRATED</option>
+          <option value="FAIL_REACHED">FAIL_REACHED (request appeared to succeed / not blocked)</option>
+        </select>
+      </label>
+      <label>
+        Notes / console excerpt (no secrets)
+        <input id="egress-notes" type="text" placeholder="e.g. Refused to connect… Content Security Policy" />
+      </label>
+      <button id="btn-egress-save" type="button">Record egress attempt</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>C — Post-close observation (operator)</legend>
+      <label>
+        Post-close activity
+        <select id="postclose-class">
+          <option value="NOT_TESTED">NOT_TESTED</option>
+          <option value="NO_ACTIVITY_OBSERVED">NO_ACTIVITY_OBSERVED (instrument limited)</option>
+          <option value="ACTIVITY_OBSERVED">ACTIVITY_OBSERVED</option>
+          <option value="ABSENCE_DEMONSTRATED">ABSENCE_DEMONSTRATED (only if proof quality allows)</option>
+          <option value="NOT_DEMONSTRATED">NOT_DEMONSTRATED</option>
+        </select>
+      </label>
+      <button id="btn-postclose-save" type="button">Record post-close observation</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>D — Residual draft assist (rejects incomplete claims)</legend>
+      <p class="meta">
+        Page PerformanceObserver is <strong>page-only</strong>. DevTools Network/Threads must be
+        watched for full_window claims. Host Worker wrapper never proves absence of nested workers.
+      </p>
+      <button id="btn-residual-watch" type="button">Start 8s page-only watch (after close)</button>
+      <label>
+        Network visibility
+        <select id="res-net-vis">
+          <option value="unknown">unknown</option>
+          <option value="none">none</option>
+          <option value="partial">partial</option>
+          <option value="full_window">full_window (DevTools Network entire window)</option>
+        </select>
+      </label>
+      <label>
+        Threads visibility
+        <select id="res-thr-vis">
+          <option value="unknown">unknown</option>
+          <option value="none">none</option>
+          <option value="partial">partial</option>
+          <option value="full_window">full_window (Sources Threads entire window)</option>
+        </select>
+      </label>
+      <label>Network requests observed (only if full_window) <input id="res-net-count" type="number" min="0" /></label>
+      <label>Live worker threads observed (only if full_window) <input id="res-thr-count" type="number" min="0" /></label>
+      <label>Workers seen (comma names) <input id="res-workers" type="text" placeholder="storage-worker.js, prover-worker.js" /></label>
+      <label>detectionMethod.network <input id="res-det-net" type="text" placeholder="devtools_network_panel" /></label>
+      <label>detectionMethod.threads <input id="res-det-thr" type="text" placeholder="devtools_sources_threads" /></label>
+      <label><input id="res-intend-absence" type="checkbox" /> Intend ABSENCE_DEMONSTRATED (requires full_window + zeros)</label>
+      <label><input id="res-intend-nested" type="checkbox" /> Intend nested NO_NESTED_OUTSIDE_REGISTRY</label>
+      <label><input id="res-glue-ruled" type="checkbox" /> wasmGlueNewWorkerRuledOut (only with runtime justification)</label>
+      <label><input id="res-infer-wrapper" type="checkbox" /> Infer no nested from host wrapper (will REJECT)</label>
+      <button id="btn-residual-draft" type="button">Build residual draft JSON</button>
+      <pre id="residual-draft">{}</pre>
+    </fieldset>
+
+    <pre id="report">{}</pre>
+    <script type="module" src="./spp-ro1-host.mjs"></script>
+  </body>
+</html>

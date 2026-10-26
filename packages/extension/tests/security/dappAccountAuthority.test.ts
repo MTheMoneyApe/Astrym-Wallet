@@ -2,6 +2,7 @@ import { address } from '@solana/kit';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { handleDappSignTransaction, handleApprovePendingRequest, permissionManager, pendingManager } from '../../src/background/handlers/dappHandlers.js';
 import { activeAccountManager } from '../../src/background/accounts/ActiveAccountManager.js';
+import { stateCoordinator } from '../../src/background/StateCoordinator.js';
 import { TransactionValidator } from '@solanym/wallet-core/src/solana/transaction/TransactionValidator.js';
 
 vi.mock('@solana/kit', () => {
@@ -35,6 +36,16 @@ describe('dappHandlers security', () => {
   let mockAccountService: any;
   
   beforeEach(async () => {
+    // Match signingResetConcurrency / transfer-handler convention: approve/sign
+    // paths require READY. Default StateCoordinator state is INITIALIZING.
+    (stateCoordinator as any)._state = 'READY';
+    (stateCoordinator as any)._resetEpoch = 1;
+    (stateCoordinator as any)._isResetting = false;
+    (stateCoordinator as any)._activeSignatures = new Map();
+    (stateCoordinator as any)._signatureDrainResolvers = [];
+    (stateCoordinator as any)._lockRequested = false;
+    (stateCoordinator as any)._lockOperation = null;
+
     mockSender = { url: 'https://dapp.com' };
     
     (globalThis as any).vaultService = {
@@ -153,8 +164,13 @@ describe('dappHandlers security', () => {
     // 5. User approves the request
     await handleApprovePendingRequest({ approved: true, id: 'req-1' } as any, mockSender);
 
-    // 6. Outcome MUST be that Account 0 signs using the captured index, ignoring the active account change
-    expect((globalThis as any).txClient.signTransaction).toHaveBeenCalledWith(0, new Uint8Array([1, 2, 3]));
+    // 6. Outcome MUST be that Account 0 signs using the captured index, ignoring the active account change.
+    // Third arg is the StateCoordinator lease assert callback (assertSignatureActive).
+    expect((globalThis as any).txClient.signTransaction).toHaveBeenCalledWith(
+      0,
+      new Uint8Array([1, 2, 3]),
+      expect.any(Function),
+    );
   });
 
   it('Test 6 — Invalid active account fails closed', async () => {
@@ -237,7 +253,11 @@ describe('dappHandlers security', () => {
     await approvalPromise;
 
     // The signed bytes must be the original, NOT the mutated one
-    expect((globalThis as any).txClient.signTransaction).toHaveBeenCalledWith(0, new Uint8Array([1, 2, 3]));
+    expect((globalThis as any).txClient.signTransaction).toHaveBeenCalledWith(
+      0,
+      new Uint8Array([1, 2, 3]),
+      expect.any(Function),
+    );
   });
 
   it('Test D2 — Returned object and byte-array mutation via getPendingSign', async () => {
@@ -288,7 +308,11 @@ describe('dappHandlers security', () => {
     await approvalPromise;
 
     // Verify the signer receives the exact original validated message bytes and captured account
-    expect((globalThis as any).txClient.signTransaction).toHaveBeenCalledWith(0, new Uint8Array([1, 2, 3]));
+    expect((globalThis as any).txClient.signTransaction).toHaveBeenCalledWith(
+      0,
+      new Uint8Array([1, 2, 3]),
+      expect.any(Function),
+    );
   });
 });
 

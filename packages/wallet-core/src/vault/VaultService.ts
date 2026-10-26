@@ -9,8 +9,9 @@
  * Auto-lock integration:
  *   The optional IAlarmService parameter enables inactivity-based auto-lock.
  *   When provided:
- *     - unlock / createVault / tryRestoreFromSession → schedule alarm
- *     - resetActivityTimer() → cancel + reschedule (call from every SW handler)
+ *     - unlock / createVault → schedule from the current time
+ *     - tryRestoreFromSession → preserve the persisted last-activity time
+ *     - resetActivityTimer() → schedule from explicit trusted UI activity
  *     - lock() → cancel alarm
  *   setTimeout is NOT used — it does not survive SW suspension.
  *
@@ -26,7 +27,8 @@
  *
  * Session key lifecycle:
  *   createVault / unlock → PBKDF2 → CryptoKey → session storage
- *   tryRestoreFromSession → session key + blob → AES-GCM decrypt (no PBKDF2)
+ *   explicit tryRestoreFromSession → session key + blob → AES-GCM decrypt
+ *   Production service-worker startup requires password unlock instead.
  *   lock / logout / browser-close → session key cleared
  *
  * KDF note:
@@ -103,6 +105,7 @@ export class VaultService {
    * NEVER write this to any storage.
    */
   private _contents: VaultContents | null = null;
+  private _sessionRestoreDisabled = false;
 
   constructor(
     private readonly _unlocker: IVaultUnlocker,
@@ -154,6 +157,7 @@ export class VaultService {
    * @throws {VaultAlreadyExistsError} If a vault already exists.
    */
   async createVault(password: string, mnemonic: SeedPhrase): Promise<void> {
+    this._sessionRestoreDisabled = true;
     // Guard: prevent accidental overwrite of an existing vault.
     const existingBlob = await this._persistent.loadBlob();
     if (existingBlob !== null) {
@@ -173,7 +177,7 @@ export class VaultService {
     // Acceptable cost: createVault is a one-time operation.
     const key = await this._unlocker.deriveKey(password, blob);
 
-    // Step 4: cache the wrapping key in session storage for transparent re-unlock.
+    // Step 4: cache the wrapping key in session-scoped storage.
     // INVARIANT: key is non-extractable CryptoKey — not the mnemonic.
     await this._session.saveKey(key);
 
@@ -181,7 +185,35 @@ export class VaultService {
     this._contents = contents;
 
     // Step 6: start the inactivity auto-lock countdown.
-    await this._scheduleAlarm();
+    try {
+      await this._scheduleAlarm(Date.now());
+      this._sessionRestoreDisabled = false;
+    } catch (cause) {
+      this._contents = null;
+      const cleanupErrors: Error[] = [];
+      try {
+        await this._session.clearKey();
+      } catch (error) {
+        cleanupErrors.push(error instanceof Error ? error : new Error(String(error)));
+      }
+      try {
+        await this._persistent.clearBlob();
+      } catch (error) {
+        cleanupErrors.push(error instanceof Error ? error : new Error(String(error)));
+      }
+      try {
+        await this._cancelAlarm();
+      } catch (error) {
+        cleanupErrors.push(error instanceof Error ? error : new Error(String(error)));
+      }
+      if (cleanupErrors.length > 0) {
+        throw new Error(
+          `Auto-lock could not be armed and new-vault cleanup was incomplete: ${cleanupErrors.map((error) => error.message).join('; ')}`,
+          { cause },
+        );
+      }
+      throw cause;
+    }
   }
 
   /**
@@ -199,6 +231,7 @@ export class VaultService {
    * @throws {VaultDecryptionError} If the password is wrong or the blob is tampered.
    */
   async unlock(password: string): Promise<void> {
+    this._sessionRestoreDisabled = true;
     const blob = await this._persistent.loadBlob();
     if (blob === null) {
       throw new VaultNotFoundError();
@@ -209,14 +242,25 @@ export class VaultService {
     const plaintext = await this._unlocker.decryptWithKey(key, blob);
     const contents = decodeContents(plaintext);
 
-    // Cache key in session storage for transparent SW-restart re-unlock.
+    // Cache the key in session storage for the current extension session.
     await this._session.saveKey(key);
 
     // Set in-memory state.
     this._contents = contents;
 
     // Start the inactivity auto-lock countdown.
-    await this._scheduleAlarm();
+    try {
+      await this._scheduleAlarm(Date.now());
+      this._sessionRestoreDisabled = false;
+    } catch (cause) {
+      this._contents = null;
+      try {
+        await this._session.clearKey();
+      } catch (cleanupError) {
+        throw new Error('Auto-lock could not be armed and session cleanup failed.', { cause: cleanupError });
+      }
+      throw cause;
+    }
   }
 
   /**
@@ -227,8 +271,7 @@ export class VaultService {
    *   - Session storage wrapping key.
    *   - Any pending auto-lock alarm.
    *
-   * After lock(), getMnemonic() throws WalletLockedError until
-   * unlock() or tryRestoreFromSession() succeeds.
+   * After lock(), getMnemonic() throws WalletLockedError until unlock succeeds.
    */
   async deleteVault(): Promise<void> {
     // 1. Invalidar material sensible en memoria de inmediato
@@ -263,19 +306,30 @@ export class VaultService {
   }
 
   async lock(): Promise<void> {
-    // Clear in-memory secret material first.
+    this._sessionRestoreDisabled = true;
     this._contents = null;
-    // Clear session key — requires password to unlock again.
-    await this._session.clearKey();
-    // Cancel the auto-lock alarm — a locked wallet needs no timer.
-    await this._cancelAlarm();
+
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => this._session.clearKey()),
+      Promise.resolve().then(() => this._cancelAlarm()),
+    ]);
+    const errors: Error[] = [];
+    if (results[0]?.status === 'rejected') {
+      errors.push(new Error('Session key removal failed', { cause: results[0].reason }));
+    }
+    if (results[1]?.status === 'rejected') {
+      errors.push(new Error('Auto-lock alarm cancellation failed', { cause: results[1].reason }));
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(errors, 'Wallet lock could not be confirmed');
+    }
   }
 
   /**
    * Attempt to restore the unlocked state from the session-cached wrapping key.
    *
-   * Called at SW activation to transparently re-unlock without prompting
-   * for the password, as long as the session key is still valid.
+   * May restore from a session key when explicitly called. Production
+   * service-worker startup requires password unlock instead.
    *
    * On success, schedules the auto-lock alarm.
    *
@@ -285,6 +339,8 @@ export class VaultService {
    * @returns true if the session was successfully restored (wallet is now unlocked).
    */
   async tryRestoreFromSession(): Promise<boolean> {
+    if (this._sessionRestoreDisabled) return false;
+
     const [blob, key] = await Promise.all([
       this._persistent.loadBlob(),
       this._session.loadKey(),
@@ -294,32 +350,39 @@ export class VaultService {
       return false;
     }
 
+    let contents: VaultContents;
     try {
       const plaintext = await this._unlocker.decryptWithKey(key, blob);
-      this._contents = decodeContents(plaintext);
-      // Restore also reschedules the alarm — the SW woke up, activity occurred.
-      await this._scheduleAlarm();
-      return true;
+      contents = decodeContents(plaintext);
     } catch {
       // Session key is stale or the blob is corrupt. Clear the stale key.
       // SECURITY: Do not log the caught error.
       await this._session.clearKey();
       return false;
     }
+
+    this._contents = contents;
+    try {
+      // Preserve the user's last activity time; worker activation is not activity.
+      await this._scheduleAlarm();
+      return true;
+    } catch (cause) {
+      this._contents = null;
+      await this._session.clearKey();
+      throw cause;
+    }
   }
 
   /**
    * Reset the inactivity auto-lock timer.
    *
-   * Call this from every service-worker message handler that represents
-   * user activity (e.g. balance fetch, account list, dApp request).
+   * Call this only after a trusted wallet-popup user interaction. Background
+   * reads, dApp messages and service-worker wakeups are not user activity.
    * Has no effect if no alarm service was provided or the wallet is locked.
    */
   async resetActivityTimer(): Promise<void> {
     if (this._alarm === null || this._contents === null) return;
-    // Cancel the existing alarm and schedule a fresh one.
-    await this._alarm.cancel();
-    await this._alarm.schedule();
+    await this._alarm.schedule(Date.now());
   }
 
   // ── Secret data access ────────────────────────────────────────────────────
@@ -342,9 +405,9 @@ export class VaultService {
   // ── Private alarm helpers ─────────────────────────────────────────────────
 
   /** Schedule the auto-lock alarm if an alarm service is available. */
-  private async _scheduleAlarm(): Promise<void> {
+  private async _scheduleAlarm(lastActivityAt?: number): Promise<void> {
     if (this._alarm !== null) {
-      await this._alarm.schedule();
+      await this._alarm.schedule(lastActivityAt);
     }
   }
 
@@ -355,4 +418,3 @@ export class VaultService {
     }
   }
 }
-

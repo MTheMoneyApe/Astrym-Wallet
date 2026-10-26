@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- Strict CSP WITHOUT wasm-unsafe-eval — expect WASM compile/instantiate to fail under Chromium CSP. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; connect-src 'self'; worker-src 'self'; style-src 'self'; object-src 'none'"
+    />
+    <title>SPP 2.31 — CSP wasm requirement probe</title>
+    <link rel="stylesheet" href="./fase-2.30-probe.css" />
+  </head>
+  <body>
+    <div class="banner">TEST ONLY — demonstrates need for wasm-unsafe-eval (no SDK full run).</div>
+    <h1>CSP without wasm-unsafe-eval</h1>
+    <p id="status">Running…</p>
+    <pre id="report">{}</pre>
+    <script type="module" src="./csp-wasm-requirement.mjs"></script>
+  </body>
+</html>

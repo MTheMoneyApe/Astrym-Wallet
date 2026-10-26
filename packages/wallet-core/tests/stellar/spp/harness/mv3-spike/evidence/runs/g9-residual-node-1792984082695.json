@@ -1,0 +1,106 @@
+{
+  "kind": "g9-residual-node-automation",
+  "phase": "2.36",
+  "createdAt": "2026-10-26T03:08:02.696Z",
+  "notChromeExecution": true,
+  "chromeInstrumentation": "NOT_EXECUTED",
+  "staticNestedWorkerAudit": {
+    "ok": true,
+    "scannedAt": "2026-10-26T03:08:02.681Z",
+    "workersDir": "C:\\Users\\M\\Downloads\\Stellar privacy project\\packages\\wallet-core\\tests\\stellar\\spp\\harness\\mv3-spike\\vendor\\dist\\workers",
+    "files": [
+      "prover-worker-module.js",
+      "prover-worker.js",
+      "storage-worker-module.js",
+      "storage-worker.js"
+    ],
+    "newWorkerCallSites": 2,
+    "matches": [
+      {
+        "file": "prover-worker-module.js",
+        "line": 4132,
+        "excerpt": "const ret = new Worker(getStringFromWasm0(arg0, arg1), getObject(arg2));"
+      },
+      {
+        "file": "storage-worker-module.js",
+        "line": 4171,
+        "excerpt": "const ret = new Worker(getStringFromWasm0(arg0, arg1), getObject(arg2));"
+      }
+    ],
+    "interpretation": "new Worker( present in worker-module wasm-bindgen glue — nested construction possible; runtime observation required to PASS G9 nested criterion"
+  },
+  "postCloseCriteria": [
+    "Host emergencyClose already recorded (registered workers terminateCalls ≥ 1)",
+    "Classification ABSENCE_DEMONSTRATED is insufficient alone",
+    "postClose.proof.observeWindowMs ≥ 5000",
+    "postClose.proof.networkRequestsObserved === 0 (DevTools Network after close)",
+    "postClose.proof.liveWorkerThreadsObserved === 0 (Sources Threads / workers after close)",
+    "postClose.proof.technique is an allowed observation method",
+    "postClose.proof.recordedAt ISO timestamp present",
+    "No claim based solely on SDK dispose() or telemetría"
+  ],
+  "nestedCriteria": [
+    "Acknowledge host window.Worker wrapper cannot see Worker() inside DedicatedWorker realms",
+    "Static audit of vendor SDK_REAL scripts for new Worker( call sites (Node)",
+    "If static audit finds new Worker( in worker-module glue: runtime spawn must be ruled out or observed",
+    "Runtime observation (Chrome): after RO-1 and/or after close, Threads shows only expected top-level workers or none",
+    "evidence.nestedWorkers.runtimeObservation + method + proof required for PASS",
+    "Unregistered OrigWorker bypass remains a separate host-limitation demo (Node)"
+  ],
+  "tests": {
+    "passed": 11,
+    "failed": 1,
+    "results": [
+      {
+        "name": "criteria lists are non-empty documentation contracts",
+        "status": "PASS"
+      },
+      {
+        "name": "post-close: NO_ACTIVITY_OBSERVED remains INSUFFICIENT",
+        "status": "PASS"
+      },
+      {
+        "name": "post-close: ABSENCE_DEMONSTRATED without proof is INSUFFICIENT",
+        "status": "PASS"
+      },
+      {
+        "name": "post-close: ABSENCE_DEMONSTRATED with complete proof schema is PASS (schema only)",
+        "status": "PASS"
+      },
+      {
+        "name": "host emergencyClose terminates registered workers; late construct denied",
+        "status": "PASS"
+      },
+      {
+        "name": "nested: Worker constructed via OrigWorker is invisible to host registry",
+        "status": "PASS"
+      },
+      {
+        "name": "nested: simulated inner-realm Worker is not captured by window wrapper",
+        "status": "PASS"
+      },
+      {
+        "name": "static audit of vendor SDK workers runs without network",
+        "status": "PASS"
+      },
+      {
+        "name": "nested assess: static sites without runtime → INSUFFICIENT",
+        "status": "PASS"
+      },
+      {
+        "name": "nested assess: runtime PASS blocked until wasmGlueNewWorkerRuledOut",
+        "status": "PASS"
+      },
+      {
+        "name": "evaluateGates: canonical-like residual keeps G9 FAIL",
+        "status": "FAIL",
+        "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ 'NOT_EXECUTED'\n- 'INSUFFICIENT_EVIDENCE'\n"
+      },
+      {
+        "name": "validateEvidence on synthetic residual export stays structurally ok; G9 FAIL",
+        "status": "PASS"
+      }
+    ]
+  },
+  "gatesPolicy": "G9 remains FAIL until postClose.proof + nestedWorkers runtime proof (with wasmGlue ruled out) are present; Node tests do not flip G9"
+}

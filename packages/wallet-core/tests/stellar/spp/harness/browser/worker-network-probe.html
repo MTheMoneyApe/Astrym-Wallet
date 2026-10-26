@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      Fase 2.30 CSP draft (document meta — harness only).
+      No unsafe-eval / unsafe-inline for scripts.
+      connect-src limited to 'self' (loopback harness origin).
+      Does NOT claim to sandbox WASM-native sockets or extension MV3.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; base-uri 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; worker-src 'self'; img-src 'none'; font-src 'none'; object-src 'none'; frame-src 'none'; form-action 'none'"
+    />
+    <title>SOLANYM SPP 2.30 — Worker network probe + CSP draft (TEST ONLY)</title>
+    <link rel="stylesheet" href="./fase-2.30-probe.css" />
+  </head>
+  <body>
+    <div class="banner">
+      <strong>SPIKE DE TEST — NO ES INTEGRACIÓN DE WALLET.</strong>
+      Worker probe + CSP draft. Solo destinos locales del harness. Sin Testnet.
+      G8/G9 = FAIL.
+    </div>
+    <h1>Fase 2.30 — Worker network probe &amp; CSP draft</h1>
+    <p class="meta">
+      Documento con CSP experimental. El worker prueba <code>fetch</code>/<code>XHR</code>
+      únicamente contra same-origin. No se intentan dominios públicos.
+    </p>
+    <p id="status">Starting…</p>
+    <pre id="report">{}</pre>
+    <script type="module" src="./worker-network-probe.mjs"></script>
+  </body>
+</html>

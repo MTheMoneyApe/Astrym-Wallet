@@ -29,27 +29,44 @@
 
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { mnemonicToSeed } from '../crypto/mnemonic.js';
-import { derivePath } from '../crypto/hdDerive.js';
+import { derivePath, STELLAR_DERIVATION_PATH, SOLANA_DERIVATION_PATH } from '../crypto/hdDerive.js';
 import type { VaultService } from '../vault/VaultService.js';
 import type { ISigner } from './ISigner.js';
 import { makeSignature, type PublicKeyBytes, type Signature } from './types.js';
 
+export type SupportedSignerChain = 'solana' | 'stellar';
+
 /** Solana BIP-44 path template. accountIndex maps directly to n. */
-const SOLANA_PATH = (accountIndex: number) => `m/44'/501'/${accountIndex}'/0'`;
+export const SOLANA_PATH = SOLANA_DERIVATION_PATH;
+
+/** Stellar SEP-0005 BIP-44 path template. */
+export const STELLAR_PATH = STELLAR_DERIVATION_PATH;
 
 export class SoftwareSigner implements ISigner {
   /**
    * @param _vault - The VaultService that holds the mnemonic.
+   * @param _chain - The target blockchain for key derivation ('solana' | 'stellar', defaults to 'solana').
    *
    * SECURITY: The VaultService is stored only for calling getMnemonic().
    *           No mnemonic, seed, or private key is stored on this object.
    */
-  constructor(private readonly _vault: VaultService) {}
+  constructor(
+    private readonly _vault: VaultService,
+    private readonly _chain: SupportedSignerChain = 'solana',
+  ) {}
+
+  public get chain(): SupportedSignerChain {
+    return this._chain;
+  }
+
+  private _getPath(accountIndex: number): string {
+    return this._chain === 'stellar' ? STELLAR_PATH(accountIndex) : SOLANA_PATH(accountIndex);
+  }
 
   /**
    * Derive the Ed25519 public key for the given HD account index.
    *
-   * Path: m/44'/501'/{accountIndex}'/0'
+   * Path: m/44'/148'/{accountIndex}' for Stellar, or m/44'/501'/{accountIndex}'/0' for Solana.
    *
    * The seed bytes are derived fresh on every call and are scoped to
    * this method's stack frame only.
@@ -58,7 +75,7 @@ export class SoftwareSigner implements ISigner {
    */
   async getPublicKey(accountIndex: number): Promise<PublicKeyBytes> {
     const seed = await this._deriveSeed();
-    const path = SOLANA_PATH(accountIndex);
+    const path = this._getPath(accountIndex);
     // derivePath returns { privateKey, chainCode }. The private key is local,
     // used only to derive the public key. It is not returned or stored.
     const { privateKey } = derivePath(seed, path);
@@ -127,7 +144,7 @@ export class SoftwareSigner implements ISigner {
    */
   private async _sign(payload: Uint8Array, accountIndex: number): Promise<Signature> {
     const seed = await this._deriveSeed();
-    const path = SOLANA_PATH(accountIndex);
+    const path = this._getPath(accountIndex);
 
     // INVARIANT 1: `privateKey` lives only within this stack frame.
     const { privateKey } = derivePath(seed, path);

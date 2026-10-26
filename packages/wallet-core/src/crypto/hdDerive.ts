@@ -242,6 +242,56 @@ export function deriveSolanaPublicKey(seed: Uint8Array, accountIndex: number): U
   return ed25519.getPublicKey(node.privateKey);
 }
 
+/**
+ * Stellar SEP-0005 BIP-44 path template.
+ * Path: m/44'/148'/{accountIndex}' (all segments hardened)
+ */
+export const STELLAR_DERIVATION_PATH = (accountIndex: number): string =>
+  `m/44'/148'/${accountIndex}'`;
+
+/**
+ * Solana BIP-44 path template.
+ * Path: m/44'/501'/{accountIndex}'/0'
+ */
+export const SOLANA_DERIVATION_PATH = (accountIndex: number): string =>
+  `m/44'/501'/${accountIndex}'/0'`;
+
+/**
+ * Derive the Stellar account public key bytes at the given account index according to SEP-0005.
+ * Path: m/44'/148'/accountIndex'
+ *
+ * Returns the 32-byte Ed25519 public key.
+ *
+ * @param seed - BIP-39 seed bytes (64 bytes from mnemonicToSeed).
+ * @param accountIndex - HD account index, starting at 0.
+ */
+export function deriveStellarPublicKey(seed: Uint8Array, accountIndex: number): Uint8Array {
+  if (!Number.isInteger(accountIndex) || accountIndex < 0) {
+    throw new InvalidDerivationPathError(
+      `accountIndex must be a non-negative integer, got: ${accountIndex}`,
+    );
+  }
+  const path = STELLAR_DERIVATION_PATH(accountIndex);
+  const node = derivePath(seed, path);
+  return ed25519.getPublicKey(node.privateKey);
+}
+
+/**
+ * Derive the Stellar account key node according to SEP-0005.
+ *
+ * @param seed - BIP-39 seed bytes (64 bytes from mnemonicToSeed).
+ * @param accountIndex - HD account index, starting at 0.
+ */
+export function deriveStellarKeyNode(seed: Uint8Array, accountIndex: number): DerivedNode {
+  if (!Number.isInteger(accountIndex) || accountIndex < 0) {
+    throw new InvalidDerivationPathError(
+      `accountIndex must be a non-negative integer, got: ${accountIndex}`,
+    );
+  }
+  const path = STELLAR_DERIVATION_PATH(accountIndex);
+  return derivePath(seed, path);
+}
+
 
 
 

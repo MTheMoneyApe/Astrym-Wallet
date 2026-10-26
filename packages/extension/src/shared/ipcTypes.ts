@@ -10,6 +10,8 @@ import type {
   AccountInfoSchema,
   GetAccountsRequestSchema,
   GetAccountsResponseSchema,
+  GetActiveAccountRequestSchema,
+  GetActiveAccountResponseSchema,
   GetWalletStateRequestSchema,
   GetWalletStateResponseSchema,
   CreateVaultRequestSchema,
@@ -18,6 +20,10 @@ import type {
   ImportVaultResponseSchema,
   GetBalanceRequestSchema,
   GetBalanceResponseSchema,
+  GetStellarBalanceRequestSchema,
+  GetStellarBalanceResponseSchema,
+  FundStellarTestnetRequestSchema,
+  FundStellarTestnetResponseSchema,
   MessageSchemas,
 } from './ipcSchemas.js';
 
@@ -37,6 +43,12 @@ export type ImportVaultResponse = z.infer<typeof ImportVaultResponseSchema>;
 export type GetBalanceRequest = z.infer<typeof GetBalanceRequestSchema>;
 export type GetBalanceResponse = z.infer<typeof GetBalanceResponseSchema>;
 
+export type GetStellarBalanceRequest = z.infer<typeof GetStellarBalanceRequestSchema>;
+export type GetStellarBalanceResponse = z.infer<typeof GetStellarBalanceResponseSchema>;
+
+export type FundStellarTestnetRequest = z.infer<typeof FundStellarTestnetRequestSchema>;
+export type FundStellarTestnetResponse = z.infer<typeof FundStellarTestnetResponseSchema>;
+
 export type UnlockVaultRequest = z.infer<typeof UnlockVaultRequestSchema>;
 export type UnlockVaultResponse = z.infer<typeof UnlockVaultResponseSchema>;
 
@@ -46,6 +58,8 @@ export type LockVaultResponse = z.infer<typeof LockVaultResponseSchema>;
 export type AccountInfo = z.infer<typeof AccountInfoSchema>;
 export type GetAccountsRequest = z.infer<typeof GetAccountsRequestSchema>;
 export type GetAccountsResponse = z.infer<typeof GetAccountsResponseSchema>;
+export type GetActiveAccountRequest = z.infer<typeof GetActiveAccountRequestSchema>;
+export type GetActiveAccountResponse = z.infer<typeof GetActiveAccountResponseSchema>;
 
 export type DappTransactionReview = z.infer<typeof import('./ipcSchemas.js').DappTransactionReviewSchema>;
 export type GetPendingApprovalsRequest = z.infer<typeof import('./ipcSchemas.js').GetPendingApprovalsRequestSchema>;
@@ -61,8 +75,21 @@ export type DappSignResponse = z.infer<typeof import('./ipcSchemas.js').DappSign
 
 export type ReviewTransferRequest = z.infer<typeof import('./ipcSchemas.js').ReviewTransferRequestSchema>;
 export type ReviewTransferResponse = z.infer<typeof import('./ipcSchemas.js').ReviewTransferResponseSchema>;
+export type EstimateTransferRequest = z.infer<typeof import('./ipcSchemas.js').EstimateTransferRequestSchema>;
+export type EstimateTransferResponse = z.infer<typeof import('./ipcSchemas.js').EstimateTransferResponseSchema>;
 export type SendTransferRequest = z.infer<typeof import('./ipcSchemas.js').SendTransferRequestSchema>;
 export type SendTransferResponse = z.infer<typeof import('./ipcSchemas.js').SendTransferResponseSchema>;
+export type ConfirmTransferRequest = z.infer<typeof import('./ipcSchemas.js').ConfirmTransferRequestSchema>;
+export type ConfirmTransferResponse = z.infer<typeof import('./ipcSchemas.js').ConfirmTransferResponseSchema>;
+
+export type EstimateStellarTransferRequest = z.infer<typeof import('./ipcSchemas.js').EstimateStellarTransferRequestSchema>;
+export type EstimateStellarTransferResponse = z.infer<typeof import('./ipcSchemas.js').EstimateStellarTransferResponseSchema>;
+export type ReviewStellarTransferRequest = z.infer<typeof import('./ipcSchemas.js').ReviewStellarTransferRequestSchema>;
+export type ReviewStellarTransferResponse = z.infer<typeof import('./ipcSchemas.js').ReviewStellarTransferResponseSchema>;
+export type SendStellarTransferRequest = z.infer<typeof import('./ipcSchemas.js').SendStellarTransferRequestSchema>;
+export type SendStellarTransferResponse = z.infer<typeof import('./ipcSchemas.js').SendStellarTransferResponseSchema>;
+export type ConfirmStellarTransferRequest = z.infer<typeof import('./ipcSchemas.js').ConfirmStellarTransferRequestSchema>;
+export type ConfirmStellarTransferResponse = z.infer<typeof import('./ipcSchemas.js').ConfirmStellarTransferResponseSchema>;
 
 export type MessageTypes = keyof typeof MessageSchemas;
 

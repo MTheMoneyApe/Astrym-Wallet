@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Mirror proposed MV3 extension_pages CSP (+ harness style-src). Header also set by serve.mjs -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; base-uri 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; worker-src 'self' blob:; object-src 'self'; img-src 'none'; font-src 'none'; frame-src 'none'; form-action 'none'"
+    />
+    <title>SOLANYM SPP 2.35 — MV3 CSP RO-1 host twin (TEST ONLY)</title>
+    <link rel="stylesheet" href="./fase-2.30-probe.css" />
+  </head>
+  <body>
+    <div class="banner">
+      <strong>SPIKE DE TEST — NO ES chrome-extension:// unpack.</strong>
+      Documento HTTP con CSP alineada a MV3 propuesta. SDK fuera del service worker.
+      Loopback only. G8/G9 = FAIL.
+    </div>
+    <h1>Fase 2.35 — MV3-CSP RO-1 document host (harness twin)</h1>
+    <p class="meta">
+      Evidencia automatizable cuando no hay Chrome desktop para cargar el spike unpacked.
+      No prueba <code>chrome-extension://</code> ni offscreen APIs.
+    </p>
+    <p id="status">Starting…</p>
+    <pre id="report">{}</pre>
+    <script type="module" src="./mv3-csp-ro1-host.mjs"></script>
+  </body>
+</html>

@@ -29,6 +29,9 @@ function createMocks() {
     getFeeForMessage: vi.fn().mockReturnValue({
       send: vi.fn().mockResolvedValue({ value: 5000n }),
     }),
+    getBalance: vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({ value: 10_000_000_000n }),
+    }),
   } as unknown as DevnetRpcClient;
 
   const keyManager = {

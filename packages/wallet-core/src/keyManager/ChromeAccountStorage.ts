@@ -42,6 +42,7 @@ interface StoredAccountEntry {
   index: number;
   publicKey: string;
   label: string;
+  chain?: 'solana' | 'stellar' | undefined;
 }
 
 function decodeStoredEntry(raw: unknown): AccountInfo | null {
@@ -64,10 +65,13 @@ function decodeStoredEntry(raw: unknown): AccountInfo | null {
     return null;
   }
 
+  const chain = (o['chain'] === 'stellar' || o['chain'] === 'solana') ? o['chain'] : undefined;
+
   return {
     index: o['index'] as number,
     publicKey,
     label: o['label'] as string,
+    chain,
   };
 }
 
@@ -128,6 +132,7 @@ export class ChromeAccountStorage implements IAccountStorage {
       index: a.index,
       publicKey: toBase64Url(a.publicKey),
       label: a.label,
+      chain: a.chain,
     }));
     
     await this._area.set({ 

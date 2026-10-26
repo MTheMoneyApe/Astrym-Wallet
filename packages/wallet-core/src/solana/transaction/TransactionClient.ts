@@ -128,15 +128,25 @@ export class TransactionClient {
     // Base64 encode the message bytes as required by getFeeForMessage
     const base64Message = getBase64Decoder().decode(messageBytes);
 
-    const feeResponse = await this._rpc.getFeeForMessage(base64Message as any).send().catch((e) => {
-      throw new TransactionError('Failed to estimate transaction fee', e);
-    });
+    const [feeResponse, balanceResponse] = await Promise.all([
+      this._rpc.getFeeForMessage(base64Message as any).send().catch((e) => {
+        throw new TransactionError('Failed to estimate transaction fee', e);
+      }),
+      this._rpc.getBalance(sourceAddress).send().catch((e) => {
+        throw new TransactionError('Failed to fetch source account balance', e);
+      }),
+    ]);
+
+    if (feeResponse.value === null) {
+      throw new TransactionError('Network fee estimate unavailable');
+    }
 
     return {
       sourceAddress,
       destinationAddress,
       lamports: request.lamports,
       feeLamports: feeResponse.value,
+      balanceLamports: balanceResponse.value,
     };
   }
 
@@ -144,17 +154,20 @@ export class TransactionClient {
    * Constructs, signs, and sends the SOL transfer transaction.
    * Does NOT auto-retry.
    */
-  async sendSol(request: SendSolRequest): Promise<string> {
+  async sendSol(request: SendSolRequest, assertAuthorized?: () => void): Promise<string> {
+    assertAuthorized?.();
     if (request.lamports <= 0n) {
       throw new InvalidTransactionAmountError('Transfer amount must be strictly positive');
     }
 
     const sourceAddress = await this._getSourceAddress(request.sourceAccountIndex);
+    assertAuthorized?.();
     const destinationAddress = this._validateAddress(request.destination);
 
     const blockhashResponse = await this._rpc.getLatestBlockhash().send().catch((e) => {
       throw new TransactionError('Failed to retrieve latest blockhash', e);
     });
+    assertAuthorized?.();
 
     const instruction = this._buildTransferInstruction(
       sourceAddress,
@@ -167,14 +180,34 @@ export class TransactionClient {
     const compiledMessage = compileTransactionMessage(txMsg2);
     const encoder = getCompiledTransactionMessageEncoder();
     const messageBytes = encoder.encode(compiledMessage);
+    const base64Message = getBase64Decoder().decode(messageBytes);
+
+    const [feeResponse, balanceResponse] = await Promise.all([
+      this._rpc.getFeeForMessage(base64Message as any).send().catch((e) => {
+        throw new TransactionError('Failed to estimate transaction fee before signing', e);
+      }),
+      this._rpc.getBalance(sourceAddress).send().catch((e) => {
+        throw new TransactionError('Failed to verify source account balance before signing', e);
+      }),
+    ]);
+    assertAuthorized?.();
+
+    if (feeResponse.value === null) {
+      throw new TransactionError('Network fee estimate unavailable; transaction not signed');
+    }
+    if (request.lamports + feeResponse.value > balanceResponse.value) {
+      throw new TransactionError('Insufficient SOL to cover the transfer and network fee');
+    }
 
     // ISigner securely produces the 64-byte Ed25519 signature
     let signatureBytes: Uint8Array;
+    assertAuthorized?.();
     try {
       signatureBytes = await this._signer.sign(request.sourceAccountIndex, messageBytes as unknown as Uint8Array);
     } catch (e) {
       throw new TransactionError('Failed to sign transaction. Ensure vault is unlocked.', e);
     }
+    assertAuthorized?.();
 
     // Assemble the fully signed Transaction object natively
     const signedTx = {
@@ -246,12 +279,18 @@ export class TransactionClient {
    * Returns a fully formed base64 encoded wire transaction containing the signature.
    * DOES NOT broadcast.
    */
-  async signTransaction(accountIndex: number, messageBytes: Uint8Array): Promise<{ signature: string, transactionBase64: string }> {
+  async signTransaction(
+    accountIndex: number,
+    messageBytes: Uint8Array,
+    assertAuthorized?: () => void,
+  ): Promise<{ signature: string, transactionBase64: string }> {
+    assertAuthorized?.();
     if (!messageBytes || messageBytes.length === 0) {
       throw new TransactionError('messageBytes cannot be empty');
     }
 
     const sourceAddress = await this._getSourceAddress(accountIndex);
+    assertAuthorized?.();
 
     // Verify the messageBytes actually expects this sourceAddress as the primary signer
     let decodedMsg;
@@ -272,11 +311,13 @@ export class TransactionClient {
 
     // Sign the EXACT message bytes
     let signatureBytes: Uint8Array;
+    assertAuthorized?.();
     try {
       signatureBytes = await this._signer.sign(accountIndex, messageBytes);
     } catch (e) {
       throw new TransactionError('Failed to sign transaction. Ensure vault is unlocked.', e);
     }
+    assertAuthorized?.();
 
     // Assemble the fully signed Transaction object
     const signedTx = {

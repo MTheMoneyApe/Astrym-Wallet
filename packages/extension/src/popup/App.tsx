@@ -6,9 +6,24 @@ import { Dashboard } from './Dashboard.js';
 import { ApproveConnect } from './ApproveConnect.js';
 import { ApproveSign } from './ApproveSign.js';
 
+export type ThemePalette = {
+  '--bg-color': string;
+  '--surface-color': string;
+  '--accent-color': string;
+  '--text-main': string;
+  '--text-sec': string;
+};
+
+export const isThemePalette = (value: unknown): value is ThemePalette => {
+  if (typeof value !== 'object' || value === null) return false;
+  const palette = value as Partial<Record<keyof ThemePalette, unknown>>;
+  return ['--bg-color', '--surface-color', '--accent-color', '--text-main', '--text-sec']
+    .every((key) => typeof palette[key as keyof ThemePalette] === 'string');
+};
+
 export type AppState = 'LOADING' | 'ONBOARDING' | 'LOCKED' | 'DASHBOARD' | 'APPROVE_CONNECT' | 'APPROVE_SIGN';
 
-export const THEME_PRESETS = {
+export const THEME_PRESETS: Record<string, ThemePalette> = {
   midnight: {
     '--bg-color': '#11151B',
     '--surface-color': '#1B222B',
@@ -39,10 +54,16 @@ export function App() {
   useEffect(() => {
     // Load theme
     chrome.storage.local.get(['themePreset', 'customColors'], (res) => {
-      let presetId = res.themePreset || 'midnight';
-      let colors = THEME_PRESETS[presetId as keyof typeof THEME_PRESETS] || THEME_PRESETS.midnight;
-      if (presetId === 'custom' && res.customColors) {
-        colors = res.customColors;
+      const storage = res as Record<string, unknown>;
+      const presetId = typeof storage['themePreset'] === 'string' ? String(storage['themePreset']) : 'midnight';
+      const fallbackColors = THEME_PRESETS['midnight'] as ThemePalette;
+      let colors: ThemePalette = fallbackColors;
+      const presetColors = THEME_PRESETS[presetId] as ThemePalette | undefined;
+      if (presetColors) {
+        colors = presetColors as ThemePalette;
+      }
+      if (presetId === 'custom' && isThemePalette(storage['customColors'])) {
+        colors = storage['customColors'] as ThemePalette;
       }
       applyColors(colors);
     });
@@ -50,7 +71,31 @@ export function App() {
     checkWalletState();
   }, []);
 
-  const applyColors = (colors: any) => {
+  useEffect(() => {
+    if (appState !== 'DASHBOARD') return;
+
+    let lastActivitySentAt = 0;
+    const recordActivity = () => {
+      const now = Date.now();
+      if (now - lastActivitySentAt < 15_000) return;
+      lastActivitySentAt = now;
+      void sendIpcMessage('RECORD_USER_ACTIVITY', {}).catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : 'Could not record wallet activity.');
+      });
+    };
+
+    recordActivity();
+    document.addEventListener('pointerdown', recordActivity, true);
+    document.addEventListener('keydown', recordActivity, true);
+    document.addEventListener('input', recordActivity, true);
+    return () => {
+      document.removeEventListener('pointerdown', recordActivity, true);
+      document.removeEventListener('keydown', recordActivity, true);
+      document.removeEventListener('input', recordActivity, true);
+    };
+  }, [appState]);
+
+  const applyColors = (colors: ThemePalette) => {
     const root = document.documentElement;
     if (colors['--bg-color']) root.style.setProperty('--bg-color', colors['--bg-color']);
     if (colors['--surface-color']) root.style.setProperty('--surface-color', colors['--surface-color']);
@@ -67,6 +112,7 @@ export function App() {
        root.style.setProperty('--border-color', '#2A323C');
        root.style.setProperty('--border-dark', '#333333');
     }
+
   };
 
   const checkWalletState = async () => {

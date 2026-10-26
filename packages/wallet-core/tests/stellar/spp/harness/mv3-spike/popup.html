@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SPP RO-1 Spike 2.36</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 12px;
+        min-width: 260px;
+      }
+      button {
+        display: block;
+        width: 100%;
+        margin: 6px 0;
+        padding: 8px;
+      }
+      .warn {
+        color: #842;
+        font-size: 12px;
+      }
+      pre {
+        font-size: 10px;
+        max-height: 180px;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <p class="warn">TEST ONLY — no vault, no keys, no production wallet. Fase 2.36</p>
+    <button id="open">Open RO-1 host</button>
+    <button id="ping">Ping SW (sdkInServiceWorker?)</button>
+    <button id="close">Emergency close (SW)</button>
+    <button id="bad">Send unknown type (expect reject)</button>
+    <pre id="out">{}</pre>
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>

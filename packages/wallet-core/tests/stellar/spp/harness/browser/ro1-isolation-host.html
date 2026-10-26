@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      Fase 2.31 CSP — enforced policy for real SDK RO-1 isolation probe.
+      connect-src 'self' only (local harness origin). No external connects.
+      script-src includes 'wasm-unsafe-eval' ONLY because WebAssembly under CSP
+      requires it in Chromium (demonstrated by csp-wasm-requirement.html).
+      No unsafe-inline / unsafe-eval (JS eval).
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; base-uri 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; worker-src 'self'; img-src 'none'; font-src 'none'; object-src 'none'; frame-src 'none'; form-action 'none'"
+    />
+    <title>SOLANYM SPP 2.31 — Real SDK isolation probe (TEST ONLY)</title>
+    <link rel="stylesheet" href="./fase-2.30-probe.css" />
+  </head>
+  <body>
+    <div class="banner">
+      <strong>SPIKE DE TEST — NO ES INTEGRACIÓN DE WALLET.</strong>
+      SDK real 0.2.1 + CSP connect-src 'self' + mock /rpc-ro1. Probes negativos solo
+      <code>*.invalid</code>. Sin Testnet. G8/G9 = FAIL.
+    </div>
+    <h1>Fase 2.31 — Real SDK isolation probe</h1>
+    <p class="meta">
+      Recorrido RO-1 real bajo CSP. Bloqueo externo evidenciado vía
+      <code>SecurityPolicyViolationEvent</code>, no solo error de fetch.
+    </p>
+    <p id="status">Starting…</p>
+    <pre id="report">{}</pre>
+    <script type="module" src="./ro1-isolation-host.mjs"></script>
+  </body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "network": "Test SDF Network ; September 2015",
+  "networkPassphrase": "Test SDF Network ; September 2015",
+  "kdf_domain": "solanym-spp-harness-synthetic-kdf",
+  "deployer": "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6",
+  "admin": "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6",
+  "asp_membership": "CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526",
+  "asp_non_membership": "CABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAFNSZ",
+  "verifiers": {
+    "policy_tx_2_2": "CABQGAYDAMBQGAYDAMBQGAYDAMBQGAYDAMBQGAYDAMBQGAYDAMBQGCK3"
+  },
+  "public_key_registry": "CACAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAINCW",
+  "pools": [
+    {
+      "poolContractId": "CACQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQLC2U",
+      "tokenContractId": "CADAMBQGAYDAMBQGAYDAMBQGAYDAMBQGAYDAMBQGAYDAMBQGAYDAMSST",
+      "deploymentLedger": 1,
+      "enabled": true,
+      "policyFlags": [],
+      "asset": {
+        "kind": "native",
+        "symbol": "XLM"
+      }
+    }
+  ]
+}

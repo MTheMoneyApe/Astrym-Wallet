@@ -1,0 +1,33 @@
+{
+  "phase": "2.36",
+  "artifactVersion": "0.0.36",
+  "chromeDesktopExecution": "PENDING_OPERATOR",
+  "chrome": {
+    "version": "PASTE_FROM_chrome://version",
+    "userAgent": null
+  },
+  "extension": {
+    "id": "PASTE_FROM_chrome://extensions",
+    "version": "0.0.36"
+  },
+  "csp": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' http://127.0.0.1:8765; worker-src 'self' blob:",
+    "workerEffectivePolicy": "same as extension_pages (MV3)",
+    "documentInvalidProbe": "PASS_CSP_CONFIRMED | NOT_DEMONSTRATED | NOT_TESTED",
+    "workerInvalidProbe": "PASS_CSP_CONFIRMED | DNS_OR_NETWORK_ONLY | NOT_DEMONSTRATED | NOT_TESTED | FAIL_REACHED"
+  },
+  "rpc": {
+    "allowedObserved": ["getLedgerEntries"],
+    "blockedObserved": []
+  },
+  "workers": {
+    "created": ["storage-worker.js", "prover-worker.js"],
+    "terminatedByHost": null
+  },
+  "postClose": {
+    "classification": "NOT_TESTED",
+    "note": "NO_ACTIVITY_OBSERVED does not equal ABSENCE_DEMONSTRATED"
+  },
+  "gates": { "G8": "FAIL", "G9": "FAIL" },
+  "operatorNotes": ""
+}

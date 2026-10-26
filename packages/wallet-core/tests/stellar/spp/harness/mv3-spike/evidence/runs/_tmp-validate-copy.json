@@ -1,0 +1,279 @@
+{
+  "phase": "2.36",
+  "artifactVersion": "0.0.36",
+  "notWalletIntegration": true,
+  "chromeDesktopExecution": "OPERATOR_EXPORT",
+  "startedAt": "2026-10-26T02:07:54.348Z",
+  "context": {
+    "protocol": "chrome-extension:",
+    "href": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/host/spp-ro1-host.html",
+    "isExtensionPage": true
+  },
+  "chrome": {
+    "version": null,
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+  },
+  "extension": {
+    "id": "kloekcmhonhmmlfcbmpedeehcciffagk",
+    "manifestVersion": 3,
+    "name": "Solanym SPP RO-1 Host Spike (TEST ONLY)",
+    "version": "0.0.36"
+  },
+  "csp": {
+    "manifestExtensionPages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' http://127.0.0.1:8765; worker-src 'self'",
+    "note": "MV3 effective page/worker CSP is the extension_pages string; meta CSP is ignored on extension pages",
+    "workerScriptHeaders": [
+      {
+        "path": "dist/workers/storage-worker.js",
+        "status": 200,
+        "cspHeader": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' http://127.0.0.1:8765; worker-src 'self'",
+        "note": "Header present"
+      },
+      {
+        "path": "dist/workers/prover-worker.js",
+        "status": 200,
+        "cspHeader": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' http://127.0.0.1:8765; worker-src 'self'",
+        "note": "Header present"
+      }
+    ],
+    "documentFetchInvalid": {
+      "target": "https://csp-probe.invalid/",
+      "fetchResult": {
+        "kind": "threw",
+        "message": "Failed to fetch"
+      },
+      "violations": [
+        {
+          "blockedURI": "https://csp-probe.invalid/",
+          "violatedDirective": "connect-src",
+          "effectiveDirective": "connect-src"
+        }
+      ],
+      "classification": "PASS_CSP_CONFIRMED"
+    }
+  },
+  "sdk": {
+    "package": "stellar-private-payments",
+    "expectedVersion": "0.2.1",
+    "resolvedVersion": "0.2.1",
+    "vendor": {
+      "version": "0.2.1",
+      "copiedAt": "2026-10-26T01:20:28.040Z"
+    }
+  },
+  "rpc": {
+    "endpoint": "http://127.0.0.1:8765/rpc-ro1",
+    "allowlist": [
+      "getLedgerEntries"
+    ],
+    "observed": [
+      {
+        "at": "2026-10-26T02:09:14.748Z",
+        "method": "getLedgerEntries",
+        "id": 1,
+        "outcome": "synthetic_getLedgerEntries_allContractsMinimal_ro1",
+        "synthetic": true
+      },
+      {
+        "at": "2026-10-26T02:09:14.758Z",
+        "method": "getLedgerEntries",
+        "id": 1,
+        "outcome": "synthetic_getLedgerEntries_allContractsMinimal_ro1",
+        "synthetic": true
+      }
+    ],
+    "deniedProbes": [
+      {
+        "method": "sync",
+        "ok": false,
+        "reason": "RO-1 deny: sync"
+      },
+      {
+        "method": "backgroundSync",
+        "ok": false,
+        "reason": "RO-1 deny: backgroundSync"
+      },
+      {
+        "method": "deposit",
+        "ok": false,
+        "reason": "RO-1 deny: deposit"
+      },
+      {
+        "method": "transfer",
+        "ok": false,
+        "reason": "RO-1 deny: transfer"
+      },
+      {
+        "method": "withdraw",
+        "ok": false,
+        "reason": "RO-1 deny: withdraw"
+      },
+      {
+        "method": "signTransaction",
+        "ok": false,
+        "reason": "RO-1 deny: signTransaction"
+      },
+      {
+        "method": "sendTransaction",
+        "ok": false,
+        "reason": "RO-1 deny: sendTransaction"
+      },
+      {
+        "method": "simulateTransaction",
+        "ok": false,
+        "reason": "RO-1 deny: simulateTransaction"
+      },
+      {
+        "method": "prove",
+        "ok": false,
+        "reason": "RO-1 deny: prove"
+      },
+      {
+        "method": "ensure_synced",
+        "ok": false,
+        "reason": "RO-1 deny: ensure_synced"
+      },
+      {
+        "rpcMethod": "sendTransaction",
+        "responseError": {
+          "code": -32601,
+          "message": "RO-1 mock: method not allowlisted (sendTransaction) — only getLedgerEntries permitted"
+        },
+        "rejected": true
+      },
+      {
+        "rpcMethod": "simulateTransaction",
+        "responseError": {
+          "code": -32601,
+          "message": "RO-1 mock: method not allowlisted (simulateTransaction) — only getLedgerEntries permitted"
+        },
+        "rejected": true
+      },
+      {
+        "rpcMethod": "getEvents",
+        "responseError": {
+          "code": -32601,
+          "message": "RO-1 mock: method not allowlisted (getEvents) — only getLedgerEntries permitted"
+        },
+        "rejected": true
+      },
+      {
+        "rpcMethod": "getHealth",
+        "responseError": {
+          "code": -32601,
+          "message": "RO-1 mock: method not allowlisted (getHealth) — only getLedgerEntries permitted"
+        },
+        "rejected": true
+      }
+    ],
+    "onlyGetLedgerEntries": true
+  },
+  "events": [
+    {
+      "tRelMs": 80032,
+      "at": "2026-10-26T02:09:14.379Z",
+      "type": "ro1_begin",
+      "requestId": "ro1-1792980554379-8e2421f1"
+    },
+    {
+      "tRelMs": 80076,
+      "at": "2026-10-26T02:09:14.424Z",
+      "type": "wasm_ok"
+    },
+    {
+      "tRelMs": 80261,
+      "at": "2026-10-26T02:09:14.609Z",
+      "type": "storage_open",
+      "workers": [
+        "storage-worker.js"
+      ]
+    },
+    {
+      "tRelMs": 80368,
+      "at": "2026-10-26T02:09:14.715Z",
+      "type": "client_new",
+      "workers": [
+        {
+          "workerId": "w-1",
+          "script": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/vendor/dist/workers/storage-worker.js",
+          "class": "SDK_REAL",
+          "sessionId": "mv3-36-1792980554375",
+          "terminated": false,
+          "terminateCalls": 0,
+          "type": "module",
+          "at": "2026-10-26T02:09:14.440Z"
+        },
+        {
+          "workerId": "w-2",
+          "script": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/vendor/dist/workers/prover-worker.js",
+          "class": "SDK_REAL",
+          "sessionId": "mv3-36-1792980554375",
+          "terminated": false,
+          "terminateCalls": 0,
+          "type": "module",
+          "at": "2026-10-26T02:09:14.676Z"
+        }
+      ]
+    },
+    {
+      "tRelMs": 80439,
+      "at": "2026-10-26T02:09:14.787Z",
+      "type": "ro1_complete",
+      "onlyGetLedgerEntries": true
+    }
+  ],
+  "workers": {
+    "registered": [
+      {
+        "workerId": "w-1",
+        "script": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/vendor/dist/workers/storage-worker.js",
+        "class": "SDK_REAL",
+        "sessionId": "mv3-36-1792980554375",
+        "terminated": false,
+        "terminateCalls": 0,
+        "type": "module",
+        "at": "2026-10-26T02:09:14.440Z"
+      },
+      {
+        "workerId": "w-2",
+        "script": "chrome-extension://kloekcmhonhmmlfcbmpedeehcciffagk/vendor/dist/workers/prover-worker.js",
+        "class": "SDK_REAL",
+        "sessionId": "mv3-36-1792980554375",
+        "terminated": false,
+        "terminateCalls": 0,
+        "type": "module",
+        "at": "2026-10-26T02:09:14.676Z"
+      }
+    ],
+    "terminated": []
+  },
+  "brokerTests": {},
+  "egressAttempts": [],
+  "postClose": {
+    "classification": "NOT_TESTED",
+    "notes": null
+  },
+  "lifecycle": {},
+  "vaultAccess": false,
+  "keysAccess": false,
+  "signingWired": false,
+  "gates": {
+    "G8": "FAIL",
+    "G9": "FAIL"
+  },
+  "ok": true,
+  "sessionId": "mv3-36-1792980554375",
+  "stages": {
+    "aspState": {
+      "ok": true,
+      "keys": [
+        "__wbg_ptr"
+      ]
+    },
+    "allContractsData": {
+      "ok": true,
+      "poolCount": 1
+    }
+  },
+  "finishedAt": "2026-10-26T02:09:31.592Z"
+}
