@@ -17,7 +17,7 @@ describe('Onboarding', () => {
   it('renders the welcome actions without showing the import form or a second selector', () => {
     const markup = renderToStaticMarkup(React.createElement(Onboarding, { onComplete: vi.fn() }));
 
-    expect(markup).toContain('Welcome to Solanym');
+    expect(markup).toContain('Welcome to Astrym');
     expect(markup).toContain('Create New Wallet');
     expect(markup).toContain('Import Existing Wallet');
     expect(markup).not.toContain('Recovery phrase</span>');

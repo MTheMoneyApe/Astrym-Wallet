@@ -29,12 +29,12 @@ export function Unlock({ onUnlock }: { onUnlock: () => void }) {
 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 24 }}>
   <img
     src="/icons/sym-logo.png"
-    alt="SYM — Solanym Wallet"
+    alt="Astrym"
     style={{
-      width: 88,
-      height: 88,
+      width: 112,
+      height: 112,
       objectFit: 'contain',
-      borderRadius: 18
+      borderRadius: 20
     }}
   />
   <h2
@@ -46,7 +46,7 @@ export function Unlock({ onUnlock }: { onUnlock: () => void }) {
       letterSpacing: '0.5px'
     }}
   >
-    Solanym
+    Astrym
   </h2>
   <span style={{ color: '#8FE8D0', fontSize: 11, letterSpacing: '2px' }}>
     PRIVATE BY DESIGN

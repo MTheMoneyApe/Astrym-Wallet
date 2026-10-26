@@ -229,15 +229,17 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
         }
         .onboarding-logo {
           display: block;
-          width: 104px;
-          height: 104px;
+          width: 128px;
+          height: 128px;
           margin-bottom: 20px;
           object-fit: contain;
+          border-radius: 22px;
         }
         .onboarding-logo--small {
-          width: 44px;
-          height: 44px;
+          width: 48px;
+          height: 48px;
           margin: 0;
+          border-radius: 10px;
         }
         .onboarding-title {
           margin: 0;
@@ -442,8 +444,8 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
 
       {mode === 'welcome' ? (
         <main className="onboarding-welcome" aria-labelledby="onboarding-title">
-          <img className="onboarding-logo" src="/icons/sym-logo.png" alt="Solanym logo" />
-          <h1 className="onboarding-title" id="onboarding-title">Welcome to Solanym</h1>
+          <img className="onboarding-logo" src="/icons/sym-logo.png" alt="Astrym" />
+          <h1 className="onboarding-title" id="onboarding-title">Welcome to Astrym</h1>
           <p className="onboarding-subtitle">Your privacy-first Stellar wallet.</p>
           <div className="onboarding-actions">
             <button
@@ -475,7 +477,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
         <main className="onboarding-flow" aria-labelledby="onboarding-title">
           <header className="onboarding-topbar">
             <span />
-            <img className="onboarding-logo onboarding-logo--small" src="/icons/sym-logo.png" alt="" />
+            <img className="onboarding-logo onboarding-logo--small" src="/icons/sym-logo.png" alt="Astrym" />
           </header>
           <h1 className="onboarding-title" id="onboarding-title">Back up your recovery phrase</h1>
           <p className="onboarding-copy">Write these 24 words down in order and keep them somewhere private. They will not be shown again.</p>
@@ -544,7 +546,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
             >
               ← Back
             </button>
-            <img className="onboarding-logo onboarding-logo--small" src="/icons/sym-logo.png" alt="" />
+            <img className="onboarding-logo onboarding-logo--small" src="/icons/sym-logo.png" alt="Astrym" />
           </header>
           <h1 className="onboarding-title" id="onboarding-title">
             {mode === 'create'
