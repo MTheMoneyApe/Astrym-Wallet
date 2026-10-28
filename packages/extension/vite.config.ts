@@ -18,7 +18,11 @@ export default defineConfig({
       },
       output: {
         entryFileNames: '[name].js',
-        chunkFileNames: '[name].js',
+        chunkFileNames(chunkInfo) {
+          const facade = (chunkInfo.facadeModuleId ?? '').replace(/\\/g, '/');
+          if (facade.endsWith('/src/background/index.ts')) return 'wallet-host.js';
+          return '[name].js';
+        },
         assetFileNames: '[name].[ext]'
       }
     }

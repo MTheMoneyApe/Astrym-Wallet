@@ -62,6 +62,7 @@ describe('Extension Security — Static Invariants', () => {
     // - background/StateCoordinator.ts — bounded signature-drain wait during lock (SIGNATURE_DRAIN_TIMEOUT_MS).
     // - background/dapp/PendingRequestManager.ts — expire pending connect/sign requests in-memory.
     // - popup/{Send,Dashboard,Onboarding}.tsx — short-lived clipboard/copy UI feedback only.
+    // - webapp/installChromeShim.ts — Android page has no chrome.alarms; auto-lock timers live in the page.
     const setTimeoutAllowlist = new Set(
       [
         'background/StateCoordinator.ts',
@@ -69,6 +70,7 @@ describe('Extension Security — Static Invariants', () => {
         'popup/Send.tsx',
         'popup/Dashboard.tsx',
         'popup/Onboarding.tsx',
+        'webapp/installChromeShim.ts',
       ].map((rel) => path.normalize(rel)),
     );
 
