@@ -102,6 +102,8 @@ describe('NymRuntimeController lifecycle', () => {
     expect(afterDisc.connected).toBe(false);
     expect(afterDisc.documentReady).toBe(false);
     expect(afterDisc.state).toBe('disconnected');
+    expect(afterDisc.mode).toBe('direct');
+    expect(ctrl.mode).toBe('direct');
 
     const again = await ctrl.connect();
     expect(again.connected).toBe(true);
@@ -168,5 +170,44 @@ describe('NymRuntimeController lifecycle', () => {
     const ok = await ctrl.connect();
     expect(ok.connected).toBe(true);
     expect(setup).toHaveBeenCalledTimes(2);
+  });
+
+  it('bootstraps the verified gateway and connects without MV3 permissions on Android', async () => {
+    const bridge = mockBridge();
+    const gatewayConfig = new NymGatewayConfigService(memoryStorage());
+    const ctrl = new NymRuntimeController({
+      bridge,
+      gatewayConfig,
+      hostPermissions: new NymHostPermissionService(null),
+      allowConnectWithoutHostPermission: true,
+    });
+
+    const snap = await ctrl.connect();
+    expect(snap.connected).toBe(true);
+    expect(snap.mode).toBe('nym');
+    const saved = await gatewayConfig.load();
+    expect(saved.selectedGateway).toBe(NYM_VERIFIED_GATEWAY.wssOrigin);
+    expect(saved.identityKey).toBe(NYM_VERIFIED_GATEWAY.identityKey);
+    expect(bridge.setup).toHaveBeenCalledWith(
+      expect.objectContaining({ preferredGateway: NYM_VERIFIED_GATEWAY.identityKey }),
+    );
+  });
+
+  it('fail-closes connect when the permission API is missing and the Android flag is off', async () => {
+    const bridge = mockBridge();
+    const gatewayConfig = new NymGatewayConfigService(memoryStorage());
+    await gatewayConfig.addGateway(
+      NYM_VERIFIED_GATEWAY.wssOrigin,
+      NYM_VERIFIED_GATEWAY.identityKey,
+    );
+    const ctrl = new NymRuntimeController({
+      bridge,
+      gatewayConfig,
+      hostPermissions: new NymHostPermissionService(null),
+    });
+
+    await expect(ctrl.connect()).rejects.toMatchObject({ code: 'CONNECT_FAILED' });
+    expect(bridge.setup).not.toHaveBeenCalled();
+    expect(ctrl.mode).toBe('direct');
   });
 });

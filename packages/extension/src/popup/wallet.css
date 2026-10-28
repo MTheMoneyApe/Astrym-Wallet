@@ -1,0 +1,258 @@
+:root {
+        --bg-color: #11151B;
+        --surface-color: #1B222B;
+        --accent-color: #8FE8D0;
+        --text-main: #F4F7F8;
+        --text-sec: #A4ADBA;
+        --border-color: #2A323C;
+        --border-dark: #333333;
+        --error-color: #ff6b6b;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        width: 400px;
+        height: 600px;
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background-color: var(--bg-color);
+        color: var(--text-main);
+      }
+      #root {
+        width: 100%;
+        height: 100%;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      
+      .view-container {
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+      }
+      .header h2 {
+        margin: 0;
+        font-size: 1.2rem;
+      }
+      .text-accent {
+        color: var(--accent-color);
+      }
+      .text-secondary {
+        color: var(--text-sec);
+      }
+      .error-text {
+        color: var(--error-color);
+      }
+      
+      .card {
+        background-color: var(--surface-color);
+        padding: 20px;
+        border-radius: 12px;
+        border: 1px solid var(--border-color);
+      }
+      .balance-card {
+        padding: 25px;
+        border-radius: 16px;
+        position: relative;
+        overflow: hidden;
+      }
+      .balance-indicator {
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 4px;
+        background-color: #555;
+      }
+      .balance-indicator[data-status="connected"] { background-color: var(--accent-color); }
+      .balance-indicator[data-status="unavailable"] { background-color: var(--error-color); }
+      
+      .nym-status {
+        display: flex;
+        align-items: center;
+        background-color: var(--bg-color);
+        padding: 4px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--border-dark);
+        font-size: 0.75rem;
+      }
+      
+      .btn-icon {
+        background: transparent;
+        border: none;
+        color: var(--text-sec);
+        cursor: pointer;
+        padding: 0;
+        font-size: 1rem;
+      }
+      .btn-outline {
+        background: transparent;
+        border: 1px solid var(--border-dark);
+        color: var(--text-sec);
+        padding: 6px 12px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 0.9em;
+      }
+      .btn-primary {
+        padding: 12px;
+        background-color: var(--accent-color);
+        color: var(--bg-color);
+        border: none;
+        border-radius: 8px;
+        font-weight: bold;
+        cursor: pointer;
+        font-size: 1rem;
+      }
+      .btn-primary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn-secondary {
+        padding: 12px;
+        background-color: transparent;
+        color: var(--accent-color);
+        border: 1px solid var(--accent-color);
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .btn-error {
+        background-color: var(--error-color);
+        color: black;
+        border: none;
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: bold;
+        font-size: 0.8em;
+      }
+      .btn-disabled {
+        padding: 14px;
+        background-color: var(--surface-color);
+        color: #555;
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        cursor: not-allowed;
+        position: relative;
+      }
+      .badge-soon {
+        position: absolute;
+        top: -8px;
+        right: -8px;
+        background-color: var(--bg-color);
+        color: #888;
+        font-size: 0.65rem;
+        padding: 2px 6px;
+        border-radius: 10px;
+        border: 1px solid var(--border-dark);
+      }
+      
+      .input-field {
+        padding: 12px;
+        background-color: var(--bg-color);
+        border: 1px solid var(--border-dark);
+        color: var(--text-main);
+        border-radius: 8px;
+        outline: none;
+      }
+      .input-field:focus {
+        border-color: var(--accent-color);
+      }
+      
+      .phrase-word {
+        background-color: var(--bg-color);
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border-dark);
+        font-size: 0.9em;
+        display: flex;
+        gap: 8px;
+      }
+      
+      .action-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .center-content {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .error-card {
+        padding: 10px;
+        background: rgba(255, 107, 107, 0.1);
+        border: 1px solid var(--error-color);
+        color: var(--error-color);
+        border-radius: 6px;
+        margin-bottom: 15px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+html:not(.astrym-webapp) body {
+  width: 400px;
+  height: 600px;
+  overflow: hidden;
+}
+
+html.astrym-webapp,
+html.astrym-webapp body {
+  width: 100%;
+  max-width: 100%;
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: auto;
+}
+
+html.astrym-webapp {
+  background-color: #191A1C;
+}
+
+html.astrym-webapp body {
+  padding:
+    env(safe-area-inset-top)
+    env(safe-area-inset-right)
+    env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+  background-color: var(--bg-color, #191A1C);
+}
+
+html.astrym-webapp #root,
+html.astrym-webapp .view-container {
+  min-height: 100%;
+  height: auto;
+}
+
+html.astrym-webapp .btn-primary,
+html.astrym-webapp .btn-secondary,
+html.astrym-webapp .btn-outline,
+html.astrym-webapp .btn-icon,
+html.astrym-webapp .input-field,
+html.astrym-webapp select,
+html.astrym-webapp button {
+  min-height: 48px;
+}
+
+html.astrym-webapp .btn-icon {
+  min-width: 48px;
+  min-height: 48px;
+}
+
+html.astrym-webapp .input-field,
+html.astrym-webapp select,
+html.astrym-webapp textarea {
+  font-size: 16px;
+}
+
+html.astrym-webapp .android-webapp-bar button {
+  min-height: 48px;
+}

@@ -10,6 +10,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'popup.html'),
+        webapp: resolve(__dirname, 'webapp.html'),
         'spp-host': resolve(__dirname, 'spp-host.html'),
         'nym-offscreen': resolve(__dirname, 'nym-offscreen.html'),
         content: resolve(__dirname, 'src/content/index.ts'),

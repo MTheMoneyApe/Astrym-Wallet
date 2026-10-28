@@ -106,11 +106,12 @@ function initBackgroundSynchronous() {
   // Logical Horizon base = SDF testnet. In mode=nym, getStellarFetch() remaps to the
   // validated effective base (default Ankr) — see stellarHorizonNymConfig.ts. No silent
   // clearnet fallback. Default router mode stays 'direct' until Connect / setMode('nym').
+  const stellarFetch = nymRuntime.getStellarFetch();
   const stellarReadClient = new StellarReadClient(
     STELLAR_TESTNET_HORIZON_URL,
     STELLAR_TESTNET_FRIENDBOT_URL,
     90_000,
-    nymRuntime.getStellarFetch(),
+    stellarFetch,
   );
   
   const config = resolveNetworkConfig('https://api.devnet.solana.com');
@@ -122,7 +123,14 @@ function initBackgroundSynchronous() {
   (globalThis as any).keyManager = keyManager;
 
   const txClient = new TransactionClient(rpcClient, keyManager, { sign: (index, data) => signer.signTransaction(data, index) });
-  const stellarTxClient = new StellarTransactionClient(undefined, keyManager, signer);
+  const stellarTxClient = new StellarTransactionClient(
+    STELLAR_TESTNET_HORIZON_URL,
+    keyManager,
+    signer,
+    undefined,
+    undefined,
+    stellarFetch,
+  );
   (globalThis as any).txClient = txClient;
   (globalThis as any).stellarTxClient = stellarTxClient;
   (globalThis as any).vaultService = vaultService;

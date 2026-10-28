@@ -166,6 +166,23 @@ describe('MessageRouter', () => {
         expect(handler).not.toHaveBeenCalled();
       });
 
+      it('allows the full-tab webapp to reveal the recovery phrase', async () => {
+        const router = new MessageRouter();
+        const handler = vi.fn().mockResolvedValue({
+          recoveryPhrase: Array.from({ length: 24 }, (_, index) => `synthetic-${index}`),
+        });
+        router.registerHandler('REVEAL_RECOVERY_PHRASE', handler);
+        const sender = {
+          id: 'test-extension-id',
+          url: 'chrome-extension://test-extension-id/webapp.html',
+        };
+
+        const result = await router.routeMessage(validRevealRequest, sender as any);
+
+        expect(handler).toHaveBeenCalledWith(validRevealRequest.payload, sender);
+        expect(result.error).toBeUndefined();
+      });
+
       it('allows the exact popup context to invoke the registered handler', async () => {
         const router = new MessageRouter();
         const handler = vi.fn().mockResolvedValue({

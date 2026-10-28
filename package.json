@@ -7,7 +7,9 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "dev:webapp": "pnpm --filter @solanym/extension dev:webapp",
+    "build:webapp": "pnpm --filter @solanym/extension build:webapp"
   },
   "devDependencies": {
     "@eslint/js": "latest",

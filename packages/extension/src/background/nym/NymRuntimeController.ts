@@ -3,6 +3,7 @@
  * FailClosedTransportRouter. Direct mode only via explicit setMode('direct').
  */
 
+import type { NymMixFetchBridge } from '@solanym/wallet-core/src/nym/NymMixFetchBridge.js';
 import {
   MixFetchNymTransport,
   NymTransportError,
@@ -42,6 +43,12 @@ import {
   type StellarHorizonProbeResult,
 } from './StellarHorizonProbe.js';
 import type { StellarReadFetch } from '@solanym/wallet-core/src/stellar/read/StellarReadClient.js';
+import type { NymOffscreenStatusPayload } from '../../nym-offscreen/protocol.js';
+
+/** Offscreen IPC bridge or the in-page MixFetch bridge used by the Android webapp. */
+export type NymSessionBridge = NymMixFetchBridge & {
+  queryStatus(): Promise<NymOffscreenStatusPayload | null>;
+};
 
 export type NymRuntimeUiSnapshot = NymTransportSnapshot & {
   mode: NymTransportMode;
@@ -110,9 +117,15 @@ function defaultLocalStorage(): {
 
 export class NymRuntimeController {
   private _mode: NymTransportMode = 'direct';
-  private readonly _bridge: OffscreenMixFetchBridge;
+  private readonly _bridge: NymSessionBridge;
   private readonly _transport: MixFetchNymTransport;
   private readonly _router: FailClosedTransportRouter;
+  /**
+   * Android / standalone webapp has no MV3 optional host permissions.
+   * WSS is a normal browser socket. Extension builds keep this false so a
+   * missing permission still fail-closes Connect.
+   */
+  private readonly _allowConnectWithoutHostPermission: boolean;
   private readonly _gatewayConfig: NymGatewayConfigService;
   private readonly _hostPermissions: NymHostPermissionService;
   private _documentReady = false;
@@ -132,11 +145,13 @@ export class NymRuntimeController {
   private _connectInFlight: Promise<NymRuntimeUiSnapshot> | null = null;
 
   constructor(options?: {
-    bridge?: OffscreenMixFetchBridge;
+    bridge?: NymSessionBridge;
     gatewayConfig?: NymGatewayConfigService;
     hostPermissions?: NymHostPermissionService;
+    allowConnectWithoutHostPermission?: boolean;
   }) {
     const docs = createOffscreenDocumentManager();
+    this._allowConnectWithoutHostPermission = options?.allowConnectWithoutHostPermission === true;
     this._bridge = options?.bridge ?? new OffscreenMixFetchBridge(docs);
     this._transport = new MixFetchNymTransport(this._bridge);
     this._router = new FailClosedTransportRouter({
@@ -302,6 +317,7 @@ export class NymRuntimeController {
   }): Promise<NymRuntimeUiSnapshot> {
     // Document open ≠ MixFetch ready — cleared until createMixFetch succeeds.
     this._documentReady = false;
+    await this._gatewayConfig.ensureVerifiedDefault();
     const config = await this.syncGatewayConfigUi();
     const wssOrigin = config.selectedGateway || config.gatewayOrigins[0] || null;
     if (!wssOrigin) {
@@ -331,11 +347,16 @@ export class NymRuntimeController {
     this._gatewayHostPermissionGranted = perm.granted;
     this._gatewayHostPermissionPattern = perm.hostPermissionPattern;
     if (!perm.granted) {
-      this._diagnosticCode = 'PERMISSION_DENIED';
-      throw new NymTransportError(
-        'CONNECT_FAILED',
-        `Gateway host permission not granted for ${perm.hostPermissionPattern}. Use Grant permission (user gesture) first. Permission ≠ Mixnet Ready.`,
-      );
+      const browserSocket =
+        this._allowConnectWithoutHostPermission && !this._hostPermissions.isApiAvailable();
+      if (!browserSocket) {
+        this._diagnosticCode = 'PERMISSION_DENIED';
+        throw new NymTransportError(
+          'CONNECT_FAILED',
+          `Gateway host permission not granted for ${perm.hostPermissionPattern}. Use Grant permission (user gesture) first. Permission ≠ Mixnet Ready.`,
+        );
+      }
+      this._gatewayHostPermissionGranted = true;
     }
 
     try {
@@ -483,6 +504,10 @@ export class NymRuntimeController {
     this._documentReady = false;
     this._diagnosticCode = 'OK';
     this._diagnosticStage = null;
+    // Disconnect is an explicit exit from Nym. While mode stays `nym`, fetch
+    // still fail-closes with no clearnet retry. Returning to `direct` here is
+    // the visible way back to Horizon reads after the user disconnects.
+    this.setMode('direct');
     return this.getSnapshot();
   }
 

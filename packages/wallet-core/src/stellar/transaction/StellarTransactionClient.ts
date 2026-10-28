@@ -8,7 +8,8 @@ import {
   StrKey,
   TransactionBuilder,
 } from '@stellar/stellar-sdk';
-import { STELLAR_TESTNET_HORIZON_URL } from '../read/StellarReadClient.js';
+import { STELLAR_TESTNET_HORIZON_URL, type StellarReadFetch } from '../read/StellarReadClient.js';
+import { routeHorizonServerThroughFetch } from './horizonFetch.js';
 import {
   InsufficientXlmBalanceError,
   InvalidStellarAmountError,
@@ -62,8 +63,18 @@ export class StellarTransactionClient {
     private readonly _signer: IStellarTransactionSigner,
     private readonly _networkPassphrase: string = Networks.TESTNET,
     serverInstance?: Horizon.Server,
+    /**
+     * Same injected transport as StellarReadClient. When set, Horizon.Server
+     * account loads, fee quotes, submits, and confirmation polls use it.
+     * Nym mode stays fail-closed because this is the router fetch, not a
+     * second clearnet client.
+     */
+    fetchImpl?: StellarReadFetch,
   ) {
     this._horizon = serverInstance ?? new Horizon.Server(horizonUrl);
+    if (!serverInstance && fetchImpl) {
+      routeHorizonServerThroughFetch(this._horizon, fetchImpl);
+    }
   }
 
   public validateDestination(destination: string, sourceAddress?: string): string {

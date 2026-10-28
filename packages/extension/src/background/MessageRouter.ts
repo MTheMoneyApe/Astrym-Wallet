@@ -1,6 +1,7 @@
 import browser from 'webextension-polyfill';
 import { BaseRequestEnvelopeSchema, MessageSchemas } from '../shared/ipcSchemas.js';
 import type { BaseResponseEnvelope, MessageTypes, ValidatedRequestPayload, ValidatedResponsePayload } from '../shared/ipcTypes.js';
+import { isInternalWalletSender, isTrustedWalletPageUrl } from './trustedWalletOrigin.js';
 
 export type MessageHandler<T extends MessageTypes> = (
   payload: ValidatedRequestPayload<T>,
@@ -44,7 +45,7 @@ export class MessageRouter {
       };
     }
 
-    const isInternalSender = sender.id === browser.runtime.id && sender.url && sender.url.startsWith(`chrome-extension://${browser.runtime.id}/`);
+    const isInternalSender = isInternalWalletSender(sender);
     
     if (isDappRoute) {
       if (!sender.url || sender.url.startsWith('chrome-extension://')) {
@@ -67,10 +68,7 @@ export class MessageRouter {
         };
       }
     } else if (envelope.type === 'REVEAL_RECOVERY_PHRASE') {
-      if (
-        !isInternalSender ||
-        sender.url !== browser.runtime.getURL('/popup.html')
-      ) {
+      if (!isInternalSender || !isTrustedWalletPageUrl(sender.url)) {
         return {
           id: envelope.id,
           type: 'ERROR',

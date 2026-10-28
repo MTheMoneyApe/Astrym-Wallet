@@ -3,6 +3,7 @@ import type { LockTimeoutMinutes } from '@solanym/wallet-core/src/vault/IAlarmSe
 import type { VaultService } from '@solanym/wallet-core/src/vault/VaultService.js';
 import type { ChromeAlarmService } from '../alarms/ChromeAlarmService.js';
 import { stateCoordinator } from '../StateCoordinator.js';
+import { isTrustedWalletPageUrl } from '../trustedWalletOrigin.js';
 
 type AutoLockSettings = Pick<ChromeAlarmService, 'getTimeoutMinutes' | 'setTimeoutMinutes'>;
 
@@ -35,7 +36,7 @@ export function createRecordUserActivityHandler(vaultService: VaultService) {
     _payload: Record<string, never>,
     sender?: browser.Runtime.MessageSender,
   ): Promise<{ success: boolean }> => {
-    if (!sender?.url || sender.url !== browser.runtime.getURL('/popup.html')) {
+    if (!isTrustedWalletPageUrl(sender?.url)) {
       throw new Error('User activity must originate from the trusted wallet popup');
     }
     if (

@@ -23,6 +23,7 @@ import type {
 } from './NymTransportPanel.js';
 import { beginGatewayPermissionRequestFromUserGesture } from './nymPermissionGesture.js';
 import { NYM_LIVE_SMOKE_EXECUTION_AUTHORIZED } from '../nym-offscreen/liveSmokeAuth.js';
+import { NYM_VERIFIED_GATEWAY } from '../nym-offscreen/verifiedGateway.js';
 
 function coerceNymUiSnapshot(snap: {
   state: NymUiSnapshot['state'];
@@ -513,7 +514,11 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   const [autoLockSaved, setAutoLockSaved] = useState(false);
 
   // Theme State
-  const [themePreset, setThemePreset] = useState<string>('midnight');
+  const [themePreset, setThemePreset] = useState<string>(
+    typeof document !== 'undefined' && document.documentElement.classList.contains('astrym-webapp')
+      ? 'astrym'
+      : 'midnight',
+  );
   const [customColors, setCustomColors] = useState<ThemePalette>({
     '--bg-color': '#11151B',
     '--surface-color': '#1B222B',
@@ -970,7 +975,31 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     };
   }, [view]);
 
-  const handleNymConnect = async () => {
+  const handleNymConnect = () => {
+    const origin = nymSnapshot.selectedGateway || NYM_VERIFIED_GATEWAY.wssOrigin;
+    const permissionsApi = typeof chrome !== 'undefined' ? chrome.permissions : undefined;
+    let permissionPending: ReturnType<typeof beginGatewayPermissionRequestFromUserGesture> | null =
+      null;
+    if (permissionsApi && typeof permissionsApi.request === 'function') {
+      try {
+        permissionPending = beginGatewayPermissionRequestFromUserGesture(origin);
+      } catch (err: unknown) {
+        setNymSnapshot((prev) => ({
+          ...prev,
+          state: 'error',
+          connected: false,
+          documentReady: false,
+          lastError: err instanceof Error ? err.message : 'Host permission request failed to start',
+          diagnosticCode:
+            err && typeof err === 'object' && 'code' in err
+              ? String((err as { code: unknown }).code)
+              : 'PERMISSION_REQUEST_FAILED',
+          gatewayHostPermissionGranted: false,
+        }));
+        return;
+      }
+    }
+
     setNymBusy(true);
     setNymSnapshot((prev) => ({
       ...prev,
@@ -978,20 +1007,38 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
       connected: false,
       lastError: null,
     }));
-    try {
-      const snap = await sendIpcMessage('NYM_CONNECT', {});
-      setNymSnapshot(coerceNymUiSnapshot(snap));
-    } catch (err: unknown) {
-      setNymSnapshot((prev) => ({
-        ...prev,
-        state: 'error',
-        connected: false,
-        documentReady: false,
-        lastError: err instanceof Error ? err.message : 'NYM_CONNECT failed',
-      }));
-    } finally {
-      setNymBusy(false);
-    }
+    void (async () => {
+      try {
+        if (permissionPending) {
+          const gesture = await permissionPending;
+          if (!gesture.granted) {
+            setNymSnapshot((prev) => ({
+              ...prev,
+              state: 'error',
+              connected: false,
+              documentReady: false,
+              lastError:
+                'Host permission not granted. Grant the gateway, then Connect. Permission ≠ Mixnet Ready.',
+              diagnosticCode: 'PERMISSION_DENIED',
+              gatewayHostPermissionGranted: false,
+            }));
+            return;
+          }
+        }
+        const snap = await sendIpcMessage('NYM_CONNECT', {});
+        setNymSnapshot(coerceNymUiSnapshot(snap));
+      } catch (err: unknown) {
+        setNymSnapshot((prev) => ({
+          ...prev,
+          state: 'error',
+          connected: false,
+          documentReady: false,
+          lastError: err instanceof Error ? err.message : 'NYM_CONNECT failed',
+        }));
+      } finally {
+        setNymBusy(false);
+      }
+    })();
   };
 
   const handleNymDisconnect = async () => {
@@ -1047,14 +1094,13 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   };
 
   const handleNymRequestPermission = () => {
-    const origin = nymSnapshot.selectedGateway;
-    if (!origin) {
+    const origin = nymSnapshot.selectedGateway || NYM_VERIFIED_GATEWAY.wssOrigin;
+    if (typeof chrome === 'undefined' || typeof chrome.permissions?.request !== 'function') {
       setNymSnapshot((prev) => ({
         ...prev,
-        state: prev.state === 'connected' ? 'disconnected' : prev.state,
-        connected: false,
-        lastError: 'Save an exact WSS gateway before granting host permission',
-        diagnosticCode: 'GATEWAY_ALLOWLIST_EMPTY',
+        lastError:
+          'El webapp de Android no usa permisos de host de Chrome. Pulsa Connect: el gateway verificado se configura solo y MixFetch corre en esta página.',
+        diagnosticCode: 'OK',
       }));
       return;
     }
@@ -1432,6 +1478,7 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
             className="input-field"
             style={{ width: '100%', marginBottom: 15 }}
           >
+            <option value="astrym">Astrym</option>
             <option value="midnight">Midnight Green</option>
             <option value="lightmint">Light Mint</option>
             <option value="forest">Forest</option>

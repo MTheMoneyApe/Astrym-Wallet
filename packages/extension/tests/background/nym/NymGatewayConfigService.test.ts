@@ -33,6 +33,15 @@ describe('NymGatewayConfigService', () => {
     expect(cfg.identityKey).toBeNull();
   });
 
+  it('ensureVerifiedDefault seeds the DevRel gateway only when config is incomplete', async () => {
+    const svc = new NymGatewayConfigService(memoryStorage());
+    const seeded = await svc.ensureVerifiedDefault();
+    expect(seeded.selectedGateway).toBe(NYM_VERIFIED_GATEWAY.wssOrigin);
+    expect(seeded.identityKey).toBe(NYM_VERIFIED_GATEWAY.identityKey);
+    const again = await svc.ensureVerifiedDefault();
+    expect(again.updatedAt).toBe(seeded.updatedAt);
+  });
+
   it('adds validated WSS + identity and selects WSS', async () => {
     const store = memoryStorage();
     const svc = new NymGatewayConfigService(store);

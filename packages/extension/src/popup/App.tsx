@@ -5,6 +5,7 @@ import { Unlock } from './Unlock.js';
 import { Dashboard } from './Dashboard.js';
 import { ApproveConnect } from './ApproveConnect.js';
 import { ApproveSign } from './ApproveSign.js';
+import { OpenAndroidWebappBar } from './OpenAndroidWebappBar.js';
 
 export type ThemePalette = {
   '--bg-color': string;
@@ -44,7 +45,14 @@ export const THEME_PRESETS: Record<string, ThemePalette> = {
     '--accent-color': '#8FE8A8',
     '--text-main': '#F1FFF5',
     '--text-sec': '#A9C8B4',
-  }
+  },
+  astrym: {
+    '--bg-color': '#191A1C',
+    '--surface-color': '#242628',
+    '--accent-color': '#3CE894',
+    '--text-main': '#F4F7F8',
+    '--text-sec': '#A4ADBA',
+  },
 };
 
 export function App() {
@@ -55,8 +63,11 @@ export function App() {
     // Load theme
     chrome.storage.local.get(['themePreset', 'customColors'], (res) => {
       const storage = res as Record<string, unknown>;
-      const presetId = typeof storage['themePreset'] === 'string' ? String(storage['themePreset']) : 'midnight';
-      const fallbackColors = THEME_PRESETS['midnight'] as ThemePalette;
+      const webapp = document.documentElement.classList.contains('astrym-webapp');
+      const presetId = typeof storage['themePreset'] === 'string'
+        ? String(storage['themePreset'])
+        : webapp ? 'astrym' : 'midnight';
+      const fallbackColors = (webapp ? THEME_PRESETS['astrym'] : THEME_PRESETS['midnight']) as ThemePalette;
       let colors: ThemePalette = fallbackColors;
       const presetColors = THEME_PRESETS[presetId] as ThemePalette | undefined;
       if (presetColors) {
@@ -137,16 +148,25 @@ export function App() {
     }
   };
 
-  if (error) {
-    return (
-      <div style={{ padding: 20, color: 'red' }}>
-        <h2>Error</h2>
-        <p>{error}</p>
-        <button onClick={() => { setError(null); checkWalletState(); }}>Retry</button>
-      </div>
-    );
-  }
+  const screen = error ? (
+    <div style={{ padding: 20, color: 'red' }}>
+      <h2>Error</h2>
+      <p>{error}</p>
+      <button onClick={() => { setError(null); checkWalletState(); }}>Retry</button>
+    </div>
+  ) : (
+    renderWalletScreen(appState, checkWalletState)
+  );
 
+  return (
+    <>
+      <OpenAndroidWebappBar />
+      {screen}
+    </>
+  );
+}
+
+function renderWalletScreen(appState: AppState, checkWalletState: () => Promise<void>) {
   switch (appState) {
     case 'LOADING':
       return <div className="center-content">Loading Solanym...</div>;
@@ -160,7 +180,9 @@ export function App() {
       return <ApproveSign onComplete={checkWalletState} />;
     case 'DASHBOARD':
       return <Dashboard onLock={checkWalletState} />;
-    default:
-      return null;
+    default: {
+      const unexpected: never = appState;
+      throw new Error(`Unhandled wallet screen: ${String(unexpected)}`);
+    }
   }
 }
