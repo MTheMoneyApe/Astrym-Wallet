@@ -3,6 +3,7 @@ node_modules/
 
 # Build outputs
 dist/
+dist-webapp/
 build/
 
 # Generated SPP SDK assets for extension packaging (Fase 1 — do not commit ~277MB)

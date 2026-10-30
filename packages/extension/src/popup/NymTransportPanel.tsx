@@ -256,7 +256,7 @@ export function NymTransportPanel({
           <button
             type="button"
             className="btn-secondary"
-            disabled={busy || !snapshot.selectedGateway}
+            disabled={busy}
             onClick={(e) => {
               // Keep request on the click stack — handler must not await IPC first.
               e.preventDefault();
@@ -572,9 +572,10 @@ export function NymTransportPanel({
       ) : null}
 
       <p style={{ margin: '10px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
-        Flujo: 1) Save gateway → 2) Grant permission (click) → 3) Smoke dry-run → 4) Connect solo
-        tras permiso y (live) build autorizado. 5) HTTP smoke solo con MixFetch Ready. Dry-run nunca
-        abre Mixnet. Fallo Mixnet ≠ clearnet.
+        Connect usa el gateway verificado si no hay uno guardado. En la extensión, el permiso de
+        host se pide en el mismo clic. En el webapp de Android no hay API de permisos MV3: MixFetch
+        corre en esta página. Disconnect vuelve a modo direct. Mientras el modo sigue en nym, un
+        fallo no cae a clearnet.
       </p>
       {mode === 'nym' && !ready ? (
         <p style={{ margin: '6px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>

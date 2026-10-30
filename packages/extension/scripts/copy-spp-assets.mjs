@@ -194,11 +194,22 @@ function assertDestinationSafeToReplace(destRoot) {
  * @param {string} relPosix path under package root
  * @returns {boolean}
  */
+const WEB_PROFILE = process.argv.includes('--web');
+
 function shouldExclude(relPosix) {
   if (relPosix.endsWith('.d.ts')) return true;
   if (relPosix === 'dist/circuits/source-bundle.tar.gz') return true;
   if (relPosix === 'js/freighter.js') return true;
   if (relPosix === 'js/types' || relPosix.startsWith('js/types/')) return true;
+  // Public web deploys cannot ship the ~272MB proving-key tree.
+  // WASM, workers, and circuits.json still copy so the host can boot.
+  if (
+    WEB_PROFILE &&
+    relPosix.startsWith('dist/circuits/') &&
+    relPosix !== 'dist/circuits/circuits.json'
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -286,6 +297,10 @@ async function main() {
     if (!byPath.has(req)) fail(`Required asset missing after copy: ${req}`);
   }
 
+  if (WEB_PROFILE) {
+    console.log('[copy-spp-assets] web profile: runtime without proving-key binaries');
+  }
+
   // Full profile: every circuits.json circuit id must have on-disk artifacts
   const lockPath = join(DEST_ROOT, 'dist', 'circuits', 'circuits.json');
   const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
@@ -295,6 +310,7 @@ async function main() {
     if (key === 'version' || key === 'meta') continue;
     if (!value || typeof value !== 'object') continue;
     circuitIds.push(key);
+    if (WEB_PROFILE) continue;
     for (const artifact of [
       `${key}.r1cs`,
       `${key}.graph.bin`,
@@ -311,7 +327,7 @@ async function main() {
     managedBy: MANAGED_BY,
     name: EXPECTED_NAME,
     version: EXPECTED_VERSION,
-    profile: PROFILE,
+    profile: WEB_PROFILE ? 'web-runtime' : PROFILE,
     profileReason:
       'full: Client.new requires circuitsBaseUrl + circuitLock; prover loads r1cs/graph/proving keys. Reduced (circuits.json-only) profile was not verified safe for Client.new; matches laboratory RO-1 vendor tree minus .d.ts/source-bundle/freighter/types.',
     resolvedFrom: sdkRoot,
@@ -330,7 +346,7 @@ async function main() {
     JSON.stringify(
       {
         ok: true,
-        profile: PROFILE,
+        profile: WEB_PROFILE ? 'web-runtime' : PROFILE,
         version: EXPECTED_VERSION,
         destination: DEST_ROOT,
         resolvedFrom: sdkRoot,

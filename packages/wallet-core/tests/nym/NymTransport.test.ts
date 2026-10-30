@@ -256,6 +256,7 @@ describe('FailClosedTransportRouter', () => {
     expect(STELLAR_HTTP_OPERATIONS_VIA_POLICY).toEqual([
       'stellar.getBalance',
       'stellar.fundTestnetAccount',
+      'stellar.horizonProbe',
     ]);
   });
 

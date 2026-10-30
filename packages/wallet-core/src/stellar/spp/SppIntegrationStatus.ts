@@ -74,10 +74,15 @@ export type SppIntegrationProbe = {
    */
   getSession?: () => SppSessionStatusHandle | null;
   /**
-   * Product gate for private payments UX. Hard-off until a later authorized phase.
-   * Default when omitted: false.
+   * Product gate for private payments UX.
+   * Default when omitted: false. Still requires a ready session and Nym.
    */
   isPrivatePaymentsEnabled?: () => boolean;
+  /**
+   * True only when transport mode is `nym` and MixFetch is connected.
+   * Default when omitted: false, so payments stay closed.
+   */
+  isNymTransportActive?: () => boolean;
   /**
    * Whether this surface is the isolated spp-host lab (not the popup).
    * Default when omitted: false.
@@ -145,6 +150,8 @@ export class SppIntegrationStatus {
     }
 
     const privatePaymentsEnabled = Boolean(this.probe.isPrivatePaymentsEnabled?.() ?? false);
+    const nymActive = Boolean(this.probe.isNymTransportActive?.() ?? false);
+    const paymentsOn = privatePaymentsEnabled && nymActive;
     const storageLabHost = Boolean(this.probe.isStorageLabHostSurface?.() ?? false);
 
     if (!facadePackaged) {
@@ -193,14 +200,11 @@ export class SppIntegrationStatus {
     }
 
     if (session.state === 'ready') {
-      // RO session ready ≠ private payments. Keep payments capability hard-off
-      // until a later authorized phase (isPrivatePaymentsEnabled is reserved).
-      void privatePaymentsEnabled;
       return {
         availability: 'ready',
         capabilities: Object.freeze({
           read_only_session: true,
-          private_payments: false,
+          private_payments: paymentsOn,
           storage_lab_host: storageLabHost,
         }),
         sessionState: 'ready',

@@ -166,6 +166,20 @@ pnpm --filter @solanym/extension build:nym-dev
 
 Output: `packages/extension/dist/`
 
+### Android / webapp
+
+```bash
+pnpm dev:webapp
+```
+
+On the phone (same Wi-Fi): `http://<lan-ip>:5173/webapp.html`. The site root (`index.html`) is the Astrym landing page; the wallet is `webapp.html`.
+
+**Deploy:** Vercel is the primary host (root domain, WASM headers). Import the repo; `vercel.json` runs `pnpm build:webapp` and publishes `packages/extension/dist-webapp`. GitHub Pages is the fallback: `.github/workflows/deploy-pages.yml` publishes the same folder with relative URLs, so it also works under `/Astrym-Wallet/`.
+
+`pnpm build:webapp` writes `packages/extension/dist-webapp/` for an installable PWA (`display: standalone`, theme `#191A1C`, accent `#3CE894`). MixFetch runs in the page; Chrome extension APIs are not required. Full steps (Spanish): [docs/android-webapp.md](docs/android-webapp.md).
+
+The extension popup button **Modo Android** opens the same UI in a full tab that still shares the extension service worker.
+
 ### Load in Chrome
 
 1. Open `chrome://extensions`

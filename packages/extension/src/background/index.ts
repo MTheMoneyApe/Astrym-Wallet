@@ -40,6 +40,7 @@ import {
   createNymStatusHandler,
 } from './handlers/nymHandlers.js';
 import { isNymOffscreenChannelMessage } from '../nym-offscreen/protocol.js';
+import { createSppPrivatePaymentHandler } from './handlers/sppPrivatePaymentHandler.js';
 
 import { 
   createUnlockVaultHandler, 
@@ -106,11 +107,12 @@ function initBackgroundSynchronous() {
   // Logical Horizon base = SDF testnet. In mode=nym, getStellarFetch() remaps to the
   // validated effective base (default Ankr) — see stellarHorizonNymConfig.ts. No silent
   // clearnet fallback. Default router mode stays 'direct' until Connect / setMode('nym').
+  const stellarFetch = nymRuntime.getStellarFetch();
   const stellarReadClient = new StellarReadClient(
     STELLAR_TESTNET_HORIZON_URL,
     STELLAR_TESTNET_FRIENDBOT_URL,
     90_000,
-    nymRuntime.getStellarFetch(),
+    stellarFetch,
   );
   
   const config = resolveNetworkConfig('https://api.devnet.solana.com');
@@ -122,7 +124,14 @@ function initBackgroundSynchronous() {
   (globalThis as any).keyManager = keyManager;
 
   const txClient = new TransactionClient(rpcClient, keyManager, { sign: (index, data) => signer.signTransaction(data, index) });
-  const stellarTxClient = new StellarTransactionClient(undefined, keyManager, signer);
+  const stellarTxClient = new StellarTransactionClient(
+    STELLAR_TESTNET_HORIZON_URL,
+    keyManager,
+    signer,
+    undefined,
+    undefined,
+    stellarFetch,
+  );
   (globalThis as any).txClient = txClient;
   (globalThis as any).stellarTxClient = stellarTxClient;
   (globalThis as any).vaultService = vaultService;
@@ -171,6 +180,7 @@ function initBackgroundSynchronous() {
   router.registerHandler('SEND_STELLAR_TRANSFER', createSendStellarTransferHandler(stellarTxClient, stellarTransferConfirmationTracker) as any);
   router.registerHandler('CONFIRM_STELLAR_TRANSFER', createConfirmStellarTransferHandler(stellarTransferConfirmationTracker) as any);
 
+  router.registerHandler('SPP_PRIVATE_PAYMENT', createSppPrivatePaymentHandler());
   router.registerHandler('NYM_CONNECT', createNymConnectHandler());
   router.registerHandler('NYM_DISCONNECT', createNymDisconnectHandler());
   router.registerHandler('NYM_STATUS', createNymStatusHandler());

@@ -662,6 +662,21 @@ export const MessageSchemas = {
       transportFetchInvoked: z.boolean(),
     }),
   },
+  SPP_PRIVATE_PAYMENT: {
+    request: z.object({
+      enabled: z.literal(true),
+      operation: z.enum(['deposit', 'transfer', 'withdraw']),
+      poolContract: z.string().min(56).max(56),
+      amountStroops: z.string().regex(/^[1-9][0-9]*$/),
+      recipient: z.string().min(56).max(56).optional(),
+      rpcUrl: z.string().url().optional(),
+    }),
+    response: z.object({
+      operation: z.enum(['deposit', 'transfer', 'withdraw']),
+      txHash: z.string().nullable(),
+      rpcRoutedViaNym: z.literal(true),
+    }),
+  },
   NYM_SET_STELLAR_HORIZON_ENDPOINT: {
     request: z.object({
       testnetEffectiveBase: z.string().url().optional(),

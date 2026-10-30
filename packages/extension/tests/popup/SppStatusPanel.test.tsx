@@ -90,6 +90,44 @@ describe('SppStatusPanel', () => {
     expect(markup).toContain('Pagos privados: no disponibles');
   });
 
+  it('keeps the private-payments option closed until Nym is connected', () => {
+    const closed = renderToStaticMarkup(
+      React.createElement(SppStatusPanel, {
+        snapshot: snap({}),
+        nymMode: 'direct',
+        nymConnected: false,
+        sppSelected: true,
+        onToggleSpp: () => undefined,
+      }),
+    );
+    expect(closed).toContain('data-spp-nym-gate="closed"');
+    expect(closed).toContain('requiere Nym conectado');
+    expect(closed).toContain('disabled');
+
+    const open = renderToStaticMarkup(
+      React.createElement(SppStatusPanel, {
+        snapshot: snap({
+          availability: 'ready',
+          sessionState: 'ready',
+          capabilities: {
+            read_only_session: true,
+            private_payments: true,
+            storage_lab_host: false,
+          },
+        }),
+        nymMode: 'nym',
+        nymConnected: true,
+        sppSelected: true,
+        onToggleSpp: () => undefined,
+      }),
+    );
+    expect(open).toContain('data-spp-nym-gate="open"');
+    expect(open).toContain('data-testid="spp-option-toggle"');
+    expect(open).toContain('checked');
+    expect(open).toContain('Preparar sesión SPP');
+    expect(open).toContain('Pagos privados: disponibles');
+  });
+
   it('labels uninitialized session as constructed not initialized', () => {
     const markup = renderToStaticMarkup(
       React.createElement(SppStatusPanel, {

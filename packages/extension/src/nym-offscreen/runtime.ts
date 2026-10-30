@@ -100,6 +100,17 @@ function clearMixFetchGlobalSingleton(): void {
   }
 }
 
+export type NymAssetUrlResolver = (file: string) => string;
+
+export type NymOffscreenRuntimeOptions = {
+  /**
+   * Resolve packaged mix-fetch siblings. Extension offscreen uses
+   * chrome.runtime.getURL. The Android webapp passes a same-origin URL
+   * under `/nym-mixfetch/` so WASM loads without extension APIs.
+   */
+  resolveAssetUrl?: NymAssetUrlResolver;
+};
+
 export class NymOffscreenRuntime {
   private _state: NymOffscreenRuntimeState = 'disconnected';
   private _lastError: string | null = null;
@@ -110,9 +121,22 @@ export class NymOffscreenRuntime {
     null;
   private _mod: MixFetchModule | null = null;
   private _allowlist: NymNetworkAllowlistConfig;
+  private readonly _resolveAssetUrl: NymAssetUrlResolver | null;
 
-  constructor(allowlist: NymNetworkAllowlistConfig = DEFAULT_NYM_NETWORK_ALLOWLIST) {
+  constructor(
+    allowlist: NymNetworkAllowlistConfig = DEFAULT_NYM_NETWORK_ALLOWLIST,
+    options: NymOffscreenRuntimeOptions = {},
+  ) {
     this._allowlist = allowlist;
+    this._resolveAssetUrl = options.resolveAssetUrl ?? null;
+  }
+
+  private resolveAsset(file: string): string | null {
+    if (this._resolveAssetUrl) return this._resolveAssetUrl(file);
+    if (typeof chrome !== 'undefined' && typeof chrome.runtime?.getURL === 'function') {
+      return chrome.runtime.getURL(`${NYM_MIXFETCH_DIR}/${file}`);
+    }
+    return null;
   }
 
   getStatus(): NymOffscreenStatusPayload {
@@ -140,20 +164,13 @@ export class NymOffscreenRuntime {
    * Verify official sibling assets resolve under nym-mixfetch/ (import.meta.url layout).
    */
   async probePackagedAssets(): Promise<boolean> {
-    if (typeof chrome === 'undefined' || !chrome?.runtime?.getURL) {
-      this._assetsReady = false;
-      this.setDiagnostic(
-        Object.assign(new Error('chrome.runtime.getURL unavailable for asset probe'), {
-          code: 'ASSET_MISSING',
-        }),
-        'ASSET_MISSING',
-      );
-      return false;
-    }
-
     const missing: string[] = [];
     for (const file of NYM_MIXFETCH_REQUIRED_FILES) {
-      const url = chrome.runtime.getURL(`${NYM_MIXFETCH_DIR}/${file}`);
+      const url = this.resolveAsset(file);
+      if (!url) {
+        missing.push(file);
+        continue;
+      }
       try {
         const res = await extensionHttp(url, { method: 'GET', cache: 'no-store' });
         if (!res.ok) missing.push(file);
@@ -187,7 +204,17 @@ export class NymOffscreenRuntime {
       });
     }
 
-    const url = chrome.runtime.getURL(`${NYM_MIXFETCH_DIR}/index.js`);
+    const url = this.resolveAsset('index.js');
+    if (!url) {
+      this._state = 'error';
+      this.setDiagnostic(
+        Object.assign(new Error('Nym mix-fetch asset URL could not be resolved'), {
+          code: 'ASSET_MISSING',
+        }),
+        'ASSET_MISSING',
+      );
+      throw Object.assign(new Error(this._lastError!), { code: 'ASSET_MISSING' });
+    }
     let mod: MixFetchModule;
     try {
       mod = (await import(/* @vite-ignore */ url)) as MixFetchModule;
@@ -399,7 +426,9 @@ export class NymOffscreenRuntime {
       requestInit.body = init.bodyText;
     }
     // mix-fetch@1.4.2 Go client applies CORS to Mixnet responses unless opted out.
-    if (init?.mode) requestInit.mode = init.mode;
+    if (init?.mode) {
+      (requestInit as { mode?: string }).mode = init.mode;
+    }
 
     let response: Response;
     try {
