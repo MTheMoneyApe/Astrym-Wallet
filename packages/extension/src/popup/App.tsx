@@ -48,10 +48,10 @@ export const THEME_PRESETS: Record<string, ThemePalette> = {
   },
   astrym: {
     '--bg-color': '#191A1C',
-    '--surface-color': '#242628',
+    '--surface-color': '#141416',
     '--accent-color': '#3CE894',
-    '--text-main': '#F4F7F8',
-    '--text-sec': '#A4ADBA',
+    '--text-main': '#FFFFFF',
+    '--text-sec': '#D0D5DD',
   },
 };
 
@@ -169,7 +169,7 @@ export function App() {
 function renderWalletScreen(appState: AppState, checkWalletState: () => Promise<void>) {
   switch (appState) {
     case 'LOADING':
-      return <div className="center-content">Loading Solanym...</div>;
+      return <div className="center-content">Cargando Astrym...</div>;
     case 'ONBOARDING':
       return <Onboarding onComplete={checkWalletState} />;
     case 'LOCKED':

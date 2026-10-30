@@ -31,7 +31,7 @@ export function ApproveConnect({ onComplete }: { onComplete: () => void }) {
   return (
     <div style={{ padding: 20, textAlign: 'center' }}>
       <h2>Connect Request</h2>
-      <p><strong>{origin}</strong> would like to connect to your Solanym wallet.</p>
+      <p><strong>{origin}</strong> would like to connect to your Astrym wallet.</p>
       <p style={{ fontSize: '0.9em', color: '#666' }}>
         This will allow the dApp to view your public key and request signatures. It cannot sign without your approval.
       </p>

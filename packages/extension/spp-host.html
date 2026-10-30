@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Solanym SPP Host (isolated)</title>
+    <title>Astrym SPP Host</title>
     <style>
       :root {
         color-scheme: dark;
@@ -109,7 +109,7 @@
     </style>
   </head>
   <body>
-    <h1>Solanym — SPP host</h1>
+    <h1>Astrym — SPP host</h1>
     <p class="meta">
       Fase 5D · facade + WASM + gated Storage lab · default phase gate
       <code>STORAGE_LAB_EXECUTION_AUTHORIZED=false</code> · no vault / signing / RPC / Client
@@ -173,6 +173,9 @@
         <div class="actions">
           <button id="spp-session-construct-btn" class="spp-btn secondary" type="button" disabled>
             Construir sesión (sin initialize)
+          </button>
+          <button id="spp-session-init-btn" class="spp-btn secondary" type="button" disabled>
+            Inicializar sesión (requiere Nym)
           </button>
           <button id="spp-session-clear-btn" class="spp-btn secondary" type="button" disabled>
             Soltar sesión (sin dispose)

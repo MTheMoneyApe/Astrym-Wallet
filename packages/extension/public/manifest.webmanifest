@@ -1,7 +1,7 @@
 {
   "name": "Astrym Wallet",
   "short_name": "Astrym",
-  "description": "Billetera Stellar con transporte Nym MixFetch. Funciona como webapp en Android.",
+  "description": "Billetera Stellar con Nym MixFetch y pagos privados.",
   "start_url": "./webapp.html",
   "scope": "./",
   "display": "standalone",

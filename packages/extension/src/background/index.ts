@@ -40,6 +40,7 @@ import {
   createNymStatusHandler,
 } from './handlers/nymHandlers.js';
 import { isNymOffscreenChannelMessage } from '../nym-offscreen/protocol.js';
+import { createSppPrivatePaymentHandler } from './handlers/sppPrivatePaymentHandler.js';
 
 import { 
   createUnlockVaultHandler, 
@@ -179,6 +180,7 @@ function initBackgroundSynchronous() {
   router.registerHandler('SEND_STELLAR_TRANSFER', createSendStellarTransferHandler(stellarTxClient, stellarTransferConfirmationTracker) as any);
   router.registerHandler('CONFIRM_STELLAR_TRANSFER', createConfirmStellarTransferHandler(stellarTransferConfirmationTracker) as any);
 
+  router.registerHandler('SPP_PRIVATE_PAYMENT', createSppPrivatePaymentHandler());
   router.registerHandler('NYM_CONNECT', createNymConnectHandler());
   router.registerHandler('NYM_DISCONNECT', createNymDisconnectHandler());
   router.registerHandler('NYM_STATUS', createNymStatusHandler());

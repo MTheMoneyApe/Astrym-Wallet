@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { sendIpcMessage } from './ipc.js';
 import { Send } from './Send.js';
 import { SppStatusPanel } from './SppStatusPanel.js';
+import { SppPrivateSend } from './SppPrivateSend.js';
+import { openSppHost } from '../spp-host/openSppHost.js';
 import { NymTransportPanel } from './NymTransportPanel.js';
 import { isThemePalette, THEME_PRESETS, type ThemePalette } from './App.js';
 import { LOCK_TIMEOUT_OPTIONS_MINUTES, type LockTimeoutMinutes } from '@solanym/wallet-core/src/vault/IAlarmService.js';
@@ -871,6 +873,8 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   const [sppSessionHandle, setSppSessionHandle] = useState<SppSessionStatusHandle | null>(null);
   const [sppSessionGeneration, setSppSessionGeneration] = useState(0);
   const [sppProbeDone, setSppProbeDone] = useState(false);
+  const [sppSelected, setSppSelected] = useState(false);
+  const [sendKind, setSendKind] = useState<'clear' | 'private'>('clear');
   const sppGenerationRef = useRef(0);
   const sppHandleRef = useRef<SppSessionStatusHandle | null>(null);
 
@@ -923,17 +927,6 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     return () => chrome.storage.onChanged.removeListener(onChanged);
   }, []);
 
-  const sppStatusSnapshot: SppIntegrationSnapshot = useMemo(
-    () =>
-      new SppIntegrationStatus(
-        createPopupSppIntegrationProbe({
-          isFacadePackaged: () => sppFacadePackaged,
-          getSession: () => sppSessionHandle,
-        }),
-      ).snapshot(),
-    [sppFacadePackaged, sppSessionHandle],
-  );
-
   const [nymSnapshot, setNymSnapshot] = useState<NymUiSnapshot>({
     state: 'disconnected',
     lastError: null,
@@ -942,6 +935,26 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     mode: 'direct',
     documentReady: false,
   });
+  const nymReadyForSpp = nymSnapshot.mode === 'nym' && nymSnapshot.connected;
+  const sppStatusSnapshot: SppIntegrationSnapshot = useMemo(
+    () =>
+      new SppIntegrationStatus(
+        createPopupSppIntegrationProbe({
+          isFacadePackaged: () => sppFacadePackaged,
+          getSession: () => sppSessionHandle,
+          isPrivatePaymentsEnabled: () => sppSelected && nymReadyForSpp,
+          isNymTransportActive: () => nymReadyForSpp,
+        }),
+      ).snapshot(),
+    [sppFacadePackaged, sppSessionHandle, sppSelected, nymReadyForSpp],
+  );
+
+  useEffect(() => {
+    if (!nymReadyForSpp && (sppSelected || sendKind === 'private')) {
+      setSppSelected(false);
+      setSendKind('clear');
+    }
+  }, [nymReadyForSpp, sppSelected, sendKind]);
   const [nymBusy, setNymBusy] = useState(false);
   const [nymHttpSmokeResult, setNymHttpSmokeResult] = useState<NymHttpSmokeUiResult | null>(
     null,
@@ -1434,7 +1447,18 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   }
 
   if (view === 'send' && account) {
-    return <Send onBack={() => setView('dashboard')} accountIndex={account.index} accountAddress={account.address} onComplete={() => setView('dashboard')} />;
+    if (sendKind === 'private' && sppSelected && nymReadyForSpp) {
+      return <SppPrivateSend onBack={() => { setSendKind('clear'); setView('dashboard'); }} />;
+    }
+    return (
+      <Send
+        onBack={() => setView('dashboard')}
+        accountIndex={account.index}
+        accountAddress={account.address}
+        onComplete={() => setView('dashboard')}
+        {...(sppSelected && nymReadyForSpp ? { onUsePrivatePayment: () => setSendKind('private') } : {})}
+      />
+    );
   }
 
   if (view === 'settings') {
@@ -1450,6 +1474,15 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           snapshot={sppStatusSnapshot}
           probing={!sppProbeDone}
           sessionGeneration={sppSessionGeneration}
+          nymMode={nymSnapshot.mode}
+          nymConnected={nymSnapshot.connected}
+          sppSelected={sppSelected}
+          onToggleSpp={(next) => {
+            if (!nymReadyForSpp) return;
+            setSppSelected(next);
+            if (!next) setSendKind('clear');
+          }}
+          onOpenHost={openSppHost}
         />
         <NymTransportPanel
           snapshot={nymSnapshot}

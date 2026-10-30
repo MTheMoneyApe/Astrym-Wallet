@@ -185,6 +185,8 @@ export class SppHostController {
   private _facadeModule: Record<string, unknown> | null = null;
   private _sessionConstructError: string | null = null;
   private _sessionStatusGeneration = 0;
+  private _sessionInitializeEnabled = false;
+  private _constructedSession: SppSession | null = null;
   private readonly _deps: SppHostControllerDeps;
   private readonly _storageLab: SppStorageLabPrep;
 
@@ -249,6 +251,8 @@ export class SppHostController {
    */
   clearBoundSession(): void {
     this._boundSession = null;
+    this._constructedSession = null;
+    this._sessionInitializeEnabled = false;
     this._emitBoundSessionChange();
   }
 
@@ -308,6 +312,8 @@ export class SppHostController {
         throw new Error(`Expected uninitialized session, got ${session.state}`);
       }
 
+      this._constructedSession = session;
+      this._sessionInitializeEnabled = false;
       this.attachExistingSession(session);
       return this.snapshot();
     } catch (cause) {
@@ -324,6 +330,20 @@ export class SppHostController {
    * Synchronous RO mirror via {@link readSppSessionStatusHandle}.
    * Safe for probes; does not call initialize, RO reads, or dispose.
    */
+  async initializeBoundSessionForNym(nymActive: boolean): Promise<SppHostSnapshot> {
+    if (!nymActive) {
+      throw new Error('Stellar Private Payments requiere Nym conectado');
+    }
+    const bound = this._constructedSession;
+    if (!bound) {
+      throw new Error('Construye la sesión SPP antes de inicializarla');
+    }
+    await bound.initialize();
+    this._sessionInitializeEnabled = bound.state === 'ready';
+    this._emitBoundSessionChange();
+    return this.snapshot();
+  }
+
   readBoundSessionStatus(): SppSessionStatusHandle | null {
     return readSppSessionStatusHandle(this._boundSession);
   }
@@ -365,7 +385,7 @@ export class SppHostController {
       wasmErrorMessage: this._wasmErrorMessage,
       wasmInitialized: this._wasmPhase === 'ready',
       sdkInitialized: this._boundSession?.state === 'ready',
-      sessionInitializeEnabled: false,
+      sessionInitializeEnabled: this._sessionInitializeEnabled,
       sessionBound: this._boundSession !== null,
       sessionState: this._boundSession?.state ?? null,
       sessionConstructError: this._sessionConstructError,

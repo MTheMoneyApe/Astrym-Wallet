@@ -1,7 +1,7 @@
 import { isWebappDocument, openAndroidWebapp } from '../webapp/openAndroidWebapp.js';
 
 export function OpenAndroidWebappBar() {
-  if (isWebappDocument()) return null;
+  const onWebapp = isWebappDocument();
   return (
     <div
       className="android-webapp-bar"
@@ -12,21 +12,26 @@ export function OpenAndroidWebappBar() {
         gap: 8,
         padding: '8px 12px',
         borderBottom: '1px solid var(--border-color)',
-        background: 'var(--surface-color)',
+        background: '#141416',
       }}
     >
-      <span className="text-secondary" style={{ fontSize: '0.75rem' }}>
-        Astrym
-      </span>
-      <button
-        type="button"
-        className="btn-primary"
-        data-testid="open-android-webapp"
-        onClick={() => openAndroidWebapp()}
-        style={{ padding: '8px 12px', minHeight: 40, fontSize: '0.85rem' }}
-      >
-        Modo Android
-      </button>
+      <img
+        src="brand/astrym-logo.png"
+        alt="Astrym"
+        height={28}
+        style={{ height: 28, width: 'auto', maxWidth: '58%' }}
+      />
+      {onWebapp ? null : (
+        <button
+          type="button"
+          className="btn-primary"
+          data-testid="open-android-webapp"
+          onClick={() => openAndroidWebapp()}
+          style={{ padding: '8px 12px', minHeight: 40, fontSize: '0.85rem' }}
+        >
+          Modo Android
+        </button>
+      )}
     </div>
   );
 }

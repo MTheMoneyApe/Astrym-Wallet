@@ -20,7 +20,9 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
+        index: resolve(__dirname, 'index.html'),
         webapp: resolve(__dirname, 'webapp.html'),
+        'spp-host': resolve(__dirname, 'spp-host.html'),
       },
     },
   },

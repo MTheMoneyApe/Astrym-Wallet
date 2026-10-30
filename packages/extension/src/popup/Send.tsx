@@ -93,11 +93,12 @@ export function resolveStellarSendFailure(error: unknown): {
   };
 }
 
-export function Send({ onBack, accountIndex, accountAddress, onComplete }: {
+export function Send({ onBack, accountIndex, accountAddress, onComplete, onUsePrivatePayment }: {
   onBack: () => void;
   accountIndex: number;
   accountAddress: string;
   onComplete: () => void;
+  onUsePrivatePayment?: () => void;
 }) {
   const isStellar = accountAddress.startsWith('G') && accountAddress.length === 56;
 
@@ -530,6 +531,11 @@ export function Send({ onBack, accountIndex, accountAddress, onComplete }: {
               )}
             </div>
           </label>
+          {onUsePrivatePayment ? (
+            <button type="button" className="btn-secondary" data-testid="use-spp-private-payment" onClick={onUsePrivatePayment}>
+              Pago privado SPP (Nym)
+            </button>
+          ) : null}
           <label style={{ display: 'grid', gap: 6, fontSize: '0.85rem' }}>
             Destinatario
             <input

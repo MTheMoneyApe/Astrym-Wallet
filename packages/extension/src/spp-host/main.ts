@@ -70,6 +70,7 @@ function render(snapshot: SppHostSnapshot, extras?: { resolvedFacadeHint?: strin
   const probeBtn = el<HTMLButtonElement>('spp-probe-btn');
   const wasmBtn = el<HTMLButtonElement>('spp-wasm-btn');
   const sessionConstructBtn = el<HTMLButtonElement>('spp-session-construct-btn');
+  const sessionInitBtn = el<HTMLButtonElement>('spp-session-init-btn');
   const sessionClearBtn = el<HTMLButtonElement>('spp-session-clear-btn');
   const storageEvalBtn = el<HTMLButtonElement>('spp-storage-eval-btn');
   const storageRunBtn = el<HTMLButtonElement>('spp-storage-run-btn');
@@ -94,6 +95,8 @@ function render(snapshot: SppHostSnapshot, extras?: { resolvedFacadeHint?: strin
   probeBtn.disabled = busy;
   wasmBtn.disabled = busy || snapshot.phase !== 'ready';
   sessionConstructBtn.disabled = busy || snapshot.phase !== 'ready' || snapshot.sessionBound;
+  sessionInitBtn.disabled =
+    busy || snapshot.sessionState !== 'uninitialized' || snapshot.sessionInitializeEnabled;
   sessionClearBtn.disabled = busy || !snapshot.sessionBound;
   storageEvalBtn.disabled = busy;
   storageRunBtn.disabled = busy || !snapshot.storageLabRunEnabled;
@@ -299,6 +302,7 @@ function main(): void {
   });
 
   const sessionConstructBtn = el<HTMLButtonElement>('spp-session-construct-btn');
+  const sessionInitBtn = el<HTMLButtonElement>('spp-session-init-btn');
   const sessionClearBtn = el<HTMLButtonElement>('spp-session-clear-btn');
   const sessionRpcInput = el<HTMLInputElement>('spp-session-rpc');
   const sessionContractsInput = el<HTMLTextAreaElement>('spp-session-contracts');
@@ -334,6 +338,29 @@ function main(): void {
         err instanceof Error ? `Session construct failed: ${err.message}` : 'Session construct failed';
       render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
     }
+  });
+
+  sessionInitBtn.addEventListener('click', () => {
+    void (async () => {
+      const response = await chrome.runtime.sendMessage({
+        id: crypto.randomUUID(),
+        type: 'NYM_STATUS',
+        payload: {},
+      }) as { payload?: { connected?: boolean; mode?: string } } | undefined;
+      const nymActive = response?.payload?.connected === true && response.payload.mode === 'nym';
+      if (!nymActive) {
+        statusBoot.textContent = 'Stellar Private Payments requiere Nym conectado.';
+        return;
+      }
+      const snapshot = await controller.initializeBoundSessionForNym(true);
+      render(snapshot, { resolvedFacadeHint: facadeHint });
+      statusBoot.textContent = snapshot.sessionInitializeEnabled
+        ? 'Sesión SPP inicializada con Nym.'
+        : 'La sesión no quedó lista.';
+    })().catch((err: unknown) => {
+      statusBoot.textContent = err instanceof Error ? err.message : 'No se pudo inicializar SPP';
+      render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
+    });
   });
 
   sessionClearBtn.addEventListener('click', () => {

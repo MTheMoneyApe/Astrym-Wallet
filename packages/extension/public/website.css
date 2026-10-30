@@ -1,0 +1,195 @@
+:root {
+  --bg: #191a1c;
+  --card: #141416;
+  --mint: #3ce894;
+  --gold: #f7cb08;
+  --white: #ffffff;
+  --grey: #d0d5dd;
+  --line: rgba(60, 232, 148, 0.28);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--white);
+  font-family: "Instrument Sans", sans-serif;
+}
+
+body {
+  position: relative;
+  overflow-x: hidden;
+}
+
+.orbit {
+  pointer-events: none;
+  position: fixed;
+  inset: -20vh auto auto 50%;
+  width: 140vw;
+  height: 70vh;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(ellipse at center, rgba(60, 232, 148, 0.16), transparent 62%),
+    repeating-linear-gradient(
+      -28deg,
+      transparent 0 18px,
+      rgba(247, 203, 8, 0.08) 18px 20px
+    );
+  mask-image: linear-gradient(to bottom, #000, transparent);
+}
+
+.top, main, footer {
+  position: relative;
+  z-index: 1;
+  width: min(1080px, calc(100% - 32px));
+  margin: 0 auto;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 0;
+}
+
+.mark { height: 36px; width: auto; }
+.hero-logo { width: min(560px, 100%); height: auto; margin: 8px 0 12px; }
+
+a { color: var(--mint); }
+
+.badge, .kicker, .steps span, footer {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.08em;
+}
+
+.badge {
+  display: inline-block;
+  margin: 0;
+  color: var(--gold);
+  font-size: 0.72rem;
+  border: 1px solid rgba(247, 203, 8, 0.55);
+  padding: 6px 10px;
+}
+
+h1, h2, h3 { font-family: Orbitron, sans-serif; font-weight: 700; }
+
+h1 {
+  font-size: clamp(1.35rem, 3.4vw, 2.15rem);
+  line-height: 1.25;
+  max-width: 18ch;
+  margin: 14px 0;
+}
+
+.lede {
+  max-width: 62ch;
+  color: var(--grey);
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+
+.cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 28px 0 64px;
+}
+
+.btn {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding: 0 18px;
+  font-family: Orbitron, sans-serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+}
+
+.btn.primary { background: var(--mint); color: #102018; }
+.btn.gold { background: transparent; color: var(--gold); border: 1px solid var(--gold); }
+.ghost {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+  text-decoration: none;
+  border-bottom: 1px solid var(--mint);
+}
+
+section { margin: 0 0 72px; }
+
+h2 { font-size: 1.35rem; margin: 8px 0 18px; }
+.kicker { margin: 0; color: var(--gold); font-size: 0.75rem; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+article {
+  background: var(--card);
+  border: 1px solid var(--line);
+  padding: 18px 16px 8px;
+  min-height: 160px;
+}
+
+article.wide { grid-column: 1 / -1; }
+
+article h3 { font-size: 0.95rem; color: var(--mint); margin: 0 0 8px; }
+article p, .steps p { color: var(--grey); line-height: 1.5; }
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.steps li {
+  display: grid;
+  gap: 6px;
+  background: var(--card);
+  border-left: 3px solid var(--mint);
+  padding: 14px 16px;
+}
+
+.steps span { color: var(--gold); font-size: 0.78rem; }
+
+.founder {
+  font-family: Orbitron, sans-serif;
+  font-size: clamp(1rem, 2.4vw, 1.4rem);
+  margin: 0;
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 28px 0 40px;
+  color: var(--grey);
+  font-size: 0.72rem;
+  border-top: 1px solid rgba(208, 213, 221, 0.15);
+}
+
+dialog {
+  border: 1px solid var(--gold);
+  background: var(--card);
+  color: var(--white);
+  padding: 22px;
+  max-width: min(420px, calc(100% - 32px));
+}
+
+dialog::backdrop { background: rgba(0, 0, 0, 0.72); }
+dialog h3 { margin-top: 0; font-family: Orbitron, sans-serif; }
+dialog p { color: var(--grey); line-height: 1.5; }
+
+@media (max-width: 640px) {
+  .cta { flex-direction: column; }
+  .btn { width: 100%; }
+}
