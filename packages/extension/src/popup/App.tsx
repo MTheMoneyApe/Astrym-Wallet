@@ -3,8 +3,8 @@ import { sendIpcMessage } from './ipc.js';
 import { Onboarding } from './Onboarding.js';
 import { Unlock } from './Unlock.js';
 import { Dashboard } from './Dashboard.js';
-import { ApproveConnect } from './ApproveConnect.js';
-import { ApproveSign } from './ApproveSign.js';
+// Founder Decision A: ApproveConnect and ApproveSign removed from active startup flow.
+// Legacy component sources preserved in ./ApproveConnect.tsx and ./ApproveSign.tsx.
 
 export type ThemePalette = {
   '--bg-color': string;
@@ -21,7 +21,7 @@ export const isThemePalette = (value: unknown): value is ThemePalette => {
     .every((key) => typeof palette[key as keyof ThemePalette] === 'string');
 };
 
-export type AppState = 'LOADING' | 'ONBOARDING' | 'LOCKED' | 'DASHBOARD' | 'APPROVE_CONNECT' | 'APPROVE_SIGN';
+export type AppState = 'LOADING' | 'ONBOARDING' | 'LOCKED' | 'DASHBOARD';
 
 export const THEME_PRESETS: Record<string, ThemePalette> = {
   midnight: {
@@ -123,14 +123,7 @@ export function App() {
       } else if (state.isLocked) {
         setAppState('LOCKED');
       } else {
-        const pending = await sendIpcMessage('GET_PENDING_APPROVALS', {});
-        if (pending.connectRequest) {
-          setAppState('APPROVE_CONNECT');
-        } else if (pending.signRequest) {
-          setAppState('APPROVE_SIGN');
-        } else {
-          setAppState('DASHBOARD');
-        }
+        setAppState('DASHBOARD');
       }
     } catch (err: any) {
       setError(err.message || 'Failed to initialize wallet');
@@ -149,15 +142,11 @@ export function App() {
 
   switch (appState) {
     case 'LOADING':
-      return <div className="center-content">Loading Solanym...</div>;
+      return <div className="center-content">Loading Astrym...</div>;
     case 'ONBOARDING':
       return <Onboarding onComplete={checkWalletState} />;
     case 'LOCKED':
       return <Unlock onUnlock={checkWalletState} />;
-    case 'APPROVE_CONNECT':
-      return <ApproveConnect onComplete={checkWalletState} />;
-    case 'APPROVE_SIGN':
-      return <ApproveSign onComplete={checkWalletState} />;
     case 'DASHBOARD':
       return <Dashboard onLock={checkWalletState} />;
     default:

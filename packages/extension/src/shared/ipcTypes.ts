@@ -90,6 +90,7 @@ export type SendStellarTransferRequest = z.infer<typeof import('./ipcSchemas.js'
 export type SendStellarTransferResponse = z.infer<typeof import('./ipcSchemas.js').SendStellarTransferResponseSchema>;
 export type ConfirmStellarTransferRequest = z.infer<typeof import('./ipcSchemas.js').ConfirmStellarTransferRequestSchema>;
 export type ConfirmStellarTransferResponse = z.infer<typeof import('./ipcSchemas.js').ConfirmStellarTransferResponseSchema>;
+export type StellarTransferStatus = z.infer<typeof import('./ipcSchemas.js').StellarTransferStatusSchema>;
 
 export type MessageTypes = keyof typeof MessageSchemas;
 

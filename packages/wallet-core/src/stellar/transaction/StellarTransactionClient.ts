@@ -8,7 +8,7 @@ import {
   StrKey,
   TransactionBuilder,
 } from '@stellar/stellar-sdk';
-import { STELLAR_TESTNET_HORIZON_URL } from '../read/StellarReadClient.js';
+import { STELLAR_TESTNET_HORIZON_URL, type StellarReadFetch } from '../read/StellarReadClient.js';
 import {
   InsufficientXlmBalanceError,
   InvalidStellarAmountError,
@@ -18,6 +18,7 @@ import {
   StellarFeeChangedError,
   StellarTransactionError,
   StellarTransactionFailedError,
+  StellarTransportMissingError,
   type IAccountMetadataProvider,
   type IStellarTransactionSigner,
   type SendXlmRequest,
@@ -53,17 +54,253 @@ export function uint8ArrayToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/**
+ * Helper to determine if a Content-Type header represents a JSON media type.
+ * Matches application/json and vendor extensions ending in +json (e.g. application/problem+json),
+ * and safely ignores parameters like ; charset=utf-8.
+ */
+export function isJsonMediaType(contentType: string | null): boolean {
+  if (!contentType) return false;
+  const mediaType = contentType.split(';')[0]?.trim().toLowerCase() || '';
+  return mediaType === 'application/json' || mediaType.endsWith('+json');
+}
+
+/**
+ * Encapsulates Stellar SDK v17.3.0 internal adapter configuration.
+ * Routes all Horizon HTTP requests through the provided fetch implementation (e.g. Nym-aware fetch).
+ * Preserves request method, URL, headers, body, query parameters, and SDK-compatible error shapes.
+ */
+export function attachHorizonFetchAdapter(
+  server: Horizon.Server,
+  fetchImpl: StellarReadFetch,
+): void {
+  const httpClient = (server as any).httpClient;
+  if (!httpClient || !httpClient.defaults) {
+    throw new StellarTransactionError(
+      'Unable to attach transport adapter: Horizon.Server httpClient is missing or incompatible.',
+    );
+  }
+
+  httpClient.defaults.adapter = async (config: any): Promise<any> => {
+    // 1. Resolve full URL
+    let fullUrl = config.url || '';
+    if (config.baseURL && !fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
+      const base = config.baseURL.replace(/\/+$/, '');
+      const path = fullUrl.replace(/^\/+/, '');
+      fullUrl = path ? `${base}/${path}` : base;
+    }
+
+    // 2. Append query parameters if present (handling primitives, arrays, URLSearchParams)
+    if (config.params) {
+      const urlObj = new URL(fullUrl);
+      if (config.params instanceof URLSearchParams) {
+        for (const [key, val] of config.params.entries()) {
+          urlObj.searchParams.append(key, val);
+        }
+      } else if (typeof config.params === 'object') {
+        for (const [key, val] of Object.entries(config.params)) {
+          if (val === undefined || val === null) continue;
+          if (Array.isArray(val)) {
+            for (const item of val) {
+              if (item !== undefined && item !== null) {
+                urlObj.searchParams.append(key, String(item));
+              }
+            }
+          } else {
+            urlObj.searchParams.append(key, String(val));
+          }
+        }
+      }
+      fullUrl = urlObj.toString();
+    }
+
+    // 3. Format request headers (supporting plain objects, AxiosHeaders with toJSON/forEach, iterables)
+    const headers: Record<string, string> = {};
+    if (config.headers) {
+      if (typeof (config.headers as any).toJSON === 'function') {
+        const jsonHeaders = (config.headers as any).toJSON();
+        if (jsonHeaders && typeof jsonHeaders === 'object') {
+          for (const [k, v] of Object.entries(jsonHeaders)) {
+            if (v !== undefined && v !== null) {
+              headers[k.toLowerCase()] = String(v);
+            }
+          }
+        }
+      } else if (typeof config.headers.forEach === 'function') {
+        config.headers.forEach((v: unknown, k: string) => {
+          if (v !== undefined && v !== null) {
+            headers[k.toLowerCase()] = String(v);
+          }
+        });
+      } else if (
+        Symbol.iterator in Object(config.headers) &&
+        typeof (config.headers as any)[Symbol.iterator] === 'function'
+      ) {
+        for (const entry of config.headers as any) {
+          if (Array.isArray(entry) && entry.length >= 2) {
+            const [k, v] = entry;
+            if (k && v !== undefined && v !== null) {
+              headers[String(k).toLowerCase()] = String(v);
+            }
+          }
+        }
+      } else if (typeof config.headers === 'object') {
+        for (const [k, v] of Object.entries(config.headers)) {
+          if (v !== undefined && v !== null) {
+            headers[k.toLowerCase()] = String(v);
+          }
+        }
+      }
+    }
+
+    // 4. Build RequestInit
+    const method = (config.method || 'GET').toUpperCase();
+    const init: RequestInit = {
+      method,
+      headers,
+    };
+
+    if (config.data != null && method !== 'GET' && method !== 'HEAD') {
+      if (typeof config.data === 'string') {
+        init.body = config.data;
+      } else if (
+        config.data instanceof URLSearchParams ||
+        (typeof FormData !== 'undefined' && config.data instanceof FormData)
+      ) {
+        init.body = config.data;
+      } else {
+        init.body = typeof config.data === 'object' ? JSON.stringify(config.data) : String(config.data);
+      }
+    }
+
+    // 5. Setup cancellation and timeout handling
+    let abortController: AbortController | undefined;
+    let timeoutId: any;
+
+    const hasTimeout = typeof config.timeout === 'number' && config.timeout > 0;
+    const hasSignal = Boolean(config.signal);
+    const hasCancelToken = Boolean(config.cancelToken?.promise);
+
+    if (hasSignal || hasCancelToken || hasTimeout) {
+      abortController = new AbortController();
+
+      if (config.signal) {
+        if (config.signal.aborted) {
+          abortController.abort(config.signal.reason);
+        } else {
+          config.signal.addEventListener(
+            'abort',
+            () => {
+              abortController?.abort(config.signal.reason);
+            },
+            { once: true },
+          );
+        }
+      }
+
+      if (config.cancelToken?.promise) {
+        config.cancelToken.promise
+          .then((cancel: any) => {
+            abortController?.abort(cancel);
+          })
+          .catch(() => {});
+      }
+
+      if (hasTimeout) {
+        timeoutId = setTimeout(() => {
+          const timeoutErr: any = new Error(`timeout of ${config.timeout}ms exceeded`);
+          timeoutErr.code = 'ECONNABORTED';
+          abortController?.abort(timeoutErr);
+        }, config.timeout);
+      }
+    }
+
+    let response: Response;
+    try {
+      // Execute via injected transport fetch (e.g. Nym / fail-closed router)
+      const fetchInit: RequestInit = { ...init };
+      if (abortController) {
+        fetchInit.signal = abortController.signal;
+      }
+      response = await fetchImpl(fullUrl, fetchInit);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    // 6. Parse response body safely without multiple stream reads
+    const rawText = await response.text();
+    let responseData: any = rawText;
+    const contentType = response.headers.get('content-type');
+
+    if (isJsonMediaType(contentType)) {
+      if (rawText.trim().length > 0) {
+        try {
+          responseData = JSON.parse(rawText);
+        } catch {
+          // If JSON parse fails, preserve rawText
+          responseData = rawText;
+        }
+      } else {
+        responseData = null;
+      }
+    }
+
+    // Format headers object for SDK compatibility
+    const responseHeaders: Record<string, string> = {};
+    if (response.headers && typeof response.headers.forEach === 'function') {
+      response.headers.forEach((v, k) => {
+        responseHeaders[k.toLowerCase()] = v;
+      });
+    }
+
+    // 7. If response is not ok (4xx, 5xx), build SDK-compatible Axios-style error
+    if (!response.ok) {
+      const httpError: any = new Error(`Request failed with status code ${response.status}`);
+      httpError.isAxiosError = true;
+      httpError.response = {
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+        data: responseData,
+        config,
+      };
+      httpError.config = config;
+      throw httpError;
+    }
+
+    return {
+      data: responseData,
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+      config,
+      request: init,
+    };
+  };
+}
+
 export class StellarTransactionClient {
   private readonly _horizon: Horizon.Server;
+  private readonly _networkPassphrase: string;
 
   constructor(
-    horizonUrl: string = STELLAR_TESTNET_HORIZON_URL,
+    horizonUrl: string,
     private readonly _keyManager: IAccountMetadataProvider,
     private readonly _signer: IStellarTransactionSigner,
-    private readonly _networkPassphrase: string = Networks.TESTNET,
-    serverInstance?: Horizon.Server,
+    networkPassphrase: string,
+    fetchImpl: StellarReadFetch,
   ) {
-    this._horizon = serverInstance ?? new Horizon.Server(horizonUrl);
+    if (!fetchImpl || typeof fetchImpl !== 'function') {
+      throw new StellarTransportMissingError(
+        'Stellar transaction transport is required. Injected Nym-aware fetch implementation must be provided.',
+      );
+    }
+    this._networkPassphrase = networkPassphrase || Networks.TESTNET;
+    const server = new Horizon.Server(horizonUrl || STELLAR_TESTNET_HORIZON_URL);
+    attachHorizonFetchAdapter(server, fetchImpl);
+    this._horizon = server;
   }
 
   public validateDestination(destination: string, sourceAddress?: string): string {
@@ -136,7 +373,7 @@ export class StellarTransactionClient {
       );
     }
 
-    const nativeBalanceEntry = sourceAccountRecord.balances.find((b) => b.asset_type === 'native');
+    const nativeBalanceEntry = sourceAccountRecord.balances.find((b: any) => b.asset_type === 'native');
     const nativeBal = nativeBalanceEntry?.balance ?? '0';
     const subentryCount = sourceAccountRecord.subentry_count ?? 0;
     const minReserveXlm = (2 + subentryCount) * STELLAR_BASE_RESERVE_XLM;

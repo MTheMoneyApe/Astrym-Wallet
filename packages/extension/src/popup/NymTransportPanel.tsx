@@ -301,15 +301,15 @@ export function NymTransportPanel({
             >
               Nym mode
             </button>
+            {/* Founder Decision F: Global Direct mode is disabled. Direct requires operation-specific authorization. */}
             <button
               type="button"
               className="btn-secondary"
-              disabled={busy || mode === 'direct'}
-              onClick={() => onSetMode('direct')}
+              disabled={true}
               data-testid="nym-mode-direct"
-              title="Explicit clearnet opt-in"
+              title="Global Direct mode is disabled. Direct requires operation-specific authorization."
             >
-              Direct (clearnet)
+              Direct (disabled)
             </button>
           </>
         ) : null}

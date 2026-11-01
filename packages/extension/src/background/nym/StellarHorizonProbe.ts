@@ -228,6 +228,8 @@ export async function probeStellarHorizon(deps: {
   fetchViaStellarTransport: StellarReadFetch;
   transport: NymTransportMode;
   nymConnected: boolean;
+  /** Injected transport describing the actual diagnostic transport. */
+  injectedTransport?: NymTransportMode;
   /** Logical Horizon URL (defaults to SDF testnet /fee_stats). */
   horizonUrl?: string;
   timeoutMs?: number;
@@ -258,6 +260,15 @@ export async function probeStellarHorizon(deps: {
     urlRewritten: resolution.rewritten,
     rewriteReason: resolution.reason,
   };
+
+  if (deps.injectedTransport !== undefined && deps.transport !== deps.injectedTransport) {
+    return emptyResult({
+      ...baseFields,
+      state: 'error',
+      message: `Transport mismatch: request=${deps.transport} injected=${deps.injectedTransport}`,
+      transportFetchInvoked: false,
+    });
+  }
 
   if (deps.transport === 'nym' && !deps.nymConnected) {
     return emptyResult({

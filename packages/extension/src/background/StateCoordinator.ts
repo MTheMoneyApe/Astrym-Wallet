@@ -8,13 +8,19 @@ export type SystemState =
   | 'LOCKED'
   | 'READY'
   | 'LOCKING'
-  | 'READY_WITH_MUTATION_LOCK';
+  | 'READY_WITH_MUTATION_LOCK'
+  | 'UNCERTAIN_TRANSACTION';
 
 export const SIGNATURE_DRAIN_TIMEOUT_MS = 35_000;
 
 export interface SignatureAuthorization {
   readonly epoch: number;
   readonly signal: AbortSignal;
+}
+
+export interface UncertainTransactionContext {
+  readonly accountIndex: number;
+  readonly txHash: string;
 }
 
 export class AsyncMutex {
@@ -49,6 +55,7 @@ export class StateCoordinator {
   private _signatureDrainResolvers: Array<() => void> = [];
   private _lockRequested = false;
   private _lockOperation: Promise<void> | null = null;
+  private _uncertainContext: UncertainTransactionContext | null = null;
   public readonly mutex = new AsyncMutex();
 
   public get state(): SystemState { return this._state; }
@@ -56,10 +63,68 @@ export class StateCoordinator {
   public get isResetting(): boolean { return this._isResetting; }
   public get activeSignatures(): number { return this._activeSignatures.size; }
   public get isLocking(): boolean { return this._lockRequested || this._state === 'LOCKING'; }
+  public get uncertainContext(): UncertainTransactionContext | null { return this._uncertainContext; }
 
   /** Force system into ERROR_STATE due to uncertain write or corruption */
   public enterErrorState(): void {
     this._state = 'ERROR_STATE';
+  }
+
+  public getUncertainContext(): UncertainTransactionContext | null {
+    return this._uncertainContext;
+  }
+
+  /**
+   * Enters or records an uncertain transaction.
+   * Module 1B invariant: Only one uncertain transaction is supported at a time across the wallet.
+   */
+  public enterUncertainTransaction(accountIndex: number, txHash: string): void {
+    if (this._isResetting || this._state === 'RESET_BLOCKED') {
+      throw new Error('Wallet reset in progress');
+    }
+    if (this._state === 'ERROR_STATE') {
+      throw new Error('System is in a degraded state (ERROR_STATE)');
+    }
+
+    if (this._uncertainContext !== null) {
+      if (
+        this._uncertainContext.accountIndex === accountIndex &&
+        this._uncertainContext.txHash === txHash
+      ) {
+        // Idempotent re-entry for the exact same transaction
+        if (this._state === 'READY' || this._state === 'READY_WITH_MUTATION_LOCK') {
+          this._state = 'UNCERTAIN_TRANSACTION';
+        }
+        return;
+      }
+      throw new Error(
+        `An uncertain transaction is already active in the wallet (${this._uncertainContext.txHash}). Overwriting is not permitted.`
+      );
+    }
+
+    this._uncertainContext = Object.freeze({ accountIndex, txHash });
+
+    if (this._state === 'READY' || this._state === 'READY_WITH_MUTATION_LOCK' || this._state === 'INITIALIZING') {
+      this._state = 'UNCERTAIN_TRANSACTION';
+    }
+    // If state is LOCKED or LOCKING, the context is recorded while retaining the locked state,
+    // ensuring that subsequent unlock transitions directly into UNCERTAIN_TRANSACTION.
+  }
+
+  /**
+   * Resolves the active uncertain transaction and restores READY (or retains LOCKED).
+   * Only this method may clear an active uncertain context.
+   */
+  public resolveUncertainTransaction(): void {
+    if (this._uncertainContext === null) {
+      throw new Error('No active uncertain transaction to resolve');
+    }
+    this._uncertainContext = null;
+
+    if (this._state === 'UNCERTAIN_TRANSACTION') {
+      this._state = 'READY';
+    }
+    // If state is LOCKED, LOCKING, or ERROR_STATE, leave the state as is.
   }
 
   public async initializeHolistic(
@@ -96,9 +161,15 @@ export class StateCoordinator {
 
   public setUnlocked(): void {
     if (this._state === 'LOCKED' || this._state === 'UNINITIALIZED') {
-      this._state = 'READY';
+      if (this._uncertainContext !== null) {
+        this._state = 'UNCERTAIN_TRANSACTION';
+      } else {
+        this._state = 'READY';
+      }
     } else if (this._state === 'READY_WITH_MUTATION_LOCK') {
       // Remain with mutation lock but session is active
+    } else if (this._state === 'UNCERTAIN_TRANSACTION') {
+      // Already unlocked in uncertain state
     } else if (this._state === 'ERROR_STATE' || this._state === 'RESET_BLOCKED') {
       // Cannot unlock if errored or resetting
       throw new Error('System is in a degraded state and cannot be unlocked');
@@ -106,7 +177,12 @@ export class StateCoordinator {
   }
   
   public setLocked(): void {
-    if (this._state === 'READY' || this._state === 'READY_WITH_MUTATION_LOCK' || this._state === 'LOCKING') {
+    if (
+      this._state === 'READY' ||
+      this._state === 'READY_WITH_MUTATION_LOCK' ||
+      this._state === 'LOCKING' ||
+      this._state === 'UNCERTAIN_TRANSACTION'
+    ) {
       this._state = 'LOCKED';
     }
   }
@@ -182,6 +258,8 @@ export class StateCoordinator {
       this._state === 'READY_WITH_MUTATION_LOCK' || 
       this._state === 'LOCKED' ||
       this._state === 'UNINITIALIZED' ||
+      this._state === 'UNCERTAIN_TRANSACTION' ||
+      this._uncertainContext !== null ||
       this._lockRequested
     ) {
       throw new Error(`System is in a degraded or locked state (${this._state}) and cannot sign`);
@@ -216,7 +294,8 @@ export class StateCoordinator {
       this._resetEpoch !== authorization.epoch ||
       this._state === 'ERROR_STATE' ||
       this._state === 'LOCKING' ||
-      this._state === 'LOCKED'
+      this._state === 'LOCKED' ||
+      this._state === 'UNCERTAIN_TRANSACTION'
     ) {
       throw new Error('Signature authorization is no longer active');
     }
@@ -237,16 +316,29 @@ export class StateCoordinator {
 
   /**
    * Begin a destructive reset operation.
+   * Rejects if an uncertain transaction context is currently active.
    */
   public beginReset(): void {
+    if (this._uncertainContext !== null) {
+      throw new Error(
+        `Cannot reset wallet while an uncertain transaction is unresolved (${this._uncertainContext.txHash})`
+      );
+    }
     this._isResetting = true;
     this._resetEpoch++;
   }
 
   /**
    * Complete reset.
+   * Throws fail-closed if called while an uncertain transaction context is active.
+   * Only resolveUncertainTransaction() may clear an active uncertain context.
    */
   public finishReset(): void {
+    if (this._uncertainContext !== null) {
+      throw new Error(
+        `Cannot complete reset while an uncertain transaction is unresolved (${this._uncertainContext.txHash})`
+      );
+    }
     this._isResetting = false;
     this._state = 'UNINITIALIZED';
   }

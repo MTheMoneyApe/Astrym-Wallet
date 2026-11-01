@@ -1,4 +1,4 @@
-import { z } from 'zod';
+﻿import { z } from 'zod';
 
 // ==========================================
 // Base Envelope & Error Types
@@ -267,9 +267,43 @@ export const SendStellarTransferRequestSchema = z.object({
   id: z.string().uuid(),
 });
 
+/**
+ * Canonical set of lifecycle statuses for Stellar transfer confirmation responses.
+ *
+ * **Compatibility note — 'UNKNOWN':**
+ * 'UNKNOWN' is the pre-Stage-4 legacy status emitted by StellarTransferConfirmationTracker's
+ * .catch() handler when a polling attempt fails with a transient network error.
+ * It is retained here for backward IPC compatibility until Stage 4 replaces the confirmation
+ * tracker with the multi-poll reconciliation loop defined in ARCH-03 §4.5, which will
+ * surface 'SUBMISSION_UNKNOWN' or 'INDETERMINATE' instead.
+ * Do not route 'UNKNOWN' responses to the uncertain-transaction recovery path.
+ */
+export const StellarTransferStatusSchema = z.enum([
+  'SUBMITTED_INGESTED',
+  'CONFIRMED',
+  'FAILED',
+  'UNKNOWN',
+  'SUBMISSION_UNKNOWN',
+  'INDETERMINATE',
+]);
+
+export type StellarTransferStatus = z.infer<typeof StellarTransferStatusSchema>;
+
+/**
+ * Schema for the initial send-transfer IPC response (submission leg only).
+ *
+ * **Compatibility note — 'PENDING':**
+ * 'PENDING' is the pre-Stage-3 legacy status returned by createSendStellarTransferHandler.
+ * The current handler completes signing and submission synchronously, then returns
+ * { txHash, status: 'PENDING' } before confirmation polling begins.
+ * It is retained here for backward IPC compatibility until Stage 3 replaces the handler
+ * to return 'SUBMITTED_INGESTED' or 'SUBMISSION_UNKNOWN' as defined in ARCH-03 §3.2.
+ * The popup must not treat 'PENDING' as a confirmed or uncertain state; it indicates
+ * that the confirmation step (ConfirmStellarTransfer IPC) has not yet been initiated.
+ */
 export const SendStellarTransferResponseSchema = z.object({
   txHash: z.string().length(64),
-  status: z.literal('PENDING'),
+  status: z.enum(['PENDING', 'SUBMITTED_INGESTED', 'SUBMISSION_UNKNOWN']),
 });
 
 export const ConfirmStellarTransferRequestSchema = z.object({
@@ -278,8 +312,9 @@ export const ConfirmStellarTransferRequestSchema = z.object({
 
 export const ConfirmStellarTransferResponseSchema = z.object({
   txHash: z.string(),
-  status: z.enum(['CONFIRMED', 'FAILED', 'UNKNOWN']),
+  status: StellarTransferStatusSchema,
   ledger: z.number().optional(),
+  error: z.string().optional(),
 });
 
 // Phase 10 Schemas

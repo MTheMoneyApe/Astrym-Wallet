@@ -275,7 +275,7 @@ describe.skipIf(!LIVE || !LIVE_SEND)('Stellar Testnet live send (write)', () => 
     const destination = Keypair.random().publicKey();
     const amountXlm = '2.0000000';
 
-    const client = new StellarTransactionClient(horizonUrl, keyManager, signer, networkPassphrase);
+    const client = new StellarTransactionClient(horizonUrl, keyManager, signer, networkPassphrase, globalThis.fetch.bind(globalThis));
 
     const review = await client.reviewXlmTransfer({
       sourceAccountIndex: 0,

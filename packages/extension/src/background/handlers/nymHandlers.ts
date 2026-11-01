@@ -67,6 +67,11 @@ export function createNymSetModeHandler() {
   return async (
     payload: ValidatedRequestPayload<'NYM_SET_MODE'>,
   ): Promise<ValidatedResponsePayload<'NYM_SET_MODE'>> => {
+    if (payload.mode === 'direct') {
+      throw new Error(
+        'Global Direct mode is disabled. Astrym Wallet operates in Nym-first mode fail-closed. Operation-specific Direct authorization is required.',
+      );
+    }
     const ctrl = getNymRuntimeController();
     ctrl.setMode(payload.mode);
     await ctrl.syncGatewayConfigUi();

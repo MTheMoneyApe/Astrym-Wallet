@@ -1,6 +1,6 @@
 /**
  * SW orchestration for Nym Mixnet: offscreen host + MixFetchNymTransport +
- * FailClosedTransportRouter. Direct mode only via explicit setMode('direct').
+ * FailClosedTransportRouter. Nym-first mode fail-closed. Global Direct mode is disabled (Founder Decision F).
  */
 
 import {
@@ -109,7 +109,12 @@ function defaultLocalStorage(): {
 }
 
 export class NymRuntimeController {
-  private _mode: NymTransportMode = 'direct';
+  /**
+   * Nym-first: starts in Nym mode. Wallet operations fail closed if Nym is not
+   * Global Direct mode is disabled; wallet operations fail closed without silent fallback.
+   * Diagnostic requests (fetchPublicData, probeStellarHorizon) must not mutate this field.
+   */
+  private _mode: NymTransportMode = 'nym';
   private readonly _bridge: OffscreenMixFetchBridge;
   private readonly _transport: MixFetchNymTransport;
   private readonly _router: FailClosedTransportRouter;
@@ -211,6 +216,11 @@ export class NymRuntimeController {
   }
 
   setMode(mode: NymTransportMode): void {
+    if (mode === 'direct') {
+      throw new Error(
+        'Global Direct mode is disabled. Astrym Wallet operates in Nym-first mode fail-closed. Operation-specific Direct authorization is required.',
+      );
+    }
     this._mode = mode;
     this._router.setMode(mode);
   }
@@ -426,16 +436,22 @@ export class NymRuntimeController {
       transport?: NymTransportMode;
     },
   ): Promise<PublicDataFetchResult> {
-    // Explicit selection wins — aligns router without silent clearnet fallback.
-    if (request?.transport === 'direct' || request?.transport === 'nym') {
-      this.setMode(request.transport);
-    }
-    const transport = this._mode;
+    // Diagnostic isolation: the requested transport for a public-data fetch must NOT
+    // mutate the shared wallet router mode. Derive a one-off fetch without setMode().
+    const transport: NymTransportMode = (request?.transport === 'direct' || request?.transport === 'nym')
+      ? request.transport
+      : this._mode;
+    // Diagnostic isolation: For an explicitly requested Nym diagnostic, use this._transport.fetch directly.
+    // Do NOT call this._router.fetch() or getStellarFetch() or mutate router mode.
+    // For Direct diagnostics, call isolated clearnetFetchImpl directly.
+    const fetchViaTransport: PublicDataTransportFetch = transport === 'nym'
+      ? (url: string, init?: RequestInit) => this._transport.fetch(url, init)
+      : (url: string, init?: RequestInit) => clearnetFetchImpl(url, init);
     return fetchPublicData({
       transport,
-      routerMode: this._router.mode,
+      injectedTransport: transport,
       nymConnected: this._transport.getSnapshot().connected === true,
-      fetchViaTransport: (url, init) => this._router.fetch(url, init),
+      fetchViaTransport,
       request: { ...request, transport },
     });
   }
@@ -449,20 +465,38 @@ export class NymRuntimeController {
     horizonUrl?: string;
     timeoutMs?: number;
   }): Promise<StellarHorizonProbeResult> {
-    if (options?.transport === 'direct' || options?.transport === 'nym') {
-      this.setMode(options.transport);
-    }
-    const transport = this._mode;
+    // Diagnostic isolation: probe transport must NOT mutate the shared router mode.
+    const transport: NymTransportMode = (options?.transport === 'direct' || options?.transport === 'nym')
+      ? options.transport
+      : this._mode;
+    // For a direct diagnostic probe, use clearnet fetch directly rather than routing
+    // through the shared router (which may be in nym mode for wallet operations).
+    // For Nym diagnostic probe: use this._transport.fetch directly via createStellarTransportFetch.
+    // Do NOT call this._router.fetch() or this.getStellarFetch().
+    // For Direct diagnostic probe: use isolated clearnetFetchImpl.
+    const fetchViaStellarTransport: StellarReadFetch = transport === 'nym'
+      ? createStellarTransportFetch({
+          getMode: () => 'nym' as NymTransportMode,
+          fetchViaRouter: (url, init) => this._transport.fetch(url, init),
+          getNymHorizonConfig: () => this._stellarNymHorizon,
+        })
+      : createStellarTransportFetch({
+          getMode: () => 'direct' as NymTransportMode,
+          fetchViaRouter: clearnetFetchImpl,
+          getNymHorizonConfig: () => this._stellarNymHorizon,
+        });
     const probeOpts: {
       fetchViaStellarTransport: StellarReadFetch;
       transport: NymTransportMode;
+      injectedTransport: NymTransportMode;
       nymConnected: boolean;
       horizonUrl?: string;
       timeoutMs?: number;
       nymHorizonConfig: StellarNymHorizonConfig;
     } = {
-      fetchViaStellarTransport: this.getStellarFetch(),
+      fetchViaStellarTransport,
       transport,
+      injectedTransport: transport,
       nymConnected: this._transport.getSnapshot().connected === true,
       nymHorizonConfig: this._stellarNymHorizon,
     };

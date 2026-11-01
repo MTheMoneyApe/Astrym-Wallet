@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   initializeActiveAccountManager: vi.fn(),
   vaultLock: vi.fn(),
   tryRestoreFromSession: vi.fn(),
+  stellarFetch: vi.fn(),
+  StellarTransactionClient: vi.fn(),
 }));
 
 vi.mock('webextension-polyfill', () => ({
@@ -78,6 +80,42 @@ vi.mock('@solanym/wallet-core/src/solana/transaction/TransactionClient.js', () =
 
 vi.mock('@solanym/wallet-core/src/solana/transport/HttpTransport.js', () => ({
   createHttpTransport: mocks.createHttpTransport,
+}));
+
+vi.mock('@solanym/wallet-core', () => ({
+  StellarTransactionClient: mocks.StellarTransactionClient,
+  StrKey: {
+    isValidEd25519PublicKey: vi.fn(),
+  },
+}));
+
+vi.mock('@solana/kit', () => ({
+  getBase58Decoder: vi.fn(() => ({
+    decode: vi.fn(),
+  })),
+}));
+
+vi.mock('@solanym/wallet-core/src/stellar/accounts/StellarAccountService.js', () => ({
+  StellarAccountService: class {},
+}));
+
+vi.mock('@solanym/wallet-core/src/stellar/read/StellarReadClient.js', () => ({
+  STELLAR_TESTNET_HORIZON_URL: 'https://horizon-testnet.stellar.org',
+  STELLAR_TESTNET_FRIENDBOT_URL: 'https://friendbot.stellar.org',
+  StellarReadClient: class {},
+}));
+
+vi.mock('@stellar/stellar-sdk', () => ({
+  Networks: {
+    TESTNET: 'Test SDF Network ; September 2015',
+    PUBLIC: 'Public Global Stellar Network ; September 2015',
+  },
+}));
+
+vi.mock('../../src/background/nym/NymRuntimeController.js', () => ({
+  getNymRuntimeController: () => ({
+    getStellarFetch: () => mocks.stellarFetch,
+  }),
 }));
 
 vi.mock('../../src/background/alarms/ChromeAlarmService.js', () => ({
@@ -181,64 +219,61 @@ describe('background RPC composition', () => {
     expect(mocks.tryRestoreFromSession).not.toHaveBeenCalled();
   });
 
-  it('routes the production balance handler through the configured HTTP transport', async () => {
-    const transportResponse = {
-      jsonrpc: '2.0',
-      id: 1,
-      result: { context: { slot: 1 }, value: 42n },
-    };
-    const httpTransport = vi.fn(async ({ payload }) => ({
-      ...transportResponse,
-      id: payload.id,
-    }));
-    mocks.createHttpTransport.mockReturnValue(httpTransport);
-
+  it('does NOT initialize active Solana runtime and HTTP transport on startup', async () => {
     await import('../../src/background/index.js');
 
-    const balanceHandler = mocks.handlers.get('GET_BALANCE');
-    expect(balanceHandler).toBeDefined();
-    await expect(
-      balanceHandler!({ address: '83astBRguLMdt2h5U1Tpdq5tjFoJ6noeGwaY3mDLVcri' }),
-    ).resolves.toEqual({ lamports: '42' });
+    expect(mocks.createHttpTransport).not.toHaveBeenCalled();
+  });
 
-    expect(mocks.createHttpTransport).toHaveBeenCalledWith({
-      network: 'devnet',
-      rpcUrl: 'https://api.devnet.solana.com',
-    });
-    expect(httpTransport).toHaveBeenCalledOnce();
-    const transportCall = httpTransport.mock.calls[0];
-    if (!transportCall) throw new Error('expected HTTP transport invocation');
-    expect(transportCall[0].payload).toEqual(
-      expect.objectContaining({
-        jsonrpc: '2.0',
-        method: 'getBalance',
-        params: [
-          '83astBRguLMdt2h5U1Tpdq5tjFoJ6noeGwaY3mDLVcri',
-          { commitment: 'confirmed' },
-        ],
-      }),
+  it('wires nymRuntime.getStellarFetch() to StellarTransactionClient', async () => {
+    await import('../../src/background/index.js');
+
+    expect(mocks.StellarTransactionClient).toHaveBeenCalledWith(
+      'https://horizon-testnet.stellar.org',
+      expect.anything(),
+      expect.anything(),
+      'Test SDF Network ; September 2015',
+      mocks.stellarFetch,
     );
   });
 
-  it('propagates a transport error from the registered balance handler without fallback', async () => {
-    const transportError = new Error('HTTP transport unavailable');
-    const httpTransport = vi.fn().mockRejectedValue(transportError);
-    const directFetch = vi.fn();
-    vi.stubGlobal('fetch', directFetch);
-    mocks.createHttpTransport.mockReturnValue(httpTransport);
+  it('rejects Solana IPC transfer endpoints with typed disabled runtime error', async () => {
+    await import('../../src/background/index.js');
 
-    try {
-      await import('../../src/background/index.js');
-      const balanceHandler = mocks.handlers.get('GET_BALANCE');
-      expect(balanceHandler).toBeDefined();
-      await expect(
-        balanceHandler!({ address: '83astBRguLMdt2h5U1Tpdq5tjFoJ6noeGwaY3mDLVcri' }),
-      ).rejects.toThrow('Failed to fetch SOL balance');
+    const solanaEndpoints = [
+      'GET_BALANCE',
+      'ESTIMATE_TRANSFER',
+      'REVIEW_TRANSFER',
+      'SEND_TRANSFER',
+      'CONFIRM_TRANSFER',
+      'GET_PENDING_APPROVALS',
+      'APPROVE_DAPP_REQUEST',
+    ];
 
-      expect(httpTransport).toHaveBeenCalledOnce();
-      expect(directFetch).not.toHaveBeenCalled();
-    } finally {
-      vi.unstubAllGlobals();
+    for (const endpoint of solanaEndpoints) {
+      const handler = mocks.handlers.get(endpoint);
+      expect(handler, `Expected handler registered for ${endpoint}`).toBeDefined();
+      await expect(handler!({})).rejects.toThrow(
+        `Solana runtime is disabled (${endpoint}). Astrym Wallet operates in Stellar-first mode.`,
+      );
     }
-  }, 20_000);
+  });
+
+  it('rejects Solana dApp endpoints with typed disabled dApp error', async () => {
+    await import('../../src/background/index.js');
+
+    const dappEndpoints = [
+      'DAPP_CONNECT',
+      'DAPP_DISCONNECT',
+      'DAPP_SIGN_TRANSACTION',
+    ];
+
+    for (const endpoint of dappEndpoints) {
+      const handler = mocks.handlers.get(endpoint);
+      expect(handler, `Expected handler registered for ${endpoint}`).toBeDefined();
+      await expect(handler!({})).rejects.toThrow(
+        `Solana dApp operations (${endpoint}) are disabled. Astrym Wallet operates in Stellar-first mode.`,
+      );
+    }
+  });
 });
