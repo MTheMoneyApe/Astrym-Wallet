@@ -10,6 +10,7 @@ import type {
 } from '../shared/ipcTypes.js';
 import { parseSolToLamports } from '../shared/solToLamports.js';
 import { SppPrivateSend } from './SppPrivateSend.js';
+import { SppAccountPanel } from './SppAccountPanel.js';
 
 type SendStatus = 'idle' | 'preparing' | 'ready' | 'sending' | 'pending' | 'confirmed' | 'failed' | 'unknown';
 
@@ -577,15 +578,22 @@ export function Send({
             </div>
           ) : null}
           {privateMode ? (
-            <SppPrivateSend
-              poolContract={privatePoolContract}
-              preparePhase={privatePreparePhase}
-              nymConnected={privatePaymentsEnabled}
-              destination={destination}
-              amount={amountSol}
-              onDestinationChange={(value) => { setDestination(value); setError(null); }}
-              onAmountChange={(value) => { setAmountSol(value); setError(null); }}
-            />
+            <>
+              <SppPrivateSend
+                poolContract={privatePoolContract}
+                preparePhase={privatePreparePhase}
+                nymConnected={privatePaymentsEnabled}
+                destination={destination}
+                amount={amountSol}
+                onDestinationChange={(value) => { setDestination(value); setError(null); }}
+                onAmountChange={(value) => { setAmountSol(value); setError(null); }}
+              />
+              <SppAccountPanel
+                preparePhase={privatePreparePhase}
+                nymConnected={privatePaymentsEnabled}
+                defaultLookupAddress={destination}
+              />
+            </>
           ) : null}
           {!privateMode ? (
           <label style={{ display: 'grid', gap: 6, fontSize: '0.85rem' }}>

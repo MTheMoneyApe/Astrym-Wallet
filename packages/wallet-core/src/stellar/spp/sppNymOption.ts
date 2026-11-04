@@ -5,6 +5,13 @@
  */
 
 import { StrKey } from '@stellar/stellar-sdk';
+import {
+  assertAuthorizationFingerprint,
+  beginPrivatePaymentExecution,
+  privatePaymentFingerprint,
+} from './sppExecutionGuard.js';
+import { assertSppTestnetBroadcastAuthorized } from './sppBroadcastGate.js';
+import { assertFeeWithinCeiling, maxFeeStroopsForOperation } from './sppFeePolicy.js';
 
 export const STELLAR_SOROBAN_TESTNET_RPC = 'https://soroban-testnet.stellar.org';
 
@@ -42,7 +49,11 @@ export type SppPrivatePaymentCode =
   | 'SESSION_NOT_READY'
   | 'HOST_UNAVAILABLE'
   | 'RPC_FAILED'
-  | 'EXECUTION_FAILED';
+  | 'EXECUTION_FAILED'
+  | 'SUBMISSION_UNKNOWN'
+  | 'DUPLICATE_EXECUTION'
+  | 'UNAUTHORIZED'
+  | 'BROADCAST_AWAITING_APPROVAL';
 
 export class SppPrivatePaymentError extends Error {
   readonly code: SppPrivatePaymentCode;
@@ -224,7 +235,18 @@ export async function executeSppPrivatePayment(input: {
    * pool. Prefer this when the pool already routes RPC via Nym (host proxy / tests).
    */
   preferInjectedTransport?: boolean;
-}): Promise<{ operation: SppPrivateOperation; txHash: string | null; rpcRoutedViaNym: true }> {
+  /** Required: must match privatePaymentFingerprint of the request. */
+  authorizationFingerprint: string;
+  /** Active Stellar G… for the approval packet (optional but recommended). */
+  senderAddress?: string | null;
+  /** Explicit max fee ceiling in stroops (never unbounded). */
+  maxFeeStroops?: string | null;
+}): Promise<{
+  operation: SppPrivateOperation;
+  txHash: string | null;
+  rpcRoutedViaNym: true;
+  confirmation: 'confirmed' | 'unknown';
+}> {
   if (sppOptionAvailability(input.gate) !== 'ready_to_enable') {
     throw new SppPrivatePaymentError(
       'NYM_REQUIRED',
@@ -241,14 +263,100 @@ export async function executeSppPrivatePayment(input: {
       'Inicializa la sesión SPP con Nym conectado antes de depositar, transferir o retirar.',
     );
   }
+
+  try {
+    assertAuthorizationFingerprint(
+      {
+        operation: request.operation,
+        poolContract: request.poolContract,
+        amountStroops: request.amount.toString(),
+        recipient: request.recipient,
+      },
+      input.authorizationFingerprint,
+    );
+  } catch (cause) {
+    throw new SppPrivatePaymentError(
+      'UNAUTHORIZED',
+      cause instanceof Error ? cause.message : 'Autorización inválida',
+      { cause },
+    );
+  }
+
+  const fingerprint = privatePaymentFingerprint({
+    operation: request.operation,
+    poolContract: request.poolContract,
+    amountStroops: request.amount.toString(),
+    recipient: request.recipient,
+  });
+  let release: (opts?: { completed?: boolean }) => void;
+  try {
+    ({ release } = beginPrivatePaymentExecution(fingerprint));
+  } catch (cause) {
+    throw new SppPrivatePaymentError(
+      'DUPLICATE_EXECUTION',
+      cause instanceof Error ? cause.message : 'Ejecución duplicada',
+      { cause },
+    );
+  }
+
+  const maxFeeStroops =
+    input.maxFeeStroops?.trim() || maxFeeStroopsForOperation(request.operation);
+  try {
+    assertFeeWithinCeiling(request.operation, maxFeeStroops);
+  } catch (cause) {
+    release();
+    throw new SppPrivatePaymentError(
+      'INVALID_REQUEST',
+      cause instanceof Error ? cause.message : 'Fee ceiling violated',
+      { cause },
+    );
+  }
+  try {
+    assertSppTestnetBroadcastAuthorized({
+      network: 'testnet',
+      operation: request.operation,
+      poolContract: request.poolContract,
+      amountXlm: (Number(request.amount) / 10_000_000).toFixed(7),
+      amountStroops: request.amount.toString(),
+      senderAddress: input.senderAddress?.trim() || null,
+      recipientAddress: request.recipient,
+      feeNote:
+        'Inclusion + Soroban resources; SDK may set fee at submit but must not exceed maxFeeStroops.',
+      maxFeeStroops,
+      rpcUrl: input.rpcUrl,
+      transport: 'nym',
+      preparedAt: new Date().toISOString(),
+    });
+  } catch (cause) {
+    release();
+    throw new SppPrivatePaymentError(
+      'BROADCAST_AWAITING_APPROVAL',
+      cause instanceof Error ? cause.message : 'Broadcast blocked pending approval',
+      { cause },
+    );
+  }
+
   const pool = input.pool;
   const preferInjected = input.preferInjectedTransport !== false;
+  let completed = false;
 
   const run = async () => {
     await probeSorobanRpc(input.rpcUrl, input.nymFetch);
     try {
       const result = await runPool(pool, request);
-      return { operation: request.operation, txHash: result.txHash, rpcRoutedViaNym: true as const };
+      if (!result.txHash) {
+        throw new SppPrivatePaymentError(
+          'SUBMISSION_UNKNOWN',
+          'El SDK no devolvió hash. No se inventa confirmación; verifica en el explorador antes de reintentar.',
+        );
+      }
+      completed = true;
+      return {
+        operation: request.operation,
+        txHash: result.txHash,
+        rpcRoutedViaNym: true as const,
+        confirmation: 'confirmed' as const,
+      };
     } catch (cause) {
       if (cause instanceof SppPrivatePaymentError) throw cause;
       const message = cause instanceof Error ? cause.message : 'El pago privado SPP falló';
@@ -256,10 +364,14 @@ export async function executeSppPrivatePayment(input: {
     }
   };
 
-  if (preferInjected) {
-    return run();
+  try {
+    if (preferInjected) {
+      return await run();
+    }
+    return await withSppRpcThroughNym(input.rpcUrl, input.nymFetch, run);
+  } finally {
+    release(completed ? { completed: true } : undefined);
   }
-  return withSppRpcThroughNym(input.rpcUrl, input.nymFetch, run);
 }
 
 async function runPool(

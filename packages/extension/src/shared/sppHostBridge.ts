@@ -45,6 +45,14 @@ export const SppHostExecuteRequestSchema = z.object({
     nymMode: z.enum(['direct', 'nym']),
     nymConnected: z.boolean(),
     sppSelected: z.literal(true),
+    /** Signing G… account for account-scoped sequence tracking (optional; both this and freshSequence required to engage). */
+    signingAccount: z.string().min(56).max(56).optional(),
+    /** Fresh Horizon sequence for signingAccount before submit. */
+    freshSequence: z.string().regex(/^[0-9]+$/).optional(),
+    /** Horizon sequence after confirmed submit; required to advance tracker on success. */
+    nextFreshSequence: z.string().regex(/^[0-9]+$/).optional(),
+    /** Deterministic auth fingerprint; derived on host if omitted when sequence tracking is engaged. */
+    operationFingerprint: z.string().min(8).max(256).optional(),
   }),
 });
 
@@ -73,6 +81,7 @@ export const SppHostExecuteFailureSchema = z.object({
     'RPC_FAILED',
     'EXECUTION_FAILED',
     'HOST_UNAVAILABLE',
+    'UNAUTHORIZED',
   ]),
   message: z.string().min(1).max(500),
 });
@@ -177,6 +186,73 @@ export const SppHostNymFetchResultSchema = z.union([
 
 export type SppHostNymFetchResult = z.infer<typeof SppHostNymFetchResultSchema>;
 
+/** SW → host: read-only account surface (lookup / balance / notes) or gated register. */
+export const SppHostAccountQueryRequestSchema = z.object({
+  channel: z.literal(SPP_HOST_BRIDGE_CHANNEL),
+  type: z.literal('SPP_HOST_ACCOUNT_QUERY'),
+  id: z.string().min(1),
+  payload: z.object({
+    action: z.enum(['snapshot', 'recipient_lookup', 'sync', 'register_public_keys']),
+    recipientAddress: z.string().min(56).max(56).optional(),
+    nymMode: z.enum(['direct', 'nym']),
+    nymConnected: z.boolean(),
+  }),
+});
+
+export type SppHostAccountQueryRequest = z.infer<typeof SppHostAccountQueryRequestSchema>;
+
+export const SppHostAccountQuerySuccessSchema = z.object({
+  channel: z.literal(SPP_HOST_BRIDGE_CHANNEL),
+  type: z.literal('SPP_HOST_ACCOUNT_QUERY_RESULT'),
+  id: z.string().min(1),
+  ok: z.literal(true),
+  action: z.enum(['snapshot', 'recipient_lookup', 'sync', 'register_public_keys']),
+  snapshot: z
+    .object({
+      userAddress: z.string().min(56).max(56),
+      poolContract: z.string().min(56).max(56),
+      registered: z.boolean().nullable(),
+      privateBalanceStroops: z.string().nullable(),
+      noteCount: z.number().int().nullable(),
+    })
+    .optional(),
+  lookup: z
+    .object({
+      address: z.string().min(56).max(56),
+      found: z.boolean(),
+      registryFullySynced: z.boolean().nullable(),
+      networkTipLedger: z.number().nullable(),
+      noteKeyPresent: z.boolean(),
+      encryptionKeyPresent: z.boolean(),
+    })
+    .optional(),
+  registerTxHash: z.string().nullable().optional(),
+  rpcRoutedViaNym: z.literal(true),
+});
+
+export const SppHostAccountQueryFailureSchema = z.object({
+  channel: z.literal(SPP_HOST_BRIDGE_CHANNEL),
+  type: z.literal('SPP_HOST_ACCOUNT_QUERY_RESULT'),
+  id: z.string().min(1),
+  ok: z.literal(false),
+  code: z.enum([
+    'NYM_REQUIRED',
+    'SESSION_NOT_READY',
+    'INVALID_REQUEST',
+    'EXECUTION_FAILED',
+    'UNAUTHORIZED',
+    'HOST_UNAVAILABLE',
+  ]),
+  message: z.string().min(1).max(500),
+});
+
+export const SppHostAccountQueryResultSchema = z.union([
+  SppHostAccountQuerySuccessSchema,
+  SppHostAccountQueryFailureSchema,
+]);
+
+export type SppHostAccountQueryResult = z.infer<typeof SppHostAccountQueryResultSchema>;
+
 export function isSppHostBridgeMessage(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const channel = (value as { channel?: unknown }).channel;
@@ -215,5 +291,19 @@ export function parseSppHostNymFetchRequest(value: unknown): SppHostNymFetchRequ
 
 export function parseSppHostNymFetchResult(value: unknown): SppHostNymFetchResult | null {
   const parsed = SppHostNymFetchResultSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+export function parseSppHostAccountQueryRequest(
+  value: unknown,
+): SppHostAccountQueryRequest | null {
+  const parsed = SppHostAccountQueryRequestSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+export function parseSppHostAccountQueryResult(
+  value: unknown,
+): SppHostAccountQueryResult | null {
+  const parsed = SppHostAccountQueryResultSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }

@@ -9,6 +9,10 @@
 import type { Client, WalletSigner } from 'stellar-private-payments';
 import type { SppPrivatePool, SppPrivatePoolResult } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import { registerSppHostWritePool, clearSppHostWritePool } from './sppHostWritePool.js';
+import {
+  bindSppHostAccountSurface,
+  clearSppHostAccountSurface,
+} from './sppHostAccountSurface.js';
 import { SppHostRemoteSigner } from './sppHostRemoteSigner.js';
 import { withSppHostNymFetchProxy } from './sppHostNymFetchProxy.js';
 
@@ -69,10 +73,24 @@ export async function initializeSppHostWritePool(
       signer,
     );
     await account.derivePrivacyKeys();
+    // Indexer sync (no broadcast). On-chain registerPublicKeys is separate and gated.
+    try {
+      await input.client.sync();
+    } catch {
+      // Sync failures are non-fatal for pool bind; lookup UX will surface them.
+    }
     const sdkPool = (await account.pool({
       poolContract: input.poolContract,
     })) as unknown as SdkPrivatePool;
     const adapted = adaptSdkPrivatePool(sdkPool);
+    bindSppHostAccountSurface({
+      client: input.client,
+      account: account as unknown as Parameters<typeof bindSppHostAccountSurface>[0]['account'],
+      userAddress: input.userAddress,
+      poolContract: input.poolContract,
+      rpcUrl: input.rpcUrl,
+      networkPassphrase: input.networkPassphrase,
+    });
     registerSppHostWritePool({
       pool: adapted,
       poolContract: input.poolContract,
@@ -82,5 +100,6 @@ export async function initializeSppHostWritePool(
 }
 
 export function disposeSppHostWritePool(reason?: string): void {
+  clearSppHostAccountSurface();
   clearSppHostWritePool(reason);
 }

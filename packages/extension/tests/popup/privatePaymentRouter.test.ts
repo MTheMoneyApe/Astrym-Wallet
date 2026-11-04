@@ -63,4 +63,13 @@ describe('routePrivatePayment', () => {
     expect(route.status).toBe('unknown');
     expect(route.canSubmit).toBe(false);
   });
+
+  it('blocks submit when proving keys or contract config are missing', () => {
+    expect(
+      routePrivatePayment({ ...base, preparePhase: 'missing_proving_keys' }).status,
+    ).toBe('failed');
+    expect(
+      routePrivatePayment({ ...base, preparePhase: 'missing_configuration' }).canSubmit,
+    ).toBe(false);
+  });
 });

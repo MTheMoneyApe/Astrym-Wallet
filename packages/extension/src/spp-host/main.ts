@@ -29,11 +29,25 @@ import { STORAGE_LAB_EXECUTION_AUTHORIZED } from './storageLabPrep.js';
 // SW ↔ host private-payment bridge (no secrets on the channel).
 installSppHostBridgeListener();
 
+/**
+ * Resolve packaged SPP assets.
+ * - Real MV3 extension: chrome.runtime.getURL
+ * - Vercel / Vite webapp (no extension id): same-origin path-absolute `/spp/…`
+ *   (never remote http(s); assertExtensionOriginUrls enforces this)
+ */
 function getExtensionURL(path: string): string {
-  if (typeof chrome !== 'undefined' && chrome.runtime?.getURL) {
-    return chrome.runtime.getURL(path);
+  const normalized = path.replace(/^\//, '');
+  const hasRealExtensionRuntime =
+    typeof chrome !== 'undefined' &&
+    typeof chrome.runtime?.id === 'string' &&
+    chrome.runtime.id.length > 0 &&
+    chrome.runtime.id !== 'astrym-android-webapp' &&
+    typeof chrome.runtime.getURL === 'function';
+  if (hasRealExtensionRuntime) {
+    return chrome.runtime.getURL(normalized);
   }
-  throw new Error('chrome.runtime.getURL is unavailable — open this page as an extension page');
+  // Webapp / Playwright preview: assets copied next to spp-host.html under /spp/
+  return `/${normalized}`;
 }
 
 /** Mirror bound session (or clear) for popup Settings — no session init. */

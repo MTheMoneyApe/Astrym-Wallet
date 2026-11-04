@@ -304,9 +304,9 @@ export class SppWalletSignerAdapter implements WalletSigner {
   }
 
   private _assertPreimageNetwork(preimage: xdr.HashIdPreimage, networkPassphrase: string): void {
-    const expectedNetworkId = hash(Buffer.from(networkPassphrase, 'utf8'));
+    const expectedNetworkId = hash(new TextEncoder().encode(networkPassphrase));
     const value = preimage.value as {
-      networkId?: Buffer | Uint8Array | { toXDR: (format: string) => Buffer | Uint8Array };
+      networkId?: Uint8Array | { toXDR: (format: string) => Uint8Array };
     };
     const raw = value.networkId;
     if (!raw) {
@@ -320,13 +320,13 @@ export class SppWalletSignerAdapter implements WalletSigner {
 }
 
 function extractHashBytes(
-  value: Buffer | Uint8Array | { toXDR: (format: string) => Buffer | Uint8Array },
+  value: Uint8Array | { toXDR: (format: string) => Uint8Array },
 ): Uint8Array {
   if (value instanceof Uint8Array) {
     return value;
   }
   if (value && typeof (value as { toXDR?: unknown }).toXDR === 'function') {
-    const raw = (value as { toXDR: (format: string) => Buffer | Uint8Array }).toXDR('raw');
+    const raw = (value as { toXDR: (format: string) => Uint8Array }).toXDR('raw');
     return raw instanceof Uint8Array ? raw : new Uint8Array(raw);
   }
   throw new SppSignerError('Auth preimage networkId is not a recognizable hash encoding');

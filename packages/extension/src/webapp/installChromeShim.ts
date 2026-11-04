@@ -157,6 +157,14 @@ export function installAndroidChromeShim(): void {
     lastError: undefined as { message: string } | undefined,
     getURL(path: string) {
       const normalized = path.startsWith('/') ? path : `/${path}`;
+      // Path-absolute URLs keep SPP host assertExtensionOriginUrls / loadSppSdkFacade
+      // happy (they refuse remote http(s) imports) while resolving same-origin.
+      if (
+        typeof location !== 'undefined' &&
+        (location.protocol === 'http:' || location.protocol === 'https:')
+      ) {
+        return normalized;
+      }
       const origin = typeof location !== 'undefined' ? location.origin : 'http://localhost';
       return new URL(normalized, origin).href;
     },
@@ -164,97 +172,173 @@ export function installAndroidChromeShim(): void {
       const callback = typeof args[args.length - 1] === 'function' ? (args.pop() as Callback) : undefined;
       const message = args.find((arg) => arg !== null && typeof arg === 'object');
       const sender = { id: runtime.id, url: runtime.getURL('/webapp.html') };
-      let pending = false;
-      let settled = false;
-      const sendResponse = (response: unknown) => {
-        if (settled) return;
-        settled = true;
-        runtime.lastError = undefined;
-        try {
-          callback?.(response);
-        } finally {
-          runtime.lastError = undefined;
-        }
-      };
-      for (const listener of onMessage.snapshot()) {
-        const ret = listener(message, sender, sendResponse);
-        if (ret === true) pending = true;
+
+      const run = (): Promise<unknown> =>
+        new Promise((resolve, reject) => {
+          let pending = false;
+          let settled = false;
+          const finish = (response: unknown, isError: boolean) => {
+            if (settled) return;
+            settled = true;
+            if (isError) {
+              runtime.lastError = { message: NO_RESPONSE };
+              reject(new Error(NO_RESPONSE));
+              runtime.lastError = undefined;
+              return;
+            }
+            runtime.lastError = undefined;
+            resolve(response);
+          };
+          const sendResponse = (response: unknown) => {
+            finish(response, false);
+          };
+          for (const listener of onMessage.snapshot()) {
+            let ret: unknown;
+            try {
+              ret = listener(message, sender, sendResponse);
+            } catch (cause) {
+              reject(cause instanceof Error ? cause : new Error(String(cause)));
+              return;
+            }
+            // MV3 / polyfill: async listeners return a Promise (or true + sendResponse).
+            if (ret === true) {
+              pending = true;
+            } else if (ret != null && typeof (ret as { then?: unknown }).then === 'function') {
+              pending = true;
+              void Promise.resolve(ret).then(
+                (value) => finish(value, false),
+                (cause) => {
+                  if (settled) return;
+                  settled = true;
+                  reject(cause instanceof Error ? cause : new Error(String(cause)));
+                },
+              );
+            }
+          }
+          if (!pending && !settled) {
+            finish(undefined, true);
+          }
+        });
+
+      if (typeof callback === 'function') {
+        void run().then(
+          (response) => {
+            runtime.lastError = undefined;
+            callback(response);
+          },
+          (cause) => {
+            runtime.lastError = {
+              message: cause instanceof Error ? cause.message : NO_RESPONSE,
+            };
+            try {
+              callback(undefined);
+            } finally {
+              runtime.lastError = undefined;
+            }
+          },
+        );
+        return undefined;
       }
-      if (!pending && !settled) {
-        runtime.lastError = { message: NO_RESPONSE };
-        try {
-          callback?.(undefined);
-        } finally {
-          runtime.lastError = undefined;
-        }
-      }
+      return run();
     },
     onMessage,
   };
 
+  /**
+   * MV3 / webextension-polyfill style: return a Promise when no callback is
+   * provided. Callback-only shims break `await chrome.storage.local.get/set`
+   * (SPP auto-prepare, gateway config) — await resolves to undefined and
+   * prepare never publishes status (idle forever after Nym Connect).
+   */
   function area(kind: 'local' | 'session') {
     return {
-      get(keys: unknown, callback?: Callback) {
-        const done = (result: Store) => {
-          runtime.lastError = undefined;
-          callback?.(result);
-        };
-        if (kind === 'local') {
-          queueMicrotask(() => done(selectKeys(local.read(), keys)));
-          return;
+      get(keys?: unknown, callback?: Callback) {
+        const run = (): Promise<Store> =>
+          new Promise((resolve) => {
+            const finish = (result: Store) => {
+              runtime.lastError = undefined;
+              resolve(result);
+            };
+            if (kind === 'local') {
+              queueMicrotask(() => finish(selectKeys(local.read(), keys ?? null)));
+              return;
+            }
+            void sessionReady.then(() =>
+              finish(selectKeys(Object.fromEntries(session), keys ?? null)),
+            );
+          });
+        if (typeof callback === 'function') {
+          void run().then((result) => callback(result));
+          return undefined;
         }
-        void sessionReady.then(() => done(selectKeys(Object.fromEntries(session), keys)));
+        return run();
       },
       set(items: Store, callback?: Callback) {
-        const apply = () => {
-          const changes: Record<string, { oldValue?: unknown; newValue?: unknown }> = {};
-          if (kind === 'local') {
-            const current = local.read();
-            const next = { ...current };
-            for (const [key, value] of Object.entries(items)) {
-              changes[key] = { oldValue: current[key], newValue: value };
-              next[key] = value;
-            }
-            local.write(next);
-          } else {
-            for (const [key, value] of Object.entries(items)) {
-              changes[key] = { oldValue: session.get(key), newValue: value };
-              session.set(key, value);
-              persistSession(key, value);
-            }
-          }
-          runtime.lastError = undefined;
-          onChanged.emit(changes, kind);
-          callback?.();
-        };
-        if (kind === 'local') queueMicrotask(apply);
-        else void sessionReady.then(apply);
+        const run = (): Promise<void> =>
+          new Promise((resolve) => {
+            const apply = () => {
+              const changes: Record<string, { oldValue?: unknown; newValue?: unknown }> = {};
+              if (kind === 'local') {
+                const current = local.read();
+                const next = { ...current };
+                for (const [key, value] of Object.entries(items)) {
+                  changes[key] = { oldValue: current[key], newValue: value };
+                  next[key] = value;
+                }
+                local.write(next);
+              } else {
+                for (const [key, value] of Object.entries(items)) {
+                  changes[key] = { oldValue: session.get(key), newValue: value };
+                  session.set(key, value);
+                  persistSession(key, value);
+                }
+              }
+              runtime.lastError = undefined;
+              onChanged.emit(changes, kind);
+              resolve();
+            };
+            if (kind === 'local') queueMicrotask(apply);
+            else void sessionReady.then(apply);
+          });
+        if (typeof callback === 'function') {
+          void run().then(() => callback());
+          return undefined;
+        }
+        return run();
       },
       remove(keys: string | string[], callback?: Callback) {
         const list = Array.isArray(keys) ? keys : [keys];
-        const apply = () => {
-          const changes: Record<string, { oldValue?: unknown }> = {};
-          if (kind === 'local') {
-            const current = local.read();
-            const next = { ...current };
-            for (const key of list) {
-              changes[key] = { oldValue: current[key] };
-              delete next[key];
-            }
-            local.write(next);
-          } else {
-            for (const key of list) {
-              changes[key] = { oldValue: session.get(key) };
-              session.delete(key);
-              persistSession(key, undefined);
-            }
-          }
-          runtime.lastError = undefined;
-          onChanged.emit(changes, kind);
-          callback?.();
-        };
-        if (kind === 'local') queueMicrotask(apply);
-        else void sessionReady.then(apply);
+        const run = (): Promise<void> =>
+          new Promise((resolve) => {
+            const apply = () => {
+              const changes: Record<string, { oldValue?: unknown }> = {};
+              if (kind === 'local') {
+                const current = local.read();
+                const next = { ...current };
+                for (const key of list) {
+                  changes[key] = { oldValue: current[key] };
+                  delete next[key];
+                }
+                local.write(next);
+              } else {
+                for (const key of list) {
+                  changes[key] = { oldValue: session.get(key) };
+                  session.delete(key);
+                  persistSession(key, undefined);
+                }
+              }
+              runtime.lastError = undefined;
+              onChanged.emit(changes, kind);
+              resolve();
+            };
+            if (kind === 'local') queueMicrotask(apply);
+            else void sessionReady.then(apply);
+          });
+        if (typeof callback === 'function') {
+          void run().then(() => callback());
+          return undefined;
+        }
+        return run();
       },
     };
   }

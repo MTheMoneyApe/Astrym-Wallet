@@ -337,6 +337,7 @@ export class NymOffscreenRuntime {
       // Official MixFetchOpts only — never forward gatewayAllowlist / raw disableCoverTraffic.
       const bridgeOpts: {
         preferredGateway?: string;
+        preferredNetworkRequester?: string;
         disableCoverTraffic?: boolean;
         forceTls?: boolean;
         mixFetchOverride?: { requestTimeoutMs?: number };
@@ -349,6 +350,13 @@ export class NymOffscreenRuntime {
         // Horizon HAL+JSON must not use blob fallback (empty/hung bodies via MixFetch).
         responseBodyConfigMap: NYM_RESPONSE_BODY_CONFIG_FOR_STELLAR,
       };
+      const preferredNr =
+        typeof options?.preferredNetworkRequester === 'string'
+          ? options.preferredNetworkRequester.trim()
+          : '';
+      if (preferredNr.includes('@')) {
+        bridgeOpts.preferredNetworkRequester = preferredNr;
+      }
       if (options?.disableCoverTraffic !== undefined) {
         bridgeOpts.disableCoverTraffic = options.disableCoverTraffic;
       }
@@ -430,14 +438,34 @@ export class NymOffscreenRuntime {
       (requestInit as { mode?: string }).mode = init.mode;
     }
 
+    // Go WASM requestTimeoutMs does not always reject the JS promise (observed
+    // hang after "SENDING CONNECT"). Bound the caller so UI/smoke cannot pend forever.
+    const REQUEST_HARD_TIMEOUT_MS = 95_000;
     let response: Response;
+    let hardTimer: ReturnType<typeof setTimeout> | undefined;
     try {
-      response = await this._instance.mixFetch(url, requestInit);
+      response = await Promise.race([
+        this._instance.mixFetch(url, requestInit),
+        new Promise<never>((_, reject) => {
+          hardTimer = setTimeout(() => {
+            reject(
+              Object.assign(
+                new Error(
+                  `MixFetch request timed out after ${REQUEST_HARD_TIMEOUT_MS}ms (Mixnet path; not clearnet)`,
+                ),
+                { code: 'REQUEST_FAILED' as const },
+              ),
+            );
+          }, REQUEST_HARD_TIMEOUT_MS);
+        }),
+      ]);
     } catch (cause) {
       this.setDiagnostic(cause, 'REQUEST_FAILED');
       throw Object.assign(new Error(this._lastError!), {
         code: this._diagnosticCode,
       });
+    } finally {
+      if (hardTimer !== undefined) clearTimeout(hardTimer);
     }
 
     const buf = new Uint8Array(await response.arrayBuffer());

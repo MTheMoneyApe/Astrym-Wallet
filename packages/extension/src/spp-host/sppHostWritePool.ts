@@ -7,9 +7,9 @@
  *   Account.pool({ poolContract }) → PrivatePool
  *   PrivatePool.deposit / transfer / withdraw → PoolExecuteResult.hashes
  *
- * This module stores an optional injected {@link SppPrivatePool}-compatible
- * adapter. It does NOT invent a PrivatePool. Until a write runtime + WalletSigner
- * IPC is wired, execute fails closed with SESSION_NOT_READY.
+ * This module stores the in-page write {@link SppPrivatePool} adapter created by
+ * {@link initializeSppHostWritePool}. Execute fails closed with SESSION_NOT_READY
+ * until that registration completes. WalletSigner IPC is remote via SW.
  */
 
 import type {
@@ -17,6 +17,19 @@ import type {
   SppPrivatePool,
   SppPrivatePoolResult,
 } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
+import { assertSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
+import {
+  assertFeeWithinCeiling,
+  maxFeeStroopsForOperation,
+} from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import {
+  SppMultiAccountSequenceTracker,
+  abortSppAccountOperation,
+  assertFreshSequenceMatchesExpected,
+  beginSppAccountOperation,
+  confirmSppAccountOperation,
+} from '@solanym/wallet-core/src/stellar/spp/sppAccountSequenceTracker.js';
+import { privatePaymentFingerprint } from '@solanym/wallet-core/src/stellar/spp/sppExecutionGuard.js';
 import {
   SPP_HOST_BRIDGE_CHANNEL,
   type SppHostExecuteRequest,
@@ -31,15 +44,35 @@ export type SppHostWritePoolStatus = {
   generation: number;
 };
 
+type SequenceInFlight = {
+  address: string;
+  fingerprint: string;
+};
+
 let writePool: SppPrivatePool | null = null;
 let boundPoolContract: string | null = null;
 let generation = 0;
 let lifecycleListener: ((event: SppHostLifecycleEvent) => void) | null = null;
+let sequenceTracker = new SppMultiAccountSequenceTracker();
 
 export function setSppHostLifecyclePublisher(
   publish: ((event: SppHostLifecycleEvent) => void) | null,
 ): void {
   lifecycleListener = publish;
+}
+
+/** Inject a tracker (tests) or replace the module singleton. */
+export function setSppHostSequenceTracker(tracker: SppMultiAccountSequenceTracker): void {
+  sequenceTracker = tracker;
+}
+
+export function getSppHostSequenceTracker(): SppMultiAccountSequenceTracker {
+  return sequenceTracker;
+}
+
+/** Test helper — clears account-scoped sequence state. */
+export function resetSppHostSequenceTrackerForTests(): void {
+  sequenceTracker = new SppMultiAccountSequenceTracker();
 }
 
 function publish(state: SppHostLifecycleEvent['state'], message?: string): void {
@@ -90,6 +123,91 @@ function mapPoolResult(result: SppPrivatePoolResult): { txHash: string | null } 
   return { txHash: result.txHash };
 }
 
+function failureResult(
+  id: string,
+  code: Extract<SppHostExecuteResult, { ok: false }>['code'],
+  message: string,
+): SppHostExecuteResult {
+  return {
+    channel: SPP_HOST_BRIDGE_CHANNEL,
+    type: 'SPP_HOST_EXECUTE_PRIVATE_PAYMENT_RESULT',
+    id,
+    ok: false,
+    code,
+    message: message.slice(0, 500),
+  };
+}
+
+function abortSequenceInFlight(begun: SequenceInFlight | null): void {
+  if (!begun) return;
+  const state = sequenceTracker.get(begun.address);
+  if (!state) return;
+  const aborted = abortSppAccountOperation(state, begun.fingerprint);
+  if (aborted.ok) sequenceTracker.replace(aborted.state);
+}
+
+/**
+ * Validate against the multi-account tracker and mark the op in-flight.
+ * Caller must pass when both signingAccount and freshSequence are present.
+ */
+function beginSequenceTracking(
+  payload: SppHostExecuteRequest['payload'] & {
+    signingAccount: string;
+    freshSequence: string;
+  },
+): { ok: true; begun: SequenceInFlight } | { ok: false; message: string } {
+  const { signingAccount, freshSequence } = payload;
+
+  const fingerprint =
+    payload.operationFingerprint ??
+    privatePaymentFingerprint({
+      operation: payload.operation,
+      poolContract: payload.poolContract,
+      amountStroops: payload.amountStroops,
+      recipient: payload.recipient ?? null,
+    });
+
+  let state = sequenceTracker.get(signingAccount);
+  if (!state) {
+    state = sequenceTracker.seed(signingAccount, freshSequence);
+  }
+
+  const seqCheck = assertFreshSequenceMatchesExpected(state, freshSequence);
+  if (!seqCheck.ok) {
+    return { ok: false, message: seqCheck.message };
+  }
+
+  const begin = beginSppAccountOperation(seqCheck.state, fingerprint);
+  if (!begin.ok) {
+    return { ok: false, message: begin.message };
+  }
+  sequenceTracker.replace(begin.state);
+  return { ok: true, begun: { address: signingAccount, fingerprint } };
+}
+
+function confirmOrAbortSequence(
+  begun: SequenceInFlight,
+  txHash: string | null,
+  nextFreshSequence: string | undefined,
+): void {
+  const state = sequenceTracker.get(begun.address);
+  if (!state) return;
+
+  if (txHash && nextFreshSequence !== undefined) {
+    const confirmed = confirmSppAccountOperation(state, {
+      fingerprint: begun.fingerprint,
+      txHash,
+      nextFreshSequence,
+    });
+    if (confirmed.ok) {
+      sequenceTracker.replace(confirmed.state);
+      return;
+    }
+  }
+  // Success without hash/next sequence, or confirm rejected → clear in-flight, do not advance.
+  abortSequenceInFlight(begun);
+}
+
 /**
  * Execute a private payment against the in-page write pool.
  * Fail-closed: no clearnet, no invented success, no global fetch mutation here.
@@ -100,42 +218,82 @@ export async function executeSppHostWritePool(
   const { id, payload } = request;
 
   if (payload.nymMode !== 'nym' || !payload.nymConnected || payload.sppSelected !== true) {
-    return {
-      channel: SPP_HOST_BRIDGE_CHANNEL,
-      type: 'SPP_HOST_EXECUTE_PRIVATE_PAYMENT_RESULT',
+    return failureResult(
       id,
-      ok: false,
-      code: 'NYM_REQUIRED',
-      message: 'spp-host refuse: Nym must be connected and SPP selected (fail-closed).',
-    };
+      'NYM_REQUIRED',
+      'spp-host refuse: Nym must be connected and SPP selected (fail-closed).',
+    );
   }
 
   if (!writePool || !boundPoolContract) {
-    return {
-      channel: SPP_HOST_BRIDGE_CHANNEL,
-      type: 'SPP_HOST_EXECUTE_PRIVATE_PAYMENT_RESULT',
+    return failureResult(
       id,
-      ok: false,
-      code: 'SESSION_NOT_READY',
-      message:
-        'Write PrivatePool no está registrado en spp-host. La sesión RO no ejecuta deposit/transfer/withdraw.',
-    };
+      'SESSION_NOT_READY',
+      'Write PrivatePool no está registrado en spp-host. La sesión RO no ejecuta deposit/transfer/withdraw.',
+    );
   }
 
   if (payload.poolContract !== boundPoolContract) {
-    return {
-      channel: SPP_HOST_BRIDGE_CHANNEL,
-      type: 'SPP_HOST_EXECUTE_PRIVATE_PAYMENT_RESULT',
+    return failureResult(
       id,
-      ok: false,
-      code: 'INVALID_REQUEST',
-      message: 'poolContract no coincide con el PrivatePool registrado en el host.',
-    };
+      'INVALID_REQUEST',
+      'poolContract no coincide con el PrivatePool registrado en el host.',
+    );
   }
 
   const activePool = writePool;
   const amount = BigInt(payload.amountStroops);
   const operation: SppPrivateOperation = payload.operation;
+
+  const maxFeeStroops = maxFeeStroopsForOperation(operation);
+  try {
+    assertFeeWithinCeiling(operation, maxFeeStroops);
+  } catch (cause) {
+    return failureResult(
+      id,
+      'INVALID_REQUEST',
+      cause instanceof Error ? cause.message : 'Fee ceiling violated',
+    );
+  }
+
+  let sequenceBegun: SequenceInFlight | null = null;
+
+  if (payload.signingAccount !== undefined && payload.freshSequence !== undefined) {
+    const begun = beginSequenceTracking({
+      ...payload,
+      signingAccount: payload.signingAccount,
+      freshSequence: payload.freshSequence,
+    });
+    if (!begun.ok) {
+      return failureResult(id, 'INVALID_REQUEST', begun.message);
+    }
+    sequenceBegun = begun.begun;
+  }
+
+  try {
+    assertSppTestnetBroadcastAuthorized({
+      network: 'testnet',
+      operation,
+      poolContract: payload.poolContract,
+      amountXlm: (Number(amount) / 10_000_000).toFixed(7),
+      amountStroops: payload.amountStroops,
+      senderAddress: payload.signingAccount ?? null,
+      recipientAddress: payload.recipient ?? null,
+      feeNote:
+        'Inclusion + Soroban resources; SDK may set fee at submit but must not exceed maxFeeStroops.',
+      maxFeeStroops,
+      rpcUrl: payload.rpcUrl,
+      transport: 'nym',
+      preparedAt: new Date().toISOString(),
+    });
+  } catch (cause) {
+    abortSequenceInFlight(sequenceBegun);
+    return failureResult(
+      id,
+      'UNAUTHORIZED',
+      cause instanceof Error ? cause.message : 'Broadcast blocked',
+    );
+  }
 
   try {
     const run = async (): Promise<SppPrivatePoolResult> => {
@@ -169,6 +327,11 @@ export async function executeSppHostWritePool(
     // SDK RPC from this page must go through SW Nym fetch — no silent clearnet.
     const result = await withSppHostNymFetchProxy(payload.rpcUrl, run);
     const mapped = mapPoolResult(result);
+
+    if (sequenceBegun) {
+      confirmOrAbortSequence(sequenceBegun, mapped.txHash, payload.nextFreshSequence);
+    }
+
     return {
       channel: SPP_HOST_BRIDGE_CHANNEL,
       type: 'SPP_HOST_EXECUTE_PRIVATE_PAYMENT_RESULT',
@@ -179,18 +342,12 @@ export async function executeSppHostWritePool(
       rpcRoutedViaNym: true,
     };
   } catch (cause) {
+    abortSequenceInFlight(sequenceBegun);
     const code =
       cause && typeof cause === 'object' && (cause as { code?: string }).code === 'INVALID_REQUEST'
         ? 'INVALID_REQUEST'
         : 'EXECUTION_FAILED';
     const message = cause instanceof Error ? cause.message : 'WASM/private pool execution failed';
-    return {
-      channel: SPP_HOST_BRIDGE_CHANNEL,
-      type: 'SPP_HOST_EXECUTE_PRIVATE_PAYMENT_RESULT',
-      id,
-      ok: false,
-      code,
-      message: message.slice(0, 500),
-    };
+    return failureResult(id, code, message);
   }
 }

@@ -64,6 +64,35 @@ export function routePrivatePayment(input: PrivatePaymentRouteInput): PrivatePay
     };
   }
 
+  if (
+    input.preparePhase === 'missing_configuration' ||
+    input.preparePhase === 'missing_proving_keys' ||
+    input.preparePhase === 'awaiting_pool_config'
+  ) {
+    return {
+      status: 'failed',
+      canAuthorize: false,
+      canSubmit: false,
+      blockPublicFallback,
+      message:
+        input.preparePhase === 'missing_proving_keys'
+          ? 'Faltan proving keys empaquetadas. Sin ellas no hay write path.'
+          : input.preparePhase === 'missing_configuration'
+            ? 'Falta ContractConfig (deployments.json) verificado. No se inventan direcciones.'
+            : 'Falta contrato de pool C… válido en la configuración.',
+    };
+  }
+
+  if (input.preparePhase === 'read_only') {
+    return {
+      status: 'initializing',
+      canAuthorize: false,
+      canSubmit: false,
+      blockPublicFallback,
+      message: 'Sesión SPP en solo lectura. El write pool aún no está listo.',
+    };
+  }
+
   if (input.preparePhase !== 'ready') {
     return {
       status: 'initializing',

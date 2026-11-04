@@ -1,10 +1,15 @@
 /**
- * Host-side auto-prepare: probe + WASM (+ optional write pool when pool C… is known).
+ * Host-side auto-prepare: probe + WASM + real circuitLock + verified ContractConfig
+ * (defaults to pinned Nethermind public Testnet) + proving-key probe + optional write pool.
  * Never marks ready without a verified write_pool_ready registration.
+ * Never invents deployments, bootnodes, or labPlaceholder configs.
+ * Nym mode stays fail-closed (no clearnet fallback).
  */
 
 import {
   SPP_AUTO_PREPARE_INTENT_KEY,
+  SPP_BOOTNODE_URL_KEY,
+  SPP_CONTRACT_CONFIG_KEY,
   SPP_POOL_CONTRACT_KEY,
   SPP_PREPARE_STATUS_KEY,
   createIdleSppPrepareStatus,
@@ -12,7 +17,24 @@ import {
   type SppPrepareStatus,
 } from '../shared/sppPrepareStatus.js';
 import type { SppHostController } from './hostController.js';
+import { getSppHostWritePoolStatus } from './sppHostWritePool.js';
 import { STELLAR_SOROBAN_TESTNET_RPC } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
+import {
+  findEnabledPoolContract,
+  parseSppContractConfig,
+  type SppContractConfigInput,
+} from '@solanym/wallet-core/src/stellar/spp/sppContractConfig.js';
+import {
+  classifySppDeploymentOwnership,
+  getNethermindPublicTestnetContractConfig,
+  NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
+  resolveNethermindPublicXlmPool,
+} from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
+import {
+  loadCircuitLockFromBaseUrl,
+  probeSppProvingKeys,
+  type SppCircuitLock,
+} from '@solanym/wallet-core/src/stellar/spp/sppProvingKeys.js';
 
 async function publish(status: SppPrepareStatus): Promise<void> {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
@@ -25,6 +47,19 @@ async function readIntent(): Promise<SppAutoPrepareIntent | null> {
   const value = raw[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
   if (!value || value.autoRun !== true) return null;
   return value;
+}
+
+async function readStoredContractConfig(): Promise<unknown | null> {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return null;
+  const raw = await chrome.storage.local.get(SPP_CONTRACT_CONFIG_KEY);
+  return raw[SPP_CONTRACT_CONFIG_KEY] ?? null;
+}
+
+async function readStoredBootnodeUrl(): Promise<string | null> {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return null;
+  const raw = await chrome.storage.local.get(SPP_BOOTNODE_URL_KEY);
+  const value = raw[SPP_BOOTNODE_URL_KEY];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 async function nymIsActive(): Promise<boolean> {
@@ -60,6 +95,14 @@ async function resolveActiveStellarAddress(): Promise<string | null> {
   }
 }
 
+function ownershipFields(config: SppContractConfigInput, poolContract: string | null) {
+  const info = classifySppDeploymentOwnership({ config, poolContract });
+  return {
+    deploymentOwnership: info.ownership,
+    deploymentLabel: info.label,
+  } as const;
+}
+
 /**
  * Consume auto-prepare intent once per host load. Safe to call after controller is constructed.
  */
@@ -69,7 +112,7 @@ export async function runSppHostAutoPrepareIfRequested(
   const intent = await readIntent();
   if (!intent) return;
 
-  const poolContract =
+  const storedPool =
     intent.poolContract ??
     (typeof chrome !== 'undefined' && chrome.storage?.local
       ? ((await chrome.storage.local.get(SPP_POOL_CONTRACT_KEY))[SPP_POOL_CONTRACT_KEY] as
@@ -78,10 +121,24 @@ export async function runSppHostAutoPrepareIfRequested(
       : null) ??
     null;
 
-  const base = (): SppPrepareStatus => ({
+  const base = (
+    poolContract: string | null = null,
+    ownership?: ReturnType<typeof ownershipFields>,
+  ): SppPrepareStatus => ({
     ...createIdleSppPrepareStatus(),
-    poolContract: poolContract && poolContract.length === 56 ? poolContract : null,
+    poolContract:
+      poolContract && poolContract.length === 56
+        ? poolContract
+        : storedPool && storedPool.length === 56
+          ? storedPool
+          : null,
     generation: intent.generation,
+    ...(ownership
+      ? {
+          deploymentOwnership: ownership.deploymentOwnership,
+          deploymentLabel: ownership.deploymentLabel,
+        }
+      : {}),
   });
 
   if (!(await nymIsActive())) {
@@ -123,12 +180,39 @@ export async function runSppHostAutoPrepareIfRequested(
       return;
     }
 
-    if (!poolContract || !poolContract.startsWith('C') || poolContract.length !== 56) {
+    const circuitsBaseUrl = snap.assets?.circuitsBaseUrl;
+    if (!circuitsBaseUrl) {
       await publish({
         ...base(),
-        phase: 'awaiting_pool_config',
+        phase: 'failed',
+        message: 'circuitsBaseUrl ausente tras el probe',
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+
+    let circuitLock: SppCircuitLock;
+    try {
+      circuitLock = await loadCircuitLockFromBaseUrl(circuitsBaseUrl);
+    } catch (cause) {
+      await publish({
+        ...base(),
+        phase: 'failed',
         message:
-          'Assets listos. Configura el contrato del pool (C…) en Ajustes para completar PrivatePool.',
+          cause instanceof Error
+            ? `circuitLock: ${cause.message}`
+            : 'No se pudo cargar circuits.json empaquetado',
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+
+    const proving = await probeSppProvingKeys({ circuitsBaseUrl, lock: circuitLock });
+    if (!proving.ok) {
+      await publish({
+        ...base(),
+        phase: 'missing_proving_keys',
+        message: `${proving.message} Ej.: ${proving.missing.slice(0, 3).join(', ')}`,
         updatedAt: Date.now(),
       });
       return;
@@ -136,23 +220,94 @@ export async function runSppHostAutoPrepareIfRequested(
 
     await publish({
       ...base(),
-      phase: 'initializing_session',
-      message: 'Construyendo e inicializando sesión SPP…',
+      phase: 'assets_ready',
+      message: `Assets + ${proving.circuitIds.length} circuitos con proving keys verificados.`,
       updatedAt: Date.now(),
     });
 
-    // Explicit lab placeholders — same as host UI defaults; real Testnet configs must be set by operator.
+    let rawConfig = await readStoredContractConfig();
+    let contractConfig: SppContractConfigInput;
+    if (!rawConfig) {
+      // Default to pinned Nethermind public Testnet — do not invent Astrym-owned addresses.
+      contractConfig = getNethermindPublicTestnetContractConfig();
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        await chrome.storage.local.set({ [SPP_CONTRACT_CONFIG_KEY]: contractConfig });
+      }
+    } else {
+      try {
+        contractConfig = parseSppContractConfig(rawConfig);
+      } catch (cause) {
+        await publish({
+          ...base(),
+          phase: 'missing_configuration',
+          message:
+            cause instanceof Error
+              ? cause.message
+              : 'ContractConfig inválido — corrige deployments.json',
+          updatedAt: Date.now(),
+        });
+        return;
+      }
+    }
+
+    const ownershipForPreferred = ownershipFields(
+      contractConfig,
+      storedPool && storedPool.length === 56 ? storedPool : NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
+    );
+
+    const poolContract =
+      findEnabledPoolContract(
+        contractConfig,
+        storedPool && storedPool.length === 56
+          ? storedPool
+          : resolveNethermindPublicXlmPool(contractConfig),
+      ) ?? findEnabledPoolContract(contractConfig);
+
+    if (!poolContract) {
+      await publish({
+        ...base(null, ownershipForPreferred),
+        phase: 'awaiting_pool_config',
+        message:
+          'ContractConfig sin pool habilitado (C…). Añade pools[].enabled=true o elige un C… válido.',
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+
+    const ownership = ownershipFields(contractConfig, poolContract);
+
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      await chrome.storage.local.set({ [SPP_POOL_CONTRACT_KEY]: poolContract });
+    }
+
+    const rpcUrl =
+      (typeof contractConfig.rpcUrl === 'string' && contractConfig.rpcUrl.trim()) ||
+      STELLAR_SOROBAN_TESTNET_RPC;
+    const networkPassphrase =
+      (typeof contractConfig.networkPassphrase === 'string' &&
+        contractConfig.networkPassphrase.trim()) ||
+      'Test SDF Network ; September 2015';
+    const bootnodeUrl = await readStoredBootnodeUrl();
+
+    await publish({
+      ...base(poolContract, ownership),
+      phase: 'initializing_session',
+      message: `Construyendo sesión SPP (${ownership.deploymentLabel})…`,
+      updatedAt: Date.now(),
+    });
+
     if (!controller.snapshot().sessionBound) {
       controller.constructAndAttachUninitializedSession({
-        rpcUrl: STELLAR_SOROBAN_TESTNET_RPC,
-        contractConfig: { labPlaceholder: true },
-        circuitLock: { labPlaceholder: true },
+        rpcUrl,
+        contractConfig,
+        circuitLock,
+        ...(bootnodeUrl ? { bootnodeUrl } : {}),
       });
     }
     snap = await controller.initializeBoundSessionForNym(true);
     if (snap.sessionState !== 'ready') {
       await publish({
-        ...base(),
+        ...base(poolContract, ownership),
         phase: 'failed',
         message: snap.sessionConstructError ?? 'La sesión SPP no quedó ready',
         updatedAt: Date.now(),
@@ -160,34 +315,54 @@ export async function runSppHostAutoPrepareIfRequested(
       return;
     }
 
+    await publish({
+      ...base(poolContract, ownership),
+      phase: 'read_only',
+      message: 'Sesión solo lectura lista. Preparando PrivatePool de escritura…',
+      updatedAt: Date.now(),
+    });
+
     const userAddress = await resolveActiveStellarAddress();
     if (!userAddress) {
       await publish({
-        ...base(),
-        phase: 'awaiting_pool_config',
-        message: 'Sesión RO lista. Desbloquea una cuenta Stellar activa para el write pool.',
+        ...base(poolContract, ownership),
+        phase: 'read_only',
+        message:
+          'Sesión RO lista. Desbloquea una cuenta Stellar activa (Testnet) para el write pool.',
         updatedAt: Date.now(),
       });
       return;
     }
 
     await publish({
-      ...base(),
+      ...base(poolContract, ownership),
       phase: 'initializing_write_pool',
-      message: 'Creando PrivatePool con firmante remoto…',
+      message: 'Creando PrivatePool con firmante remoto vía Nym…',
       updatedAt: Date.now(),
     });
     await controller.initializeWritePoolForNym({
       nymActive: true,
       poolContract,
       userAddress,
-      networkPassphrase: 'Test SDF Network ; September 2015',
+      networkPassphrase,
     });
 
+    const writeStatus = getSppHostWritePoolStatus();
+    if (!writeStatus.hasWritePool || writeStatus.poolContract !== poolContract) {
+      await publish({
+        ...base(poolContract, ownership),
+        phase: 'failed',
+        message: 'Write pool no quedó registrado tras initializeWritePoolForNym (fail-closed).',
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+
     await publish({
-      ...base(),
+      ...base(poolContract, ownership),
       phase: 'ready',
-      message: 'PrivatePool listo. Los pagos privados usan Nym (sin fallback clearnet).',
+      message:
+        `SESSION write_pool_ready (${ownership.deploymentLabel}). Deposit/transfer/withdraw en el mismo pool vía Nym (sin fallback clearnet).`,
       updatedAt: Date.now(),
     });
   } catch (cause) {

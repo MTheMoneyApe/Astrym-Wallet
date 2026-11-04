@@ -22,6 +22,11 @@ export type SppHostPoolProxyOptions = {
   nymConnected: boolean;
   poolContract: string;
   send: SppHostBridgeSender;
+  /** Optional account-scoped sequence tracking forwarded to spp-host. */
+  signingAccount?: string;
+  freshSequence?: string;
+  nextFreshSequence?: string;
+  operationFingerprint?: string;
 };
 
 async function executeViaHost(
@@ -48,6 +53,10 @@ async function executeViaHost(
     sppSelected: true,
   };
   if (recipient) payload.recipient = recipient;
+  if (options.signingAccount) payload.signingAccount = options.signingAccount;
+  if (options.freshSequence) payload.freshSequence = options.freshSequence;
+  if (options.nextFreshSequence) payload.nextFreshSequence = options.nextFreshSequence;
+  if (options.operationFingerprint) payload.operationFingerprint = options.operationFingerprint;
 
   const request: SppHostExecuteRequest = {
     channel: SPP_HOST_BRIDGE_CHANNEL,

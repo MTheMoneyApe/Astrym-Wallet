@@ -107,7 +107,12 @@ export function digestToHex(digest: Uint8Array): string {
   if (digest.byteLength !== 32) {
     throw new Error('Signing digest must be exactly 32 bytes');
   }
-  return Buffer.from(digest).toString('hex');
+  // Browser-safe — never rely on Node Buffer in the Android webapp host.
+  let hex = '';
+  for (let i = 0; i < digest.byteLength; i++) {
+    hex += digest[i]!.toString(16).padStart(2, '0');
+  }
+  return hex;
 }
 
 export function createContextualSignatureGate(

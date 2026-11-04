@@ -42,6 +42,12 @@ import {
   parseSppHostSignRequest,
 } from '../shared/sppHostBridge.js';
 import { createSppPrivatePaymentHandler } from './handlers/sppPrivatePaymentHandler.js';
+import {
+  createSppAccountSnapshotHandler,
+  createSppAccountSyncHandler,
+  createSppRecipientLookupHandler,
+  createSppRegisterPublicKeysHandler,
+} from './handlers/sppAccountHandlers.js';
 import { noteSppHostLifecycle } from './spp/sppPrivatePoolRegistry.js';
 import {
   handleSppHostNymFetchRequest,
@@ -181,6 +187,10 @@ function initBackgroundSynchronous() {
   router.registerHandler('CONFIRM_STELLAR_TRANSFER', createConfirmStellarTransferHandler(stellarTransferConfirmationTracker) as any);
 
   router.registerHandler('SPP_PRIVATE_PAYMENT', createSppPrivatePaymentHandler());
+  router.registerHandler('SPP_ACCOUNT_SNAPSHOT', createSppAccountSnapshotHandler());
+  router.registerHandler('SPP_RECIPIENT_LOOKUP', createSppRecipientLookupHandler());
+  router.registerHandler('SPP_REGISTER_PUBLIC_KEYS', createSppRegisterPublicKeysHandler());
+  router.registerHandler('SPP_ACCOUNT_SYNC', createSppAccountSyncHandler());
   router.registerHandler('NYM_CONNECT', createNymConnectHandler());
   router.registerHandler('NYM_DISCONNECT', createNymDisconnectHandler());
   router.registerHandler('NYM_STATUS', createNymStatusHandler());

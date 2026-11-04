@@ -49,11 +49,15 @@ export class InPageMixFetchBridge implements NymSessionBridge {
   async setup(options?: NymMixFetchSetupOptions): Promise<void> {
     const connectOptions: {
       preferredGateway?: string;
+      preferredNetworkRequester?: string;
       gatewayAllowlist?: string[];
       disableCoverTraffic?: boolean;
       forceTls?: boolean;
     } = {};
     if (options?.preferredGateway) connectOptions.preferredGateway = options.preferredGateway;
+    if (options?.preferredNetworkRequester) {
+      connectOptions.preferredNetworkRequester = options.preferredNetworkRequester;
+    }
     if (options?.gatewayAllowlist) connectOptions.gatewayAllowlist = options.gatewayAllowlist;
     if (options?.disableCoverTraffic !== undefined) {
       connectOptions.disableCoverTraffic = options.disableCoverTraffic;

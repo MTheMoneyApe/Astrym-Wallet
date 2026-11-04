@@ -705,10 +705,73 @@ export const MessageSchemas = {
       amountStroops: z.string().regex(/^[1-9][0-9]*$/),
       recipient: z.string().min(56).max(56).optional(),
       rpcUrl: z.string().url().optional(),
+      /** Must equal privatePaymentFingerprint(...) of the authorized details. */
+      authorizationFingerprint: z.string().min(8).max(256),
+      /** Explicit ceiling; never submit unbounded fees once broadcasts are authorized. */
+      maxFeeStroops: z.string().regex(/^[1-9][0-9]*$/).optional(),
+      /** Signing G… for host-side sequence tracking (optional until packet approved). */
+      signingAccount: z.string().min(56).max(56).optional(),
+      /** Fresh Horizon sequence for signingAccount before submit. */
+      freshSequence: z.string().regex(/^[0-9]+$/).optional(),
+      /** Post-confirm Horizon sequence used when host confirms advancement. */
+      nextFreshSequence: z.string().regex(/^[0-9]+$/).optional(),
     }),
     response: z.object({
       operation: z.enum(['deposit', 'transfer', 'withdraw']),
       txHash: z.string().nullable(),
+      rpcRoutedViaNym: z.literal(true),
+      confirmation: z.enum(['confirmed', 'unknown']),
+    }),
+  },
+  SPP_ACCOUNT_SNAPSHOT: {
+    request: z.object({}),
+    response: z.object({
+      userAddress: z.string().min(56).max(56),
+      poolContract: z.string().min(56).max(56),
+      registered: z.boolean().nullable(),
+      privateBalanceStroops: z.string().nullable(),
+      noteCount: z.number().int().nullable(),
+      rpcRoutedViaNym: z.literal(true),
+    }),
+  },
+  SPP_RECIPIENT_LOOKUP: {
+    request: z.object({
+      address: z.string().min(56).max(56),
+    }),
+    response: z.object({
+      address: z.string().min(56).max(56),
+      found: z.boolean(),
+      registryFullySynced: z.boolean().nullable(),
+      networkTipLedger: z.number().nullable(),
+      noteKeyPresent: z.boolean(),
+      encryptionKeyPresent: z.boolean(),
+      rpcRoutedViaNym: z.literal(true),
+    }),
+  },
+  SPP_REGISTER_PUBLIC_KEYS: {
+    request: z.object({
+      /** Operator acknowledgment that this may broadcast once the gate opens. */
+      acknowledgeBroadcast: z.literal(true),
+    }),
+    response: z.object({
+      txHash: z.string().nullable(),
+      rpcRoutedViaNym: z.literal(true),
+      confirmation: z.enum(['confirmed', 'unknown']),
+    }),
+  },
+  SPP_ACCOUNT_SYNC: {
+    request: z.object({}),
+    response: z.object({
+      synced: z.literal(true),
+      snapshot: z
+        .object({
+          userAddress: z.string().min(56).max(56),
+          poolContract: z.string().min(56).max(56),
+          registered: z.boolean().nullable(),
+          privateBalanceStroops: z.string().nullable(),
+          noteCount: z.number().int().nullable(),
+        })
+        .nullable(),
       rpcRoutedViaNym: z.literal(true),
     }),
   },

@@ -7,6 +7,7 @@ import {
 } from '../nym/NymRuntimeController.js';
 import {
   clearSppAutoPrepareOnNymDisconnect,
+  ensureSppAutoPrepareIfNeeded,
   startSppAutoPrepareAfterNymConnect,
 } from '../spp/sppAutoPrepare.js';
 import { clearSppPrivatePool } from '../spp/sppPrivatePoolRegistry.js';
@@ -85,6 +86,15 @@ export function createNymStatusHandler() {
     _payload: ValidatedRequestPayload<'NYM_STATUS'>,
   ): Promise<ValidatedResponsePayload<'NYM_STATUS'>> => {
     const snap = await getNymRuntimeController().refreshStatus();
+    // Reload / Settings: if already connected, re-arm prepare without fake ready.
+    if (snap.connected && snap.mode === 'nym') {
+      void ensureSppAutoPrepareIfNeeded({
+        nymConnected: true,
+        nymMode: 'nym',
+      }).catch(() => {
+        /* prepare status publisher records failure */
+      });
+    }
     return toSnapshot(snap);
   };
 }

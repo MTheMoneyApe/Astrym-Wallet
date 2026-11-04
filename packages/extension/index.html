@@ -4,11 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#191A1C" />
-    <meta name="description" content="Astrym — billetera de privacidad en Stellar con Nym MixFetch y pagos privados." />
+    <meta name="description" content="Astrym — billetera Stellar de autocustodia con transporte opcional Nym Mixnet y pagos privados SPP en Testnet." />
     <meta name="color-scheme" content="dark" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <title>Astrym — Billetera de Privacidad en Stellar</title>
+    <title>Astrym — Autocustodia Stellar · Nym · SPP</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/favicon-32.png" />
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
@@ -21,89 +21,151 @@
     <div class="orbit" aria-hidden="true"></div>
     <header class="top">
       <img src="./brand/astrym-logo.png" alt="Astrym" class="mark" />
-      <a class="ghost" href="./webapp.html">Webapp</a>
+      <nav class="top-nav" aria-label="Principal">
+        <a class="ghost" href="#status">Estado</a>
+        <a class="ghost" href="./webapp.html">Abrir wallet</a>
+      </nav>
     </header>
 
     <main>
       <section class="hero">
         <p class="badge">HACKMERIDIAN 2026 · LISBON · STELLAR × NYM</p>
         <img src="./brand/astrym-logo.png" alt="" class="hero-logo" />
-        <h1>ASTRYM — Billetera de Privacidad en Stellar con Tecnología Nym</h1>
+        <h1>ASTRYM</h1>
         <p class="lede">
-          Custodia propia, lecturas Horizon por el mixnet y pagos privados de Stellar
-          cuando Nym está conectado. Si el mixnet falla, Astrym se detiene: no hay
-          caída silenciosa a clearnet.
+          Billetera Stellar de autocustodia. Conecta Nym MixFetch cuando quieras ocultar
+          tu tráfico de red, y usa Stellar Private Payments (SPP) sobre el pool público
+          Nethermind Testnet cuando el mixnet esté verificado.
         </p>
         <div class="cta">
-          <a class="btn primary" href="./webapp.html">Abrir Astrym Webapp (Android / Navegador)</a>
-          <button class="btn gold" type="button" id="install-pwa">Instalar en Android (PWA)</button>
+          <a class="btn primary" href="./webapp.html">Abrir Astrym Webapp</a>
+          <button class="btn gold" type="button" id="install-pwa">Instalar PWA (Android / iOS)</button>
         </div>
+        <p class="hero-note">
+          Extensión de escritorio, webapp y móvil son superficies distintas: el popup MV3
+          no muestra el modo Android; la PWA vive aquí.
+        </p>
       </section>
 
-      <section id="solution">
-        <p class="kicker">01</p>
-        <h2>The Solution</h2>
+      <section id="product">
+        <p class="kicker">01 · PRODUCTO</p>
+        <h2>Qué hace Astrym hoy</h2>
         <div class="grid">
           <article>
-            <h3>Self-Custody</h3>
-            <p>Las 24 palabras y las claves se quedan en el dispositivo. Astrym no custodia la cuenta.</p>
+            <h3>Autocustodia</h3>
+            <p>Frase de 24 palabras y claves en el dispositivo. Astrym no custodia tu cuenta.</p>
           </article>
           <article>
-            <h3>Network Privacy via Nym MixFetch</h3>
-            <p>Horizon y el RPC de Soroban salen por el mixnet. Quien mira tu red no ve el destino en claro.</p>
+            <h3>Stellar (Testnet / Mainnet lecturas)</h3>
+            <p>Saldos, envíos públicos y Friendbot Testnet con el cliente Stellar endurecido.</p>
           </article>
           <article>
-            <h3>Stellar Connectivity</h3>
-            <p>Saldos, Friendbot y envíos de Testnet usan el mismo cliente Stellar, con o sin Nym.</p>
+            <h3>Nym MixFetch (opcional)</h3>
+            <p>Horizon y Soroban pueden salir por el mixnet. Si el modo Nym está activo y falla, Astrym se detiene: sin fallback silencioso a clearnet.</p>
           </article>
           <article>
-            <h3>Fail-Closed Design</h3>
-            <p>Con el modo Nym activo, un error de MixFetch no reintenta por la red abierta.</p>
-          </article>
-          <article class="wide">
-            <h3>Stellar Private Payments</h3>
+            <h3>SPP privado (Testnet)</h3>
             <p>
-              Con Nym conectado puedes activar pagos privados: depósito, transferencia o retiro.
-              En modo direct la opción permanece cerrada.
+              Depósito, transferencia y retiro contra el pool Nethermind
+              <code class="inline-code">CAMWBUWH…WG24U</code> cuando Nym + write_pool_ready están verificados.
             </p>
           </article>
         </div>
       </section>
 
+      <section id="status">
+        <p class="kicker">02 · ESTADO HONESTO</p>
+        <h2>Implementado · En curso · Futuro</h2>
+        <div class="status-board">
+          <article class="status-card status-card--done">
+            <h3>Implementado</h3>
+            <ul>
+              <li>Vault local, onboarding y firma Stellar</li>
+              <li>MixFetch 1.4.2 con gateway/NR verificados</li>
+              <li>HTTP smoke + Horizon-over-Nym (Ankr remap documentado)</li>
+              <li>SPP SDK 0.2.1, WASM, 16 proving keys, PrivatePool + write_pool_ready</li>
+              <li>Host SPP embebido en webapp (sin depender de popups bloqueados)</li>
+            </ul>
+          </article>
+          <article class="status-card status-card--wip">
+            <h3>En curso</h3>
+            <ul>
+              <li>Registro on-chain de claves + discovery de destinatarios</li>
+              <li>Pago privado Testnet extremo a extremo (requiere aprobación explícita antes de broadcast)</li>
+              <li>UX de notas / saldo privado y reconciliación</li>
+            </ul>
+          </article>
+          <article class="status-card status-card--next">
+            <h3>Futuro</h3>
+            <ul>
+              <li>Auditorías de seguridad independientes</li>
+              <li>Claims de anonimato / producción Mainnet SPP</li>
+              <li>Pools propios o políticas ASP adicionales</li>
+            </ul>
+          </article>
+        </div>
+        <p class="status-disclaimer">
+          Astrym no afirma anonimato criptográfico, auditorías completadas ni readiness de producción.
+          Nym reduce la visibilidad de red; SPP aporta notas privadas en Stellar Testnet cuando el stack está listo.
+        </p>
+      </section>
+
       <section id="workflow">
-        <p class="kicker">02</p>
+        <p class="kicker">03 · FLUJO</p>
         <h2>Technical Workflow</h2>
         <ol class="steps">
           <li>
             <span>01 Local Wallet</span>
-            <p>Bóveda cifrada, cuenta Stellar y firma local.</p>
+            <p>Bóveda cifrada, cuenta Stellar y firma local en extensión o webapp.</p>
           </li>
           <li>
             <span>02 Nym Mixnet</span>
-            <p>MixFetch en la extensión (offscreen) o en el navegador Android.</p>
+            <p>MixFetch en offscreen (extensión) o bridge in-page (Android / navegador).</p>
           </li>
           <li>
             <span>03 Stellar Data Access &amp; Private Payments</span>
-            <p>Horizon, Friendbot y, si lo activas, Stellar Private Payments.</p>
+            <p>Horizon/Soroban por Nym cuando está activo; SPP solo con prepare.phase = ready y gate de broadcast.</p>
           </li>
         </ol>
       </section>
 
+      <section id="surfaces">
+        <p class="kicker">04 · SUPERFICIES</p>
+        <h2>Cómo usar Astrym</h2>
+        <div class="grid">
+          <article>
+            <h3>Extensión de escritorio</h3>
+            <p>Popup 400×600 centrado en la wallet. Sin barra Android. Ideal para Chrome/Chromium.</p>
+          </article>
+          <article>
+            <h3>Webapp / PWA</h3>
+            <p>Misma wallet a pantalla completa, responsive, instalable. CTA de instalación solo aquí.</p>
+          </article>
+          <article class="wide">
+            <h3>SPP Host</h3>
+            <p>
+              Laboratorio de sesión SPP (<a href="./spp-host.html">spp-host.html</a>).
+              En la webapp se embebe en proceso; no abras runtimes duplicados.
+            </p>
+          </article>
+        </div>
+      </section>
+
       <section id="founder">
-        <p class="kicker">03</p>
+        <p class="kicker">05 · FOUNDER</p>
         <h2>Founder</h2>
         <p class="founder">@MTheMoneyApe — Founder &amp; Vibecoder</p>
       </section>
     </main>
 
     <footer>
-      <span>Astrym</span>
+      <span>Astrym · self-custody · optional Nym · SPP Testnet</span>
       <a href="./webapp.html">Abrir webapp</a>
     </footer>
 
     <dialog id="install-modal">
       <form method="dialog">
-        <h3>Instalar en Android</h3>
+        <h3>Instalar en Android / iOS</h3>
         <p>Pulsa el menú ⋮ del navegador → Añadir a pantalla de inicio / Instalar app</p>
         <button class="btn primary" value="close">Entendido</button>
       </form>

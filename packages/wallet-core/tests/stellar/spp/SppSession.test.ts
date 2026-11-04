@@ -269,6 +269,64 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
     expect(aspState).toHaveBeenCalled();
     expect(dispose).toHaveBeenCalled();
   });
+
+  it('fails closed when bootnodeRequired and bootnodeUrl is missing', async () => {
+    const storage = { fork: () => storage, call: async () => null };
+    const create = vi.fn(async () => {
+      throw new Error('Client.new must not run');
+    });
+    const runtime = createSppSdkRuntime({
+      initWasm: async () => undefined,
+      Storage: { open: async () => storage as never },
+      Client: { new: create as never },
+      bootnodeRequired: async () => true,
+    });
+
+    await expect(
+      runtime.createReadOnlyClient({
+        rpcUrl: 'http://127.0.0.1:9/rpc',
+        contractConfig: CONTRACT_CONFIG,
+        circuitLock: CIRCUIT_LOCK,
+        assets: ASSETS,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('forwards operator bootnodeUrl when bootnodeRequired is true', async () => {
+    const storage = { fork: () => storage, call: async () => null };
+    const create = vi.fn(async () => ({
+      aspState: async () => ({}) as never,
+      allContractsData: async () => ({}) as never,
+      dispose: () => undefined,
+      backgroundSync: async () => undefined,
+      stopBackgroundSync: () => undefined,
+      sync: async () => undefined,
+      operationalFeed: async () => [],
+      contractConfig: () => ({}) as never,
+      account: async () => ({}) as never,
+      recipientLookup: async () => ({}) as never,
+      verifySelectiveDisclosure: async () => ({}) as never,
+    }));
+    const runtime = createSppSdkRuntime({
+      initWasm: async () => undefined,
+      Storage: { open: async () => storage as never },
+      Client: { new: create as never },
+      bootnodeRequired: async () => true,
+    });
+
+    await runtime.createReadOnlyClient({
+      rpcUrl: 'http://127.0.0.1:9/rpc',
+      contractConfig: CONTRACT_CONFIG,
+      circuitLock: CIRCUIT_LOCK,
+      assets: ASSETS,
+      bootnodeUrl: 'https://bootnode.example/spp',
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ bootnodeUrl: 'https://bootnode.example/spp' }),
+    );
+  });
 });
 
 describe('SppSession surface guarantees (static)', () => {

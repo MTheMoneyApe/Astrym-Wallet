@@ -70,10 +70,82 @@ body {
   min-width: 0;
 }
 
-.mark { height: 36px; width: auto; max-width: min(48vw, 180px); }
-.hero-logo { width: min(560px, 100%); height: auto; margin: 8px 0 12px; }
+.mark { height: 32px; width: auto; max-width: min(42vw, 148px); }
+.hero-logo { width: min(420px, 88%); height: auto; margin: 8px 0 12px; }
+
+.top-nav {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 
 a { color: var(--mint); }
+
+.hero h1 {
+  max-width: none;
+  letter-spacing: 0.08em;
+}
+
+.hero-note {
+  margin: -36px 0 56px;
+  max-width: 58ch;
+  color: var(--grey);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.inline-code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.78em;
+  color: var(--gold);
+}
+
+.status-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 12px;
+}
+
+.status-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  padding: 18px 16px;
+  min-width: 0;
+}
+
+.status-card h3 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  color: var(--mint);
+}
+
+.status-card ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--grey);
+  line-height: 1.55;
+  font-size: 0.92rem;
+}
+
+.status-card--wip {
+  border-color: rgba(247, 203, 8, 0.45);
+}
+
+.status-card--wip h3 { color: var(--gold); }
+
+.status-card--next {
+  border-color: rgba(208, 213, 221, 0.22);
+}
+
+.status-disclaimer {
+  margin: 16px 0 0;
+  color: var(--grey);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  max-width: 68ch;
+}
 
 .badge, .kicker, .steps span, footer {
   font-family: "JetBrains Mono", ui-monospace, monospace;

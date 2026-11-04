@@ -190,7 +190,11 @@ describe('NymRuntimeController lifecycle', () => {
     expect(saved.selectedGateway).toBe(NYM_VERIFIED_GATEWAY.wssOrigin);
     expect(saved.identityKey).toBe(NYM_VERIFIED_GATEWAY.identityKey);
     expect(bridge.setup).toHaveBeenCalledWith(
-      expect.objectContaining({ preferredGateway: NYM_VERIFIED_GATEWAY.identityKey }),
+      expect.objectContaining({
+        preferredGateway: NYM_VERIFIED_GATEWAY.identityKey,
+        preferredNetworkRequester: NYM_VERIFIED_GATEWAY.networkRequesterAddress,
+        disableCoverTraffic: true,
+      }),
     );
   });
 

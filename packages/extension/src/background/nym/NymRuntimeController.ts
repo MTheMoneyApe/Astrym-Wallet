@@ -46,6 +46,7 @@ import {
 } from './StellarHorizonProbe.js';
 import type { StellarReadFetch } from '@solanym/wallet-core/src/stellar/read/StellarReadClient.js';
 import type { NymOffscreenStatusPayload } from '../../nym-offscreen/protocol.js';
+import { NYM_VERIFIED_GATEWAY } from '../../nym-offscreen/verifiedGateway.js';
 
 /** Offscreen IPC bridge or the in-page MixFetch bridge used by the Android webapp. */
 export type NymSessionBridge = NymMixFetchBridge & {
@@ -371,14 +372,26 @@ export class NymRuntimeController {
       const transportConfig: {
         gatewayUrl: string;
         gatewayAllowlist: string[];
+        preferredNetworkRequester?: string;
         disableCoverTraffic?: boolean;
       } = {
         // gatewayUrl carries MixFetch identity key into preferredGateway.
         gatewayUrl: identityKey,
         gatewayAllowlist: config.gatewayOrigins,
       };
+      // Pin NR when using the verified entry gateway — random NR selection hangs
+      // at SOCKS CONNECT even after createMixFetch reports Ready.
+      if (identityKey === NYM_VERIFIED_GATEWAY.identityKey) {
+        transportConfig.preferredNetworkRequester =
+          NYM_VERIFIED_GATEWAY.networkRequesterAddress;
+      }
       if (options?.disableCoverTraffic !== undefined) {
         transportConfig.disableCoverTraffic = options.disableCoverTraffic;
+      } else {
+        // Cover traffic is valuable in production but slows first HTTP smoke /
+        // Horizon probes on constrained Android WebViews. Default off for Connect;
+        // operators can re-enable later via explicit option if needed.
+        transportConfig.disableCoverTraffic = true;
       }
       // Ensures offscreen document + createMixFetch via bridge.setup (serialized).
       await this._transport.connect(transportConfig);

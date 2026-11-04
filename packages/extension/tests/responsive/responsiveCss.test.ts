@@ -30,6 +30,28 @@ describe('responsive shared CSS contracts', () => {
     expect(walletCss).toContain('@media (orientation: landscape)');
   });
 
+  it('keeps the webapp shell logo compact against the global img rule', () => {
+    expect(walletCss).toContain('html.astrym-webapp .android-webapp-bar img');
+    const overrideIdx = walletCss.indexOf('html.astrym-webapp .android-webapp-bar img');
+    const globalImgIdx = walletCss.indexOf('html.astrym-webapp img');
+    expect(overrideIdx).toBeGreaterThan(globalImgIdx);
+    const block = walletCss.slice(overrideIdx, overrideIdx + 220);
+    expect(block).toMatch(/height:\s*22px/);
+    expect(block).toMatch(/max-width:\s*min\(42%,\s*140px\)/);
+  });
+
+  it('gives the desktop popup a single scrollable view-container', () => {
+    expect(walletCss).toContain('html:not(.astrym-webapp) .wallet-shell');
+    expect(walletCss).toContain('html:not(.astrym-webapp) .view-container');
+    expect(walletCss).toContain('html:not(.astrym-webapp) .android-webapp-bar');
+    expect(walletCss).toMatch(/html:not\(\.astrym-webapp\) \.view-container[\s\S]*?overflow-y:\s*auto/);
+  });
+
+  it('keeps unlock/corner logos compact on desktop', () => {
+    expect(walletCss).toMatch(/html:not\(\.astrym-webapp\) \.unlock-logo[\s\S]*?width:\s*64px/);
+    expect(walletCss).toMatch(/\.unlock-logo\s*\{[\s\S]*?width:\s*72px/);
+  });
+
   it('covers the audited breakpoints', () => {
     for (const bp of ['429px', '768px', '1024px', '1280px']) {
       expect(walletCss).toContain(bp);

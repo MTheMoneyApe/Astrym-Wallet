@@ -4,10 +4,19 @@ import { Send } from './Send.js';
 import { SppStatusPanel } from './SppStatusPanel.js';
 import { NymTransportPanel } from './NymTransportPanel.js';
 import {
+  SPP_BOOTNODE_URL_KEY,
+  SPP_CONTRACT_CONFIG_KEY,
   SPP_POOL_CONTRACT_KEY,
   SPP_PREPARE_STATUS_KEY,
+  isSppWriteReady,
   type SppPrepareStatus,
 } from '../shared/sppPrepareStatus.js';
+import { ensureSppAutoPrepareIfNeeded } from '../background/spp/sppAutoPrepare.js';
+import { parseSppContractConfig } from '@solanym/wallet-core/src/stellar/spp/sppContractConfig.js';
+import {
+  getNethermindPublicTestnetContractConfig,
+  NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
+} from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import { isThemePalette, THEME_PRESETS, type ThemePalette } from './App.js';
 import { LOCK_TIMEOUT_OPTIONS_MINUTES, type LockTimeoutMinutes } from '@solanym/wallet-core/src/vault/IAlarmService.js';
 import {
@@ -881,6 +890,8 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   const [sendKind, setSendKind] = useState<'clear' | 'private'>('clear');
   const [sppPrepareStatus, setSppPrepareStatus] = useState<SppPrepareStatus | null>(null);
   const [sppPoolContract, setSppPoolContract] = useState('');
+  const [sppContractConfigJson, setSppContractConfigJson] = useState('');
+  const [sppBootnodeUrl, setSppBootnodeUrl] = useState('');
   const sppGenerationRef = useRef(0);
   const sppHandleRef = useRef<SppSessionStatusHandle | null>(null);
 
@@ -967,14 +978,59 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     if (nymReadyForSpp) setSppSelected(true);
   }, [nymReadyForSpp]);
 
+  // Re-arm SPP auto-prepare when Nym is already connected (reload / Settings)
+  // without inventing readiness — host must still emit write_pool_ready.
+  useEffect(() => {
+    if (!nymReadyForSpp) return;
+    if (isSppWriteReady(sppPrepareStatus)) return;
+    let cancelled = false;
+    void ensureSppAutoPrepareIfNeeded({
+      nymConnected: true,
+      nymMode: 'nym',
+    })
+      .then((status) => {
+        if (!cancelled && status) setSppPrepareStatus(status);
+      })
+      .catch(() => {
+        /* prepare status publisher records failure */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [nymReadyForSpp, sppPrepareStatus?.phase, sppPrepareStatus?.updatedAt]);
+
   useEffect(() => {
     if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) return;
-    chrome.storage.local.get([SPP_PREPARE_STATUS_KEY, SPP_POOL_CONTRACT_KEY], (res) => {
-      const prep = res[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
-      if (prep?.phase) setSppPrepareStatus(prep);
-      const pool = res[SPP_POOL_CONTRACT_KEY];
-      if (typeof pool === 'string') setSppPoolContract(pool);
-    });
+    chrome.storage.local.get(
+      [
+        SPP_PREPARE_STATUS_KEY,
+        SPP_POOL_CONTRACT_KEY,
+        SPP_CONTRACT_CONFIG_KEY,
+        SPP_BOOTNODE_URL_KEY,
+      ],
+      (res) => {
+        const prep = res[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+        if (prep?.phase) setSppPrepareStatus(prep);
+        const pool = res[SPP_POOL_CONTRACT_KEY];
+        if (typeof pool === 'string') setSppPoolContract(pool);
+        else setSppPoolContract(NETHERMIND_PUBLIC_XLM_POOL_CONTRACT);
+        const cfg = res[SPP_CONTRACT_CONFIG_KEY];
+        if (cfg && typeof cfg === 'object') {
+          setSppContractConfigJson(JSON.stringify(cfg, null, 2));
+        } else if (typeof cfg === 'string') {
+          setSppContractConfigJson(cfg);
+        } else {
+          const pinned = getNethermindPublicTestnetContractConfig();
+          setSppContractConfigJson(JSON.stringify(pinned, null, 2));
+          void chrome.storage.local.set({
+            [SPP_CONTRACT_CONFIG_KEY]: pinned,
+            [SPP_POOL_CONTRACT_KEY]: NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
+          });
+        }
+        const boot = res[SPP_BOOTNODE_URL_KEY];
+        if (typeof boot === 'string') setSppBootnodeUrl(boot);
+      },
+    );
     const onChanged = (
       changes: Record<string, chrome.storage.StorageChange>,
       area: string,
@@ -985,6 +1041,21 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
       }
       if (typeof changes[SPP_POOL_CONTRACT_KEY]?.newValue === 'string') {
         setSppPoolContract(changes[SPP_POOL_CONTRACT_KEY].newValue as string);
+      }
+      if (changes[SPP_CONTRACT_CONFIG_KEY]?.newValue) {
+        const next = changes[SPP_CONTRACT_CONFIG_KEY].newValue;
+        if (typeof next === 'string') setSppContractConfigJson(next);
+        else if (next && typeof next === 'object') {
+          setSppContractConfigJson(JSON.stringify(next, null, 2));
+        }
+      }
+      if (typeof changes[SPP_BOOTNODE_URL_KEY]?.newValue === 'string') {
+        setSppBootnodeUrl(changes[SPP_BOOTNODE_URL_KEY].newValue as string);
+      } else if (
+        changes[SPP_BOOTNODE_URL_KEY] &&
+        changes[SPP_BOOTNODE_URL_KEY].newValue === undefined
+      ) {
+        setSppBootnodeUrl('');
       }
     };
     chrome.storage.onChanged.addListener(onChanged);
@@ -1510,11 +1581,13 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           snapshot={sppStatusSnapshot}
           probing={!sppProbeDone}
           sessionGeneration={sppSessionGeneration}
-          nymMode={nymSnapshot.mode}
+          nymMode={nymSnapshot.mode === 'nym' ? 'nym' : 'direct'}
           nymConnected={nymSnapshot.connected}
           sppSelected={sppSelected}
-          prepareStatus={sppPrepareStatus}
+          prepareStatus={sppPrepareStatus ?? null}
           poolContract={sppPoolContract}
+          contractConfigJson={sppContractConfigJson}
+          bootnodeUrl={sppBootnodeUrl}
           onToggleSpp={(next) => {
             if (!nymReadyForSpp) return;
             setSppSelected(next);
@@ -1524,6 +1597,41 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
             setSppPoolContract(contract);
             if (typeof chrome !== 'undefined' && chrome.storage?.local) {
               void chrome.storage.local.set({ [SPP_POOL_CONTRACT_KEY]: contract });
+            }
+          }}
+          onContractConfigJsonChange={(json) => {
+            setSppContractConfigJson(json);
+            if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+            const trimmed = json.trim();
+            if (!trimmed) {
+              void chrome.storage.local.remove(SPP_CONTRACT_CONFIG_KEY);
+              return;
+            }
+            try {
+              const parsed = parseSppContractConfig(JSON.parse(trimmed) as unknown);
+              void chrome.storage.local.set({ [SPP_CONTRACT_CONFIG_KEY]: parsed });
+            } catch {
+              // Keep textarea text; do not persist invalid JSON as ready config.
+            }
+          }}
+          onBootnodeUrlChange={(url) => {
+            setSppBootnodeUrl(url);
+            if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+            if (!url) {
+              void chrome.storage.local.remove(SPP_BOOTNODE_URL_KEY);
+              return;
+            }
+            void chrome.storage.local.set({ [SPP_BOOTNODE_URL_KEY]: url });
+          }}
+          onUseNethermindPublic={() => {
+            const pinned = getNethermindPublicTestnetContractConfig();
+            setSppPoolContract(NETHERMIND_PUBLIC_XLM_POOL_CONTRACT);
+            setSppContractConfigJson(JSON.stringify(pinned, null, 2));
+            if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+              void chrome.storage.local.set({
+                [SPP_CONTRACT_CONFIG_KEY]: pinned,
+                [SPP_POOL_CONTRACT_KEY]: NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
+              });
             }
           }}
         />

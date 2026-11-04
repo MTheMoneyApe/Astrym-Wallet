@@ -2,6 +2,7 @@ import {
   STELLAR_SOROBAN_TESTNET_RPC,
   executeSppPrivatePayment,
 } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
+import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
 import type { ValidatedRequestPayload, ValidatedResponsePayload } from '../../shared/ipcTypes.js';
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
 import {
@@ -47,6 +48,12 @@ export function createSppPrivatePaymentHandler() {
           nymConnected: snap.connected,
           poolContract: payload.poolContract,
           send: createChromeRuntimeSppHostSender(),
+          ...(payload.signingAccount ? { signingAccount: payload.signingAccount } : {}),
+          ...(payload.freshSequence ? { freshSequence: payload.freshSequence } : {}),
+          ...(payload.nextFreshSequence
+            ? { nextFreshSequence: payload.nextFreshSequence }
+            : {}),
+          operationFingerprint: payload.authorizationFingerprint,
         });
       }
     }
@@ -58,6 +65,8 @@ export function createSppPrivatePaymentHandler() {
       nymFetch: ctrl.getStellarFetch(),
       pool,
       preferInjectedTransport: true,
+      authorizationFingerprint: payload.authorizationFingerprint,
+      maxFeeStroops: payload.maxFeeStroops ?? maxFeeStroopsForOperation(payload.operation),
     });
   };
 }

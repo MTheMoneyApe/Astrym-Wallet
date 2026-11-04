@@ -9,7 +9,9 @@ import {
   xlmToStroops,
   type SppPrivateOperation,
 } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
+import { privatePaymentFingerprint } from '@solanym/wallet-core/src/stellar/spp/sppExecutionGuard.js';
 import { routePrivatePayment } from './privatePaymentRouter.js';
+import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
 
 const OPERATIONS: readonly SppPrivateOperation[] = ['deposit', 'transfer', 'withdraw'];
 
@@ -115,17 +117,28 @@ export function SppPrivateSend({
       setAuthorized(true);
       return;
     }
+    const authorizationFingerprint = privatePaymentFingerprint({
+      operation,
+      poolContract: poolContract.trim(),
+      amountStroops,
+      recipient: operation === 'deposit' ? null : recipientValue.trim() || null,
+    });
+    const maxFeeStroops = maxFeeStroopsForOperation(operation);
     const payload: {
       enabled: true;
       operation: SppPrivateOperation;
       poolContract: string;
       amountStroops: string;
+      authorizationFingerprint: string;
+      maxFeeStroops: string;
       recipient?: string;
     } = {
       enabled: true,
       operation,
       poolContract: poolContract.trim(),
       amountStroops,
+      authorizationFingerprint,
+      maxFeeStroops,
     };
     if (operation !== 'deposit' && recipientValue.trim()) {
       payload.recipient = recipientValue.trim();
@@ -133,7 +146,15 @@ export function SppPrivateSend({
     setBusy(true);
     void sendIpcMessage('SPP_PRIVATE_PAYMENT', payload)
       .then((result) => {
-        setTxHash(result.txHash);
+        if (result.confirmation === 'unknown' || !result.txHash) {
+          setErrorCode('SUBMISSION_UNKNOWN');
+          setError(
+            'Resultado ambiguo: no hay hash confirmado. No reintentes hasta verificar en el explorador.',
+          );
+          setTxHash(result.txHash);
+        } else {
+          setTxHash(result.txHash);
+        }
         setAuthorized(false);
       })
       .catch((cause: unknown) => {
@@ -158,6 +179,34 @@ export function SppPrivateSend({
       <p data-testid="spp-private-route-status" data-status={route.status} style={{ margin: 0, fontSize: '0.78rem' }}>
         Estado: {route.status} — {route.message}
       </p>
+      {authorized && !busy ? (
+        <div
+          className="card"
+          data-testid="spp-private-auth-summary"
+          style={{ padding: 12, fontSize: '0.78rem', display: 'grid', gap: 6 }}
+        >
+          <strong>Autorizar exactamente (Testnet):</strong>
+          <span>Operación: {operationLabel(operation)}</span>
+          <span className="address-wrap">Pool: {poolContract}</span>
+          <span>Importe: {amountValue} XLM</span>
+          {operation !== 'deposit' ? (
+            <span className="address-wrap">Destinatario: {recipientValue || '(cuenta activa)'}</span>
+          ) : null}
+          <span>
+            maxFee techo: {maxFeeStroopsForOperation(operation)} stroops (política centralizada, no unbounded)
+          </span>
+          <span className="text-secondary">
+            El broadcast permanece bloqueado hasta aprobación explícita del operador
+            (gate SPP_BROADCAST_AWAITING_APPROVAL). Inclusión + recursos Soroban cubiertos por el techo.
+          </span>
+        </div>
+      ) : null}
+      {errorCode === 'BROADCAST_AWAITING_APPROVAL' ||
+      (error && error.includes('SPP_BROADCAST_AWAITING_APPROVAL')) ? (
+        <p className="text-secondary" data-testid="spp-broadcast-awaiting" style={{ fontSize: '0.75rem' }}>
+          Pago preparado y retenido. No se ha difundido ninguna transacción Testnet.
+        </p>
+      ) : null}
       <label>
         Operación SPP
         <select
@@ -198,8 +247,8 @@ export function SppPrivateSend({
         <label>
           Destinatario G…
           <input
-            className="input-field"
-            style={{ width: '100%', marginTop: 4, fontFamily: 'monospace', fontSize: '0.78rem' }}
+            className="input-field address-wrap"
+            style={{ width: '100%', marginTop: 4 }}
             value={recipientValue}
             disabled={busy}
             onChange={(event) => {
@@ -212,7 +261,7 @@ export function SppPrivateSend({
         </label>
       ) : null}
       {error ? <p className="error-text" role="alert">{error}</p> : null}
-      {txHash ? <p style={{ overflowWrap: 'anywhere' }}>Tx: {txHash}</p> : null}
+      {txHash ? <p className="tx-hash">Tx: {txHash}</p> : null}
       {route.status === 'unknown' ? (
         <p className="text-secondary" style={{ fontSize: '0.75rem' }}>
           No reintentes todavía: verifica el hash / estado en el explorador o en el host SPP.

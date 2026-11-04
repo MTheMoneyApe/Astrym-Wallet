@@ -297,12 +297,21 @@ body {
   border-bottom: 1px solid var(--border-color);
   background: #141416;
   min-width: 0;
+  flex-shrink: 0;
 }
 
-.android-webapp-bar img {
-  height: 28px;
+.android-webapp-bar img,
+.android-webapp-bar__logo {
+  height: 22px;
   width: auto;
-  max-width: min(58%, 220px);
+  max-width: min(42%, 140px);
+  object-fit: contain;
+}
+
+.android-webapp-bar__label {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 /* Extension popup shell — keep fixed chrome size (400×600) */
@@ -314,7 +323,42 @@ html:not(.astrym-webapp) body {
 }
 
 html:not(.astrym-webapp) #root {
+  height: 100%;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Desktop popup: never show Android/PWA chrome (belt-and-suspenders). */
+html:not(.astrym-webapp) .android-webapp-bar {
+  display: none !important;
+}
+
+/* Single scroll owner so Settings / menu / long views remain reachable. */
+html:not(.astrym-webapp) .wallet-shell {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+html:not(.astrym-webapp) .view-container {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+html:not(.astrym-webapp) .unlock-screen,
+html:not(.astrym-webapp) .center-content,
+html:not(.astrym-webapp) .onboarding-flow {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .unlock-screen {
@@ -339,11 +383,17 @@ html:not(.astrym-webapp) #root {
 }
 
 .unlock-logo {
-  width: 112px;
-  height: 112px;
+  width: 72px;
+  height: 72px;
   object-fit: contain;
-  border-radius: 20px;
+  border-radius: 16px;
   max-width: 100%;
+}
+
+html:not(.astrym-webapp) .unlock-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
 }
 
 .unlock-title {
@@ -632,6 +682,14 @@ html.astrym-webapp video,
 html.astrym-webapp canvas {
   max-width: 100%;
   height: auto;
+}
+
+/* Compact shell mark: must beat `html.astrym-webapp img { height: auto }` */
+html.astrym-webapp .android-webapp-bar img,
+html.astrym-webapp .android-webapp-bar__logo {
+  height: 22px;
+  width: auto;
+  max-width: min(42%, 140px);
 }
 
 /* Compact phones */

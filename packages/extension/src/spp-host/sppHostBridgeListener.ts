@@ -5,9 +5,11 @@
 
 import {
   isSppHostBridgeMessage,
+  parseSppHostAccountQueryRequest,
   parseSppHostExecuteRequest,
   type SppHostLifecycleEvent,
 } from '../shared/sppHostBridge.js';
+import { executeSppHostAccountQuery } from './sppHostAccountQuery.js';
 import {
   clearSppHostWritePool,
   executeSppHostWritePool,
@@ -42,6 +44,24 @@ export function installSppHostBridgeListener(): SppHostBridgeListenerHandles {
     sendResponse: (response: unknown) => void,
   ): boolean => {
     if (!isSppHostBridgeMessage(message)) return false;
+
+    const accountQuery = parseSppHostAccountQueryRequest(message);
+    if (accountQuery) {
+      void executeSppHostAccountQuery(accountQuery)
+        .then((result) => sendResponse(result))
+        .catch((cause: unknown) => {
+          const messageText = cause instanceof Error ? cause.message : 'host account query failed';
+          sendResponse({
+            channel: accountQuery.channel,
+            type: 'SPP_HOST_ACCOUNT_QUERY_RESULT',
+            id: accountQuery.id,
+            ok: false,
+            code: 'EXECUTION_FAILED',
+            message: messageText.slice(0, 500),
+          });
+        });
+      return true;
+    }
 
     const request = parseSppHostExecuteRequest(message);
     if (!request) return false;

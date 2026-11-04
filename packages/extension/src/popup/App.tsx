@@ -151,9 +151,15 @@ export function App() {
     renderWalletScreen(appState, checkWalletState)
   );
 
+  // Desktop extension popup must not show Android/PWA chrome.
+  // Webapp (html.astrym-webapp) keeps the compact brand bar only.
+  const showWebappBrandBar =
+    typeof document !== 'undefined' &&
+    document.documentElement.classList.contains('astrym-webapp');
+
   return (
     <div className="wallet-shell">
-      <OpenAndroidWebappBar />
+      {showWebappBrandBar ? <OpenAndroidWebappBar /> : null}
       {screen}
     </div>
   );

@@ -14,6 +14,8 @@ import { stateCoordinator } from '../StateCoordinator.js';
 import { activeAccountManager, type ActiveAccountManager } from '../accounts/ActiveAccountManager.js';
 import browser from 'webextension-polyfill';
 import { isTrustedWalletPageUrl } from '../trustedWalletOrigin.js';
+import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
+import { ensureSppAutoPrepareIfNeeded } from '../spp/sppAutoPrepare.js';
 
 type ActiveAccountIndexWriter = Pick<ActiveAccountManager, 'setActiveAccountIndex'>;
 
@@ -121,6 +123,16 @@ export function createUnlockVaultHandler(vaultService: VaultService) {
       if (stateCoordinator.isResetting) throw new Error('Reset in progress');
       await vaultService.unlock(payload.password);
       stateCoordinator.setUnlocked();
+      // Write-pool needs an unlocked Stellar account; resume prepare if Nym is up.
+      try {
+        const nym = getNymRuntimeController().getSnapshot();
+        void ensureSppAutoPrepareIfNeeded({
+          nymConnected: nym.connected,
+          nymMode: nym.mode,
+        });
+      } catch {
+        // Non-fatal: unlock succeeded; prepare can be retried from Settings.
+      }
       return { success: true };
     } finally {
       stateCoordinator.mutex.release();

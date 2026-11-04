@@ -8,10 +8,27 @@ import {
   SPP_POOL_CONTRACT_KEY,
   SPP_PREPARE_STATUS_KEY,
   createIdleSppPrepareStatus,
+  isSppWriteReady,
   type SppAutoPrepareIntent,
+  type SppPreparePhase,
   type SppPrepareStatus,
 } from '../../shared/sppPrepareStatus.js';
 import { openSppHostInternal } from '../../spp-host/openSppHost.js';
+
+/** Phases that mean prepare is already running — do not start a duplicate. */
+const IN_FLIGHT_PHASES: ReadonlySet<SppPreparePhase> = new Set([
+  'opening_host',
+  'probing_assets',
+  'assets_ready',
+  'initializing_session',
+  'read_only',
+  'initializing_write_pool',
+]);
+
+/** How long opening_host may stall before we treat it as stuck and retry. */
+const OPENING_HOST_STALL_MS = 45_000;
+
+let ensureInFlight: Promise<SppPrepareStatus | null> | null = null;
 
 function storageLocal(): chrome.storage.LocalStorageArea | null {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return null;
@@ -26,6 +43,14 @@ export async function readStoredPoolContract(): Promise<string | null> {
   return typeof value === 'string' && value.startsWith('C') && value.length === 56
     ? value
     : null;
+}
+
+export async function readSppPrepareStatus(): Promise<SppPrepareStatus | null> {
+  const area = storageLocal();
+  if (!area) return null;
+  const raw = await area.get(SPP_PREPARE_STATUS_KEY);
+  const value = raw[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+  return value?.phase ? value : null;
 }
 
 export async function publishSppPrepareStatus(
@@ -45,6 +70,18 @@ export async function publishSppPrepareStatus(
     await area.set({ [SPP_PREPARE_STATUS_KEY]: next });
   }
   return next;
+}
+
+function shouldStartPrepare(status: SppPrepareStatus | null): boolean {
+  if (!status) return true;
+  if (isSppWriteReady(status)) return false;
+  if (status.phase === 'opening_host') {
+    const age = Date.now() - (status.updatedAt || 0);
+    return age > OPENING_HOST_STALL_MS;
+  }
+  if (IN_FLIGHT_PHASES.has(status.phase)) return false;
+  // idle | failed | missing_* | awaiting_pool_config → retry when Nym is up
+  return true;
 }
 
 /**
@@ -83,6 +120,33 @@ export async function startSppAutoPrepareAfterNymConnect(): Promise<void> {
   }
 }
 
+/**
+ * Idempotent prepare entry for reload / Settings / already-connected Nym.
+ * Skips when write_pool_ready or an in-flight phase is fresh.
+ */
+export async function ensureSppAutoPrepareIfNeeded(input: {
+  nymConnected: boolean;
+  nymMode: 'direct' | 'nym';
+}): Promise<SppPrepareStatus | null> {
+  if (!input.nymConnected || input.nymMode !== 'nym') {
+    return readSppPrepareStatus();
+  }
+  if (ensureInFlight) return ensureInFlight;
+
+  ensureInFlight = (async () => {
+    const current = await readSppPrepareStatus();
+    if (!shouldStartPrepare(current)) {
+      return current;
+    }
+    await startSppAutoPrepareAfterNymConnect();
+    return readSppPrepareStatus();
+  })().finally(() => {
+    ensureInFlight = null;
+  });
+
+  return ensureInFlight;
+}
+
 export async function clearSppAutoPrepareOnNymDisconnect(): Promise<void> {
   const area = storageLocal();
   if (area) {
@@ -93,4 +157,9 @@ export async function clearSppAutoPrepareOnNymDisconnect(): Promise<void> {
     message: 'Nym desconectado. SPP pausado hasta la próxima conexión.',
     poolContract: await readStoredPoolContract(),
   });
+}
+
+/** Test helper */
+export function resetSppAutoPrepareEnsureLockForTests(): void {
+  ensureInFlight = null;
 }
