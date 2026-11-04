@@ -21,8 +21,12 @@ import {
 import { SppHostController } from './hostController.js';
 import type { SppHostSnapshot } from './hostController.js';
 import { SPP_PACKAGE_PATHS } from './paths.js';
+import { installSppHostBridgeListener } from './sppHostBridgeListener.js';
 import { readHostLabSppIntegrationSnapshot } from './sppIntegrationProbe.js';
 import { STORAGE_LAB_EXECUTION_AUTHORIZED } from './storageLabPrep.js';
+
+// SW ↔ host private-payment bridge (no secrets on the channel).
+installSppHostBridgeListener();
 
 function getExtensionURL(path: string): string {
   if (typeof chrome !== 'undefined' && chrome.runtime?.getURL) {
@@ -72,6 +76,7 @@ function render(snapshot: SppHostSnapshot, extras?: { resolvedFacadeHint?: strin
   const sessionConstructBtn = el<HTMLButtonElement>('spp-session-construct-btn');
   const sessionInitBtn = el<HTMLButtonElement>('spp-session-init-btn');
   const sessionClearBtn = el<HTMLButtonElement>('spp-session-clear-btn');
+  const writePoolBtn = el<HTMLButtonElement>('spp-write-pool-btn');
   const storageEvalBtn = el<HTMLButtonElement>('spp-storage-eval-btn');
   const storageRunBtn = el<HTMLButtonElement>('spp-storage-run-btn');
   const storageFreeBtn = el<HTMLButtonElement>('spp-storage-free-btn');
@@ -98,6 +103,7 @@ function render(snapshot: SppHostSnapshot, extras?: { resolvedFacadeHint?: strin
   sessionInitBtn.disabled =
     busy || snapshot.sessionState !== 'uninitialized' || snapshot.sessionInitializeEnabled;
   sessionClearBtn.disabled = busy || !snapshot.sessionBound;
+  writePoolBtn.disabled = busy || snapshot.sessionState !== 'ready';
   storageEvalBtn.disabled = busy;
   storageRunBtn.disabled = busy || !snapshot.storageLabRunEnabled;
   storageFreeBtn.disabled = busy || !snapshot.storageLabFreeEnabled;
@@ -367,6 +373,61 @@ function main(): void {
     controller.clearBoundSession();
     statusBoot.textContent = 'Session reference cleared (dispose not called).';
     render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
+  });
+
+  const writePoolBtn = el<HTMLButtonElement>('spp-write-pool-btn');
+  const writePoolContractInput = el<HTMLInputElement>('spp-write-pool-contract');
+  writePoolBtn.addEventListener('click', () => {
+    void (async () => {
+      const nymResponse = (await chrome.runtime.sendMessage({
+        id: crypto.randomUUID(),
+        type: 'NYM_STATUS',
+        payload: {},
+      })) as { payload?: { connected?: boolean; mode?: string } } | undefined;
+      const nymActive =
+        nymResponse?.payload?.connected === true && nymResponse.payload.mode === 'nym';
+      if (!nymActive) {
+        statusBoot.textContent = 'Write pool requiere Nym conectado.';
+        return;
+      }
+      const active = (await chrome.runtime.sendMessage({
+        id: crypto.randomUUID(),
+        type: 'GET_ACTIVE_ACCOUNT',
+        payload: {},
+      })) as { payload?: { status?: string; index?: number | null } } | undefined;
+      if (active?.payload?.status !== 'VALID' || active.payload.index == null) {
+        statusBoot.textContent = 'Desbloquea la wallet y selecciona una cuenta Stellar activa.';
+        return;
+      }
+      const accounts = (await chrome.runtime.sendMessage({
+        id: crypto.randomUUID(),
+        type: 'GET_ACCOUNTS',
+        payload: {},
+      })) as { payload?: Array<{ index: number; publicKey: string }> } | undefined;
+      const account = accounts?.payload?.find((a) => a.index === active.payload!.index);
+      if (!account?.publicKey) {
+        statusBoot.textContent = 'No se pudo resolver la dirección Stellar activa.';
+        return;
+      }
+      const poolContract = writePoolContractInput.value.trim();
+      if (!poolContract.startsWith('C') || poolContract.length !== 56) {
+        statusBoot.textContent = 'Introduce un poolContract C… válido (56 chars).';
+        return;
+      }
+      statusBoot.textContent = 'Inicializando write PrivatePool (Nym + vault signer)…';
+      const snapshot = await controller.initializeWritePoolForNym({
+        nymActive: true,
+        poolContract,
+        userAddress: account.publicKey,
+        networkPassphrase: 'Test SDF Network ; September 2015',
+      });
+      render(snapshot, { resolvedFacadeHint: facadeHint });
+      statusBoot.textContent = 'Write pool listo (o ver error). Deposit/transfer/withdraw usan este pool.';
+    })().catch((err: unknown) => {
+      statusBoot.textContent =
+        err instanceof Error ? err.message : 'No se pudo inicializar el write pool';
+      render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
+    });
   });
 
   storageEvalBtn.addEventListener('click', () => {

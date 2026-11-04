@@ -31,6 +31,7 @@ import {
   fetchPublicData,
   type PublicDataFetchRequest,
   type PublicDataFetchResult,
+  type PublicDataTransportFetch,
 } from './PublicDataClient.js';
 import { createStellarTransportFetch } from './stellarTransportFetch.js';
 import {

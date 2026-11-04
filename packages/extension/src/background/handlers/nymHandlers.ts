@@ -1,9 +1,11 @@
 import type { ValidatedRequestPayload, ValidatedResponsePayload } from '../../shared/ipcTypes.js';
+import { SPP_HOST_BRIDGE_CHANNEL } from '../../shared/sppHostBridge.js';
 import { runNymLiveSmoke } from '../nym/NymLiveSmoke.js';
 import {
   getNymRuntimeController,
   type NymRuntimeUiSnapshot,
 } from '../nym/NymRuntimeController.js';
+import { clearSppPrivatePool } from '../spp/sppPrivatePoolRegistry.js';
 
 function toSnapshot(snap: NymRuntimeUiSnapshot): ValidatedResponsePayload<'NYM_STATUS'> {
   return {
@@ -49,6 +51,21 @@ export function createNymDisconnectHandler() {
   return async (
     _payload: ValidatedRequestPayload<'NYM_DISCONNECT'>,
   ): Promise<ValidatedResponsePayload<'NYM_DISCONNECT'>> => {
+    // Fail-closed SPP: drop SW registry and tell spp-host to drop write pools.
+    clearSppPrivatePool();
+    try {
+      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+        void chrome.runtime.sendMessage({
+          channel: SPP_HOST_BRIDGE_CHANNEL,
+          type: 'SPP_HOST_POOL_LIFECYCLE',
+          generation: Date.now(),
+          state: 'cleared',
+          message: 'Nym disconnected',
+        });
+      }
+    } catch {
+      // Host may be closed; registry clear already happened.
+    }
     const snap = await getNymRuntimeController().disconnect();
     return toSnapshot(snap);
   };

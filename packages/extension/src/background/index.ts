@@ -35,7 +35,18 @@ import {
   createNymStatusHandler,
 } from './handlers/nymHandlers.js';
 import { isNymOffscreenChannelMessage } from '../nym-offscreen/protocol.js';
+import {
+  isSppHostBridgeMessage,
+  parseSppHostLifecycleEvent,
+  parseSppHostNymFetchRequest,
+  parseSppHostSignRequest,
+} from '../shared/sppHostBridge.js';
 import { createSppPrivatePaymentHandler } from './handlers/sppPrivatePaymentHandler.js';
+import { noteSppHostLifecycle } from './spp/sppPrivatePoolRegistry.js';
+import {
+  handleSppHostNymFetchRequest,
+  handleSppHostSignRequest,
+} from './spp/sppHostBridgeHandlers.js';
 
 import { 
   createUnlockVaultHandler, 
@@ -228,6 +239,46 @@ function initBackgroundSynchronous() {
   // claim the response Promise (offscreen document owns that protocol).
   browser.runtime.onMessage.addListener((message: any, sender: any) => {
     if (isNymOffscreenChannelMessage(message)) {
+      return;
+    }
+    // spp-host ↔ SW bridge: lifecycle events update the registry; sign + Nym
+    // fetch are answered here; execute requests are answered by the host page.
+    if (isSppHostBridgeMessage(message)) {
+      const lifecycle = parseSppHostLifecycleEvent(message);
+      if (lifecycle) {
+        noteSppHostLifecycle({
+          state: lifecycle.state,
+          ...(lifecycle.message !== undefined ? { message: lifecycle.message } : {}),
+        });
+        return Promise.resolve({ ok: true });
+      }
+      const signRequest = parseSppHostSignRequest(message);
+      if (signRequest) {
+        return (async () => {
+          try {
+            await initPromise;
+          } catch {
+            return {
+              channel: signRequest.channel,
+              type: 'SPP_HOST_SIGN_RESULT',
+              id: signRequest.id,
+              ok: false,
+              code: 'VAULT_LOCKED',
+              message: 'Wallet background initialization failed; unlock and retry.',
+            };
+          }
+          return handleSppHostSignRequest(signRequest, {
+            signer,
+            keyManager,
+            networkPassphrase: Networks.TESTNET,
+          });
+        })();
+      }
+      const nymFetchRequest = parseSppHostNymFetchRequest(message);
+      if (nymFetchRequest) {
+        return handleSppHostNymFetchRequest(nymFetchRequest);
+      }
+      // Execute requests: do not claim; host page owns replies.
       return;
     }
     return (async () => {

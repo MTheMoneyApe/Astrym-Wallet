@@ -112,6 +112,12 @@ export type SppSdkRuntimeDeps = {
   Client: {
     new: (options: ClientNewOptions) => Promise<Client>;
   };
+  /**
+   * Optional hook after `Client.new` succeeds. Used by spp-host to retain the
+   * full Client for write-pool init without exposing mutators on {@link SppSession}.
+   * Must not escape secrets; Client still lives only in the host page.
+   */
+  onClientCreated?: (client: Client) => void;
 };
 
 /**
@@ -138,6 +144,11 @@ export function createSppSdkRuntime(deps: SppSdkRuntimeDeps): SppSessionRuntime 
         options.bootnodeUrl = args.bootnodeUrl;
       }
       const client = await deps.Client.new(options);
+      try {
+        deps.onClientCreated?.(client);
+      } catch {
+        // Hook failures must not leave a half-ready RO session.
+      }
       return {
         aspState: () => client.aspState(),
         allContractsData: () => client.allContractsData(),

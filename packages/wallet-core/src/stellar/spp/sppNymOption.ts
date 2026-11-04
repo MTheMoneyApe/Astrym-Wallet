@@ -40,6 +40,7 @@ export type SppPrivatePaymentCode =
   | 'NOT_SELECTED'
   | 'INVALID_REQUEST'
   | 'SESSION_NOT_READY'
+  | 'HOST_UNAVAILABLE'
   | 'RPC_FAILED'
   | 'EXECUTION_FAILED';
 
@@ -139,23 +140,54 @@ function asUrl(input: RequestInfo | URL): string {
   return input.url;
 }
 
+/** Serial queue so legacy SDK paths that still need a temporary fetch wrap never race. */
+let sppTransportTail: Promise<unknown> = Promise.resolve();
+
+/**
+ * Build a fetch that routes same-origin Soroban RPC through Nym and rejects
+ * every other origin. Does not touch `globalThis.fetch`.
+ */
+export function createSppNymScopedFetch(rpcUrl: string, nymFetch: SppRpcFetch): SppRpcFetch {
+  return async (url, init) => {
+    if (!sameOrigin(url, rpcUrl)) {
+      throw new SppPrivatePaymentError(
+        'RPC_FAILED',
+        `SPP solo puede llamar al origen del RPC Soroban (${new URL(rpcUrl).origin}); se bloqueó ${url}.`,
+      );
+    }
+    return nymFetch(url, init);
+  };
+}
+
+/**
+ * @deprecated Prefer pools / hosts that accept `createSppNymScopedFetch` injection.
+ * Last-resort serialized wrap for SDKs that hard-code `globalThis.fetch`.
+ */
 export async function withSppRpcThroughNym<T>(
   rpcUrl: string,
   nymFetch: SppRpcFetch,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const previous = globalThis.fetch.bind(globalThis);
-  const routed: typeof fetch = async (input, init) => {
-    const url = asUrl(input);
-    if (sameOrigin(url, rpcUrl)) return nymFetch(url, init);
-    return previous(input, init);
+  const run = async (): Promise<T> => {
+    const previous = globalThis.fetch;
+    const routed: typeof fetch = async (input, init) => {
+      const url = asUrl(input);
+      if (sameOrigin(url, rpcUrl)) return nymFetch(url, init);
+      return previous.call(globalThis, input, init);
+    };
+    globalThis.fetch = routed;
+    try {
+      return await fn();
+    } finally {
+      globalThis.fetch = previous;
+    }
   };
-  globalThis.fetch = routed;
-  try {
-    return await fn();
-  } finally {
-    globalThis.fetch = previous;
-  }
+  const next = sppTransportTail.then(run, run);
+  sppTransportTail = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
 }
 
 async function probeSorobanRpc(rpcUrl: string, nymFetch: SppRpcFetch): Promise<void> {
@@ -187,6 +219,11 @@ export async function executeSppPrivatePayment(input: {
   rpcUrl: string;
   nymFetch: SppRpcFetch;
   pool: SppPrivatePool | null;
+  /**
+   * When true (default), skip mutating globalThis.fetch and only probe + run the
+   * pool. Prefer this when the pool already routes RPC via Nym (host proxy / tests).
+   */
+  preferInjectedTransport?: boolean;
 }): Promise<{ operation: SppPrivateOperation; txHash: string | null; rpcRoutedViaNym: true }> {
   if (sppOptionAvailability(input.gate) !== 'ready_to_enable') {
     throw new SppPrivatePaymentError(
@@ -205,7 +242,9 @@ export async function executeSppPrivatePayment(input: {
     );
   }
   const pool = input.pool;
-  return withSppRpcThroughNym(input.rpcUrl, input.nymFetch, async () => {
+  const preferInjected = input.preferInjectedTransport !== false;
+
+  const run = async () => {
     await probeSorobanRpc(input.rpcUrl, input.nymFetch);
     try {
       const result = await runPool(pool, request);
@@ -215,7 +254,12 @@ export async function executeSppPrivatePayment(input: {
       const message = cause instanceof Error ? cause.message : 'El pago privado SPP falló';
       throw new SppPrivatePaymentError('EXECUTION_FAILED', message, { cause });
     }
-  });
+  };
+
+  if (preferInjected) {
+    return run();
+  }
+  return withSppRpcThroughNym(input.rpcUrl, input.nymFetch, run);
 }
 
 async function runPool(

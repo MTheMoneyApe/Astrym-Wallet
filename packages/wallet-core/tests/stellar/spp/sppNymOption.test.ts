@@ -2,9 +2,11 @@ import { Keypair, StrKey } from '@stellar/stellar-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  createSppNymScopedFetch,
   executeSppPrivatePayment,
   sppOptionAvailability,
   sppPrivatePaymentsAllowed,
+  withSppRpcThroughNym,
   xlmToStroops,
   type SppPrivatePool,
 } from '../../../src/stellar/spp/sppNymOption.js';
@@ -63,17 +65,12 @@ describe('SPP option while Nym is on', () => {
     expect(nymFetch).not.toHaveBeenCalled();
   });
 
-  it('routes Soroban RPC through Nym and then deposits', async () => {
-    const direct = vi.fn(async () => new Response('clearnet', { status: 200 }));
+  it('probes Soroban via Nym then deposits without mutating globalThis.fetch', async () => {
     const previous = globalThis.fetch;
+    const direct = vi.fn(async () => new Response('clearnet', { status: 200 }));
     globalThis.fetch = direct as typeof fetch;
     const nymFetch = vi.fn(async () => new Response('{"result":"ok"}', { status: 200 }));
     const pool = readyPool();
-    pool.deposit = vi.fn(async () => {
-      const res = await fetch(RPC, { method: 'POST', body: '{}' });
-      expect(await res.text()).toBe('{"result":"ok"}');
-      return { txHash: 'deposit-tx' };
-    });
     try {
       const result = await executeSppPrivatePayment({
         gate: { mode: 'nym', connected: true, selected: true },
@@ -81,11 +78,57 @@ describe('SPP option while Nym is on', () => {
         rpcUrl: RPC,
         nymFetch,
         pool,
+        preferInjectedTransport: true,
       });
       expect(result.rpcRoutedViaNym).toBe(true);
       expect(result.txHash).toBe('deposit-tx');
       expect(direct).not.toHaveBeenCalled();
-      expect(String(nymFetch.mock.calls[0]?.[0])).toContain('soroban-testnet.stellar.org');
+      expect(globalThis.fetch).toBe(direct);
+      expect(nymFetch).toHaveBeenCalled();
+      expect(pool.deposit).toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = previous;
+    }
+  });
+
+  it('scoped fetch rejects non-RPC origins', async () => {
+    const nymFetch = vi.fn(async () => new Response('ok', { status: 200 }));
+    const scoped = createSppNymScopedFetch(RPC, nymFetch);
+    await expect(scoped('https://evil.example/')).rejects.toMatchObject({ code: 'RPC_FAILED' });
+    expect(nymFetch).not.toHaveBeenCalled();
+    await scoped(RPC, { method: 'POST' });
+    expect(nymFetch).toHaveBeenCalledOnce();
+  });
+
+  it('serializes legacy withSppRpcThroughNym wraps so concurrent ops do not clobber fetch', async () => {
+    const previous = globalThis.fetch;
+    const direct = vi.fn(async () => new Response('clearnet', { status: 200 }));
+    globalThis.fetch = direct as typeof fetch;
+    const order: string[] = [];
+    const nymA = vi.fn(async () => {
+      order.push('a-start');
+      await new Promise((r) => setTimeout(r, 30));
+      order.push('a-end');
+      return new Response('a', { status: 200 });
+    });
+    const nymB = vi.fn(async () => {
+      order.push('b-start');
+      await new Promise((r) => setTimeout(r, 5));
+      order.push('b-end');
+      return new Response('b', { status: 200 });
+    });
+    try {
+      await Promise.all([
+        withSppRpcThroughNym(RPC, nymA, async () => {
+          await fetch(RPC);
+        }),
+        withSppRpcThroughNym(RPC, nymB, async () => {
+          await fetch(RPC);
+        }),
+      ]);
+      expect(order).toEqual(['a-start', 'a-end', 'b-start', 'b-end']);
+      expect(direct).not.toHaveBeenCalled();
+      expect(globalThis.fetch).toBe(direct);
     } finally {
       globalThis.fetch = previous;
     }
