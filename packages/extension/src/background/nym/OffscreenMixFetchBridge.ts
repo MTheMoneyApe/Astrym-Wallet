@@ -158,6 +158,7 @@ export class OffscreenMixFetchBridge implements NymMixFetchBridge {
     const connectOptions: {
       disableCoverTraffic?: boolean;
       preferredGateway?: string;
+      preferredNetworkRequester?: string;
       gatewayAllowlist?: string[];
       forceTls?: boolean;
     } = {
@@ -169,6 +170,12 @@ export class OffscreenMixFetchBridge implements NymMixFetchBridge {
     }
     if (typeof options?.preferredGateway === 'string' && options.preferredGateway) {
       connectOptions.preferredGateway = options.preferredGateway;
+    }
+    if (
+      typeof options?.preferredNetworkRequester === 'string' &&
+      options.preferredNetworkRequester.includes('@')
+    ) {
+      connectOptions.preferredNetworkRequester = options.preferredNetworkRequester;
     }
     if (Array.isArray(options?.gatewayAllowlist)) {
       connectOptions.gatewayAllowlist = options.gatewayAllowlist.filter(

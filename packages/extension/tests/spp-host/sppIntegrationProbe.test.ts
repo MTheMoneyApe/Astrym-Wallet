@@ -89,24 +89,23 @@ describe('Fase 5G.2 surface guarantees (static)', () => {
     expect(src).not.toMatch(/STORAGE_LAB_EXECUTION_AUTHORIZED\s*=\s*true/);
   });
 
-  it('controller session slot has no create/initialize path', () => {
+  it('controller constructs a session and initializes it only through the Nym gate', () => {
     const src = readFileSync(join(EXT_ROOT, 'src/spp-host/hostController.ts'), 'utf8');
     expect(src).toMatch(/attachExistingSession/);
     expect(src).toMatch(/readBoundSessionStatus/);
+    expect(src).toMatch(/initializeBoundSessionForNym/);
+    expect(src).toMatch(/Stellar Private Payments requiere Nym conectado/);
+    expect(src).toMatch(/_sessionInitializeEnabled = false/);
     expect(src).not.toMatch(/new SppSession\b/);
-    expect(src).not.toMatch(/\.initialize\s*\(/);
-    expect(src).not.toMatch(/createSppSdkRuntime/);
-    expect(src).not.toMatch(/sessionConstruct/);
-    expect(src).toMatch(/sessionInitializeEnabled:\s*false/);
   });
 
-  it('main wires integrationSnapshot getSession from readBoundSessionStatus only', () => {
+  it('main wires integrationSnapshot getSession from readBoundSessionStatus and asks Nym before init', () => {
     const src = readFileSync(join(EXT_ROOT, 'src/spp-host/main.ts'), 'utf8');
     expect(src).toMatch(/getSession:\s*\(\)\s*=>\s*controller\.readBoundSessionStatus\(\)/);
+    expect(src).toMatch(/NYM_STATUS/);
+    expect(src).toMatch(/initializeBoundSessionForNym/);
     expect(src).not.toMatch(/new SppSession/);
-    expect(src).not.toMatch(/sessionConstruct/);
     expect(src).not.toMatch(/attachExistingSession/);
-    expect(src).not.toMatch(/chrome\.runtime\.sendMessage/);
   });
 
   it('keeps STORAGE_LAB_EXECUTION_AUTHORIZED false', () => {

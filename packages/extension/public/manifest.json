@@ -1,15 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "Solanym Wallet",
+  "name": "Astrym Wallet",
   "version": "0.1.0",
-  "description": "Secure Stellar Wallet",
+  "description": "Billetera Stellar con privacidad Nym",
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Solanym",
+    "default_title": "Astrym",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

@@ -67,6 +67,12 @@ export type NymOffscreenConnectOptions = {
    * Required for createMixFetch with mix-fetch@1.4.2.
    */
   preferredGateway?: string;
+  /**
+   * MixFetchOpts.preferredNetworkRequester — Nym client address
+   * (`identity.encryption@gateway`). When omitted, mix-fetch picks a random
+   * service provider; many hang indefinitely at SOCKS CONNECT.
+   */
+  preferredNetworkRequester?: string;
   /** Exact WSS/HTTPS origins for MV3 host-permission policy (never forwarded to MixFetch). */
   gatewayAllowlist?: string[];
   /** MixFetchOpts.forceTls — prefer WSS to the entry gateway (default true from bridge). */

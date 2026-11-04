@@ -1,8 +1,10 @@
 /**
  * SW orchestration for Nym Mixnet: offscreen host + MixFetchNymTransport +
- * FailClosedTransportRouter. Nym-first mode fail-closed. Global Direct mode is disabled (Founder Decision F).
+ * FailClosedTransportRouter. Horizon/Direct is the default wallet transport;
+ * Nym is opt-in. While mode=nym, MixFetch stays fail-closed (no silent clearnet).
  */
 
+import type { NymMixFetchBridge } from '@solanym/wallet-core/src/nym/NymMixFetchBridge.js';
 import {
   MixFetchNymTransport,
   NymTransportError,
@@ -30,6 +32,7 @@ import {
   fetchPublicData,
   type PublicDataFetchRequest,
   type PublicDataFetchResult,
+  type PublicDataTransportFetch,
 } from './PublicDataClient.js';
 import { createStellarTransportFetch } from './stellarTransportFetch.js';
 import {
@@ -42,6 +45,13 @@ import {
   type StellarHorizonProbeResult,
 } from './StellarHorizonProbe.js';
 import type { StellarReadFetch } from '@solanym/wallet-core/src/stellar/read/StellarReadClient.js';
+import type { NymOffscreenStatusPayload } from '../../nym-offscreen/protocol.js';
+import { NYM_VERIFIED_GATEWAY } from '../../nym-offscreen/verifiedGateway.js';
+
+/** Offscreen IPC bridge or the in-page MixFetch bridge used by the Android webapp. */
+export type NymSessionBridge = NymMixFetchBridge & {
+  queryStatus(): Promise<NymOffscreenStatusPayload | null>;
+};
 
 export type NymRuntimeUiSnapshot = NymTransportSnapshot & {
   mode: NymTransportMode;
@@ -110,14 +120,21 @@ function defaultLocalStorage(): {
 
 export class NymRuntimeController {
   /**
-   * Nym-first: starts in Nym mode. Wallet operations fail closed if Nym is not
-   * Global Direct mode is disabled; wallet operations fail closed without silent fallback.
+   * Default Direct so Horizon balances/sends work without Nym.
+   * User Connect switches to nym (fail-closed MixFetch). Disconnect returns to Direct.
    * Diagnostic requests (fetchPublicData, probeStellarHorizon) must not mutate this field.
+   * Bridge is OffscreenMixFetchBridge by default; Android webapp injects NymSessionBridge.
    */
-  private _mode: NymTransportMode = 'nym';
-  private readonly _bridge: OffscreenMixFetchBridge;
+  private _mode: NymTransportMode = 'direct';
+  private readonly _bridge: NymSessionBridge;
   private readonly _transport: MixFetchNymTransport;
   private readonly _router: FailClosedTransportRouter;
+  /**
+   * Android / standalone webapp has no MV3 optional host permissions.
+   * WSS is a normal browser socket. Extension builds keep this false so a
+   * missing permission still fail-closes Connect.
+   */
+  private readonly _allowConnectWithoutHostPermission: boolean;
   private readonly _gatewayConfig: NymGatewayConfigService;
   private readonly _hostPermissions: NymHostPermissionService;
   private _documentReady = false;
@@ -137,11 +154,13 @@ export class NymRuntimeController {
   private _connectInFlight: Promise<NymRuntimeUiSnapshot> | null = null;
 
   constructor(options?: {
-    bridge?: OffscreenMixFetchBridge;
+    bridge?: NymSessionBridge;
     gatewayConfig?: NymGatewayConfigService;
     hostPermissions?: NymHostPermissionService;
+    allowConnectWithoutHostPermission?: boolean;
   }) {
     const docs = createOffscreenDocumentManager();
+    this._allowConnectWithoutHostPermission = options?.allowConnectWithoutHostPermission === true;
     this._bridge = options?.bridge ?? new OffscreenMixFetchBridge(docs);
     this._transport = new MixFetchNymTransport(this._bridge);
     this._router = new FailClosedTransportRouter({
@@ -216,11 +235,6 @@ export class NymRuntimeController {
   }
 
   setMode(mode: NymTransportMode): void {
-    if (mode === 'direct') {
-      throw new Error(
-        'Global Direct mode is disabled. Astrym Wallet operates in Nym-first mode fail-closed. Operation-specific Direct authorization is required.',
-      );
-    }
     this._mode = mode;
     this._router.setMode(mode);
   }
@@ -312,6 +326,7 @@ export class NymRuntimeController {
   }): Promise<NymRuntimeUiSnapshot> {
     // Document open ≠ MixFetch ready — cleared until createMixFetch succeeds.
     this._documentReady = false;
+    await this._gatewayConfig.ensureVerifiedDefault();
     const config = await this.syncGatewayConfigUi();
     const wssOrigin = config.selectedGateway || config.gatewayOrigins[0] || null;
     if (!wssOrigin) {
@@ -341,25 +356,42 @@ export class NymRuntimeController {
     this._gatewayHostPermissionGranted = perm.granted;
     this._gatewayHostPermissionPattern = perm.hostPermissionPattern;
     if (!perm.granted) {
-      this._diagnosticCode = 'PERMISSION_DENIED';
-      throw new NymTransportError(
-        'CONNECT_FAILED',
-        `Gateway host permission not granted for ${perm.hostPermissionPattern}. Use Grant permission (user gesture) first. Permission ≠ Mixnet Ready.`,
-      );
+      const browserSocket =
+        this._allowConnectWithoutHostPermission && !this._hostPermissions.isApiAvailable();
+      if (!browserSocket) {
+        this._diagnosticCode = 'PERMISSION_DENIED';
+        throw new NymTransportError(
+          'CONNECT_FAILED',
+          `Gateway host permission not granted for ${perm.hostPermissionPattern}. Use Grant permission (user gesture) first. Permission ≠ Mixnet Ready.`,
+        );
+      }
+      this._gatewayHostPermissionGranted = true;
     }
 
     try {
       const transportConfig: {
         gatewayUrl: string;
         gatewayAllowlist: string[];
+        preferredNetworkRequester?: string;
         disableCoverTraffic?: boolean;
       } = {
         // gatewayUrl carries MixFetch identity key into preferredGateway.
         gatewayUrl: identityKey,
         gatewayAllowlist: config.gatewayOrigins,
       };
+      // Pin NR when using the verified entry gateway — random NR selection hangs
+      // at SOCKS CONNECT even after createMixFetch reports Ready.
+      if (identityKey === NYM_VERIFIED_GATEWAY.identityKey) {
+        transportConfig.preferredNetworkRequester =
+          NYM_VERIFIED_GATEWAY.networkRequesterAddress;
+      }
       if (options?.disableCoverTraffic !== undefined) {
         transportConfig.disableCoverTraffic = options.disableCoverTraffic;
+      } else {
+        // Cover traffic is valuable in production but slows first HTTP smoke /
+        // Horizon probes on constrained Android WebViews. Default off for Connect;
+        // operators can re-enable later via explicit option if needed.
+        transportConfig.disableCoverTraffic = true;
       }
       // Ensures offscreen document + createMixFetch via bridge.setup (serialized).
       await this._transport.connect(transportConfig);
@@ -517,6 +549,8 @@ export class NymRuntimeController {
     this._documentReady = false;
     this._diagnosticCode = 'OK';
     this._diagnosticStage = null;
+    // Return to Direct so Horizon works again; private SPP remains gated on Nym.
+    this.setMode('direct');
     return this.getSnapshot();
   }
 

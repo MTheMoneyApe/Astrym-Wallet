@@ -266,8 +266,8 @@ export class StellarClockSkewTooLargeError extends StellarTransactionError {
  * Thrown when signed transaction XDR fails local invariant verification before dispatch.
  */
 export class StellarXdrValidationError extends StellarTransactionError {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, cause?: unknown) {
+    super(message, cause);
     this.name = 'StellarXdrValidationError';
   }
 }

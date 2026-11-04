@@ -70,7 +70,8 @@ describe('nym-mixfetch import.meta.url asset resolution', () => {
       resolve(__dirname, '../../src/nym-offscreen/runtime.ts'),
       'utf8',
     );
-    expect(offscreenSrc).toContain("`${NYM_MIXFETCH_DIR}/index.js`");
+    expect(offscreenSrc).toContain('`${NYM_MIXFETCH_DIR}/${file}`');
+    expect(offscreenSrc).toContain('resolveAssetUrl');
     expect(offscreenSrc).toMatch(/import\(\s*\/\*\s*@vite-ignore\s*\*\/\s*url\s*\)/);
   });
 });
