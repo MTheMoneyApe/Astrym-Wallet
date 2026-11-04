@@ -90,7 +90,10 @@ export async function fetchPublicData(deps: {
   /** When transport=nym, MixFetch must already be connected. */
   nymConnected: boolean;
   /** Router mode must equal request.transport (explicit selection). */
-  routerMode: NymTransportMode;
+  /** Injected transport describing the actual diagnostic transport. */
+  injectedTransport?: NymTransportMode;
+  /** @deprecated Kept for backward compatibility with older tests. */
+  routerMode?: NymTransportMode;
   request?: Omit<PublicDataFetchRequest, 'transport'> & { transport?: NymTransportMode };
   now?: () => number;
   randomId?: () => string;
@@ -123,7 +126,8 @@ export async function fetchPublicData(deps: {
     };
   }
 
-  if (transport !== deps.routerMode) {
+  const effectiveInjectedTransport = deps.injectedTransport ?? deps.routerMode;
+  if (effectiveInjectedTransport !== undefined && transport !== effectiveInjectedTransport) {
     return {
       state: 'error',
       transport,
@@ -135,7 +139,7 @@ export async function fetchPublicData(deps: {
       probeMatched: false,
       echoedProbeId: null,
       responsePreview: null,
-      message: `Transport mismatch: request=${transport} router=${deps.routerMode}`,
+      message: `Transport mismatch: request=${transport} injected=${effectiveInjectedTransport}`,
       transportFetchInvoked: false,
     };
   }

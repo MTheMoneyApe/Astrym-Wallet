@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Keypair } from '@stellar/stellar-sdk';
+import { Keypair, Networks, TransactionBuilder } from '@stellar/stellar-sdk';
 import {
   StellarTransactionClient,
+  attachHorizonFetchAdapter,
+  isJsonMediaType,
   STELLAR_BASE_RESERVE_XLM,
   STELLAR_MIN_ACCOUNT_RESERVE_XLM,
   uint8ArrayToBase64,
@@ -14,7 +16,14 @@ import {
   StellarAccountNotFundedError,
   StellarFeeChangedError,
   StellarTransactionFailedError,
+  StellarTransportMissingError,
 } from '../../src/stellar/transaction/types.js';
+
+interface MockAccountData {
+  sequence?: string;
+  subentry_count?: number;
+  balances?: Array<{ asset_type: string; balance: string }>;
+}
 
 describe('StellarTransactionClient', () => {
   const sourceKp = Keypair.random();
@@ -39,30 +48,133 @@ describe('StellarTransactionClient', () => {
     }),
   };
 
-  let mockServer: any;
+  let mockAccounts: Map<string, MockAccountData | null>;
+  let mockBaseFee: number;
+  let mockSubmitHandler: ((txBody: string) => Promise<Response> | Response) | null;
+  let mockTransactionRecord: { successful: boolean; ledger_attr?: number } | null | 404;
+  let mockFetch: any;
   let client: StellarTransactionClient;
 
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockServer = {
-      loadAccount: vi.fn(),
-      fetchBaseFee: vi.fn().mockResolvedValue(100),
-      fetchTimebounds: vi.fn().mockResolvedValue({ minTime: 0, maxTime: 0 }),
-      submitTransaction: vi.fn(),
-      transactions: vi.fn().mockReturnValue({
-        transaction: vi.fn().mockReturnValue({
-          call: vi.fn(),
-        }),
-      }),
-    };
+    mockAccounts = new Map();
+    // Default funded source account
+    mockAccounts.set(sourceAddress, {
+      sequence: '100',
+      subentry_count: 0,
+      balances: [{ asset_type: 'native', balance: '100.0000000' }],
+    });
+    // Default funded destination account
+    mockAccounts.set(destAddress, {
+      sequence: '50',
+      subentry_count: 0,
+      balances: [{ asset_type: 'native', balance: '20.0000000' }],
+    });
+
+    mockBaseFee = 100;
+    mockSubmitHandler = null;
+    mockTransactionRecord = null;
+
+    mockFetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      const method = (init?.method || 'GET').toUpperCase();
+
+      // POST /transactions
+      if (url.includes('/transactions') && method === 'POST') {
+        if (mockSubmitHandler) {
+          return mockSubmitHandler(init?.body as string);
+        }
+        return new Response(
+          JSON.stringify({
+            hash: 'b78a3b4c469b284360d131dab7c3c313abf9e606b9705e0e7e9953a360fb1275',
+            ledger: 123456,
+            successful: true,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+
+      // GET /transactions/:hash
+      if (url.includes('/transactions/')) {
+        if (mockTransactionRecord === 404) {
+          return new Response(
+            JSON.stringify({
+              status: 404,
+              title: 'Resource Missing',
+              type: 'https://stellar.org/horizon-errors/not_found',
+            }),
+            { status: 404, headers: { 'Content-Type': 'application/problem+json' } },
+          );
+        }
+        if (mockTransactionRecord) {
+          return new Response(
+            JSON.stringify({
+              hash: url.split('/transactions/')[1]?.split('?')[0],
+              ...mockTransactionRecord,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+      }
+
+      // GET /accounts/:address
+      if (url.includes('/accounts/')) {
+        const addr = url.split('/accounts/')[1]?.split('?')[0];
+        const acc = addr ? mockAccounts.get(addr) : undefined;
+        if (acc === null || acc === undefined) {
+          return new Response(
+            JSON.stringify({
+              status: 404,
+              title: 'Resource Missing',
+              type: 'https://stellar.org/horizon-errors/not_found',
+            }),
+            { status: 404, headers: { 'Content-Type': 'application/problem+json' } },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            id: addr,
+            sequence: acc.sequence ?? '100',
+            subentry_count: acc.subentry_count ?? 0,
+            balances: acc.balances ?? [{ asset_type: 'native', balance: '100.0000000' }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+
+      // GET /fee_stats
+      if (url.includes('/fee_stats')) {
+        return new Response(
+          JSON.stringify({
+            fee_charged: { min: String(mockBaseFee), mode: String(mockBaseFee), p10: String(mockBaseFee) },
+            base_fee_in_stroops: mockBaseFee,
+            last_ledger_base_fee: mockBaseFee,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+
+      // GET /ledgers
+      if (url.includes('/ledgers')) {
+        return new Response(
+          JSON.stringify({
+            _embedded: {
+              records: [{ sequence: 1000, closed_at: '2026-11-01T15:00:00Z' }],
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+
+      return new Response('Not Found', { status: 404 });
+    });
 
     client = new StellarTransactionClient(
       'https://horizon-testnet.stellar.org',
       mockKeyManager,
       mockSigner,
-      'Test SDF Network ; September 2015',
-      mockServer,
+      Networks.TESTNET,
+      mockFetch,
     );
   });
 
@@ -92,7 +204,7 @@ describe('StellarTransactionClient', () => {
       expect(() => client.validateAmount('0')).toThrow(InvalidStellarAmountError);
       expect(() => client.validateAmount('-5')).toThrow(InvalidStellarAmountError);
       expect(() => client.validateAmount('abc')).toThrow(InvalidStellarAmountError);
-      expect(() => client.validateAmount('1.12345678')).toThrow(InvalidStellarAmountError); // > 7 decimals
+      expect(() => client.validateAmount('1.12345678')).toThrow(InvalidStellarAmountError);
     });
 
     it('validates memo length within 28 bytes', () => {
@@ -106,26 +218,6 @@ describe('StellarTransactionClient', () => {
 
   describe('reviewXlmTransfer', () => {
     it('reviews a payment to an existing account', async () => {
-      mockServer.loadAccount.mockImplementation((addr: string) => {
-        if (addr === sourceAddress) {
-          return Promise.resolve({
-            id: sourceAddress,
-            sequence: '100',
-            subentry_count: 0,
-            balances: [{ asset_type: 'native', balance: '100.0000000' }],
-          });
-        }
-        if (addr === destAddress) {
-          return Promise.resolve({
-            id: destAddress,
-            sequence: '50',
-            subentry_count: 0,
-            balances: [{ asset_type: 'native', balance: '20.0000000' }],
-          });
-        }
-        return Promise.reject({ response: { status: 404 } });
-      });
-
       const summary = await client.reviewXlmTransfer({
         sourceAccountIndex: 0,
         destination: destAddress,
@@ -144,17 +236,7 @@ describe('StellarTransactionClient', () => {
     });
 
     it('detects unfunded destination and requires minimum 1 XLM createAccount', async () => {
-      mockServer.loadAccount.mockImplementation((addr: string) => {
-        if (addr === sourceAddress) {
-          return Promise.resolve({
-            id: sourceAddress,
-            sequence: '100',
-            subentry_count: 0,
-            balances: [{ asset_type: 'native', balance: '100.0000000' }],
-          });
-        }
-        return Promise.reject({ response: { status: 404 }, name: 'NotFoundError' });
-      });
+      mockAccounts.set(destAddress, null); // 404
 
       // Amount >= 1.0 succeeds with createAccount
       const summary = await client.reviewXlmTransfer({
@@ -177,7 +259,7 @@ describe('StellarTransactionClient', () => {
     });
 
     it('throws StellarAccountNotFundedError if source account is unfunded (404)', async () => {
-      mockServer.loadAccount.mockRejectedValue({ response: { status: 404 }, name: 'NotFoundError' });
+      mockAccounts.set(sourceAddress, null); // 404
 
       await expect(
         client.reviewXlmTransfer({
@@ -189,16 +271,10 @@ describe('StellarTransactionClient', () => {
     });
 
     it('throws InsufficientXlmBalanceError if transfer exceeds available balance reserve', async () => {
-      mockServer.loadAccount.mockImplementation((addr: string) => {
-        if (addr === sourceAddress) {
-          return Promise.resolve({
-            id: sourceAddress,
-            sequence: '100',
-            subentry_count: 2, // reserve = (2 + 2) * 0.5 = 2.0 XLM
-            balances: [{ asset_type: 'native', balance: '10.0000000' }], // available = 8.0 XLM
-          });
-        }
-        return Promise.resolve({ id: destAddress, balances: [] });
+      mockAccounts.set(sourceAddress, {
+        sequence: '100',
+        subentry_count: 2, // reserve = (2 + 2) * 0.5 = 2.0 XLM
+        balances: [{ asset_type: 'native', balance: '10.0000000' }], // available = 8.0 XLM
       });
 
       // 9 XLM > 8 XLM available
@@ -212,17 +288,11 @@ describe('StellarTransactionClient', () => {
     });
 
     it('balance check uses approvedFeeStroops (not a lower live base fee)', async () => {
-      mockServer.fetchBaseFee.mockResolvedValue(100);
-      mockServer.loadAccount.mockImplementation((addr: string) => {
-        if (addr === sourceAddress) {
-          return Promise.resolve({
-            id: sourceAddress,
-            sequence: '100',
-            subentry_count: 0, // reserve 1.0 → available 2.0 from balance 3.0
-            balances: [{ asset_type: 'native', balance: '3.0000000' }],
-          });
-        }
-        return Promise.resolve({ id: destAddress, balances: [] });
+      mockBaseFee = 100;
+      mockAccounts.set(sourceAddress, {
+        sequence: '100',
+        subentry_count: 0, // reserve 1.0 -> available 2.0 from balance 3.0
+        balances: [{ asset_type: 'native', balance: '3.0000000' }],
       });
 
       // amount 2.0 + approved 0.0000100 would fit; approved 1_000_000 stroops (=0.1 XLM) still fits
@@ -248,23 +318,7 @@ describe('StellarTransactionClient', () => {
   });
 
   describe('sendXlm', () => {
-    const fundedSourceAccount = () => ({
-      id: sourceAddress,
-      sequence: '12345',
-      subentry_count: 0,
-      balances: [{ asset_type: 'native', balance: '100.0000000' }],
-      accountId: () => sourceAddress,
-      sequenceNumber: () => '12345',
-      incrementSequenceNumber: () => {},
-    });
-
     it('builds, signs through signer, and submits transaction to Horizon', async () => {
-      mockServer.loadAccount.mockResolvedValue(fundedSourceAccount());
-      mockServer.submitTransaction.mockResolvedValue({
-        hash: 'b78a3b4c469b284360d131dab7c3c313abf9e606b9705e0e7e9953a360fb1275',
-        ledger: 123456,
-      });
-
       const onBeforeSign = vi.fn();
 
       const result = await client.sendXlm(
@@ -280,7 +334,6 @@ describe('StellarTransactionClient', () => {
 
       expect(onBeforeSign).toHaveBeenCalledOnce();
       expect(mockSigner.signTransaction).toHaveBeenCalledOnce();
-      expect(mockServer.submitTransaction).toHaveBeenCalledOnce();
       expect(result.status).toBe('confirmed');
       expect(result.hash).toBe(
         'b78a3b4c469b284360d131dab7c3c313abf9e606b9705e0e7e9953a360fb1275',
@@ -289,29 +342,40 @@ describe('StellarTransactionClient', () => {
     });
 
     it('F1: builds TX with approvedFeeStroops even when live base fee is lower', async () => {
-      mockServer.loadAccount.mockResolvedValue(fundedSourceAccount());
-      // Live fee dropped after REVIEW; SEND must still attach the approved fee.
-      mockServer.fetchBaseFee.mockResolvedValue(50);
-      mockServer.submitTransaction.mockResolvedValue({
-        hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        ledger: 1,
-      });
+      mockBaseFee = 50;
+      let submittedBody = '';
+      mockSubmitHandler = (body: string) => {
+        submittedBody = body;
+        return new Response(
+          JSON.stringify({
+            hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            ledger: 1,
+            successful: true,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      };
 
-      await client.sendXlm({
+      const result = await client.sendXlm({
         sourceAccountIndex: 0,
         destination: destAddress,
         amountXlm: '1.0',
         approvedFeeStroops: 200,
       });
 
-      const submittedTx = mockServer.submitTransaction.mock.calls[0][0];
-      expect(String(submittedTx.fee)).toBe('200');
+      expect(result.status).toBe('confirmed');
       expect(mockSigner.signTransaction).toHaveBeenCalledOnce();
+      expect(submittedBody).toContain('tx=');
+
+      const params = new URLSearchParams(submittedBody);
+      const txXdr = params.get('tx');
+      expect(txXdr).toBeTruthy();
+      const parsedTx = TransactionBuilder.fromXDR(txXdr!, Networks.TESTNET);
+      expect(String(parsedTx.fee)).toBe('200');
     });
 
     it('F2: aborts before sign/submit when network fee exceeds approvedFeeStroops', async () => {
-      mockServer.loadAccount.mockResolvedValue(fundedSourceAccount());
-      mockServer.fetchBaseFee.mockResolvedValue(500);
+      mockBaseFee = 500;
 
       await expect(
         client.sendXlm({
@@ -323,15 +387,19 @@ describe('StellarTransactionClient', () => {
       ).rejects.toThrow(StellarFeeChangedError);
 
       expect(mockSigner.signTransaction).not.toHaveBeenCalled();
-      expect(mockServer.submitTransaction).not.toHaveBeenCalled();
+      const submittedPost = mockFetch.mock.calls.find(
+        ([url, init]: [string, RequestInit]) => url.includes('/transactions') && init?.method === 'POST',
+      );
+      expect(submittedPost).toBeUndefined();
     });
 
     it('formats Horizon error codes cleanly when submission fails', async () => {
-      mockServer.loadAccount.mockResolvedValue(fundedSourceAccount());
-      mockServer.submitTransaction.mockRejectedValue({
-        message: 'Transaction Failed',
-        response: {
-          data: {
+      mockSubmitHandler = () =>
+        new Response(
+          JSON.stringify({
+            type: 'https://stellar.org/horizon-errors/transaction_failed',
+            title: 'Transaction Failed',
+            status: 400,
             detail: 'The transaction failed when submitted to the stellar network.',
             extras: {
               result_codes: {
@@ -339,9 +407,9 @@ describe('StellarTransactionClient', () => {
                 operations: ['op_underfunded'],
               },
             },
-          },
-        },
-      });
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/problem+json' } },
+        );
 
       await expect(
         client.sendXlm({
@@ -356,10 +424,10 @@ describe('StellarTransactionClient', () => {
 
   describe('confirmTransaction', () => {
     it('returns confirmed status when Horizon reports successful', async () => {
-      mockServer.transactions().transaction().call.mockResolvedValue({
+      mockTransactionRecord = {
         successful: true,
         ledger_attr: 98765,
-      });
+      };
 
       const res = await client.confirmTransaction('some-hash');
       expect(res.status).toBe('confirmed');
@@ -367,10 +435,10 @@ describe('StellarTransactionClient', () => {
     });
 
     it('returns failed status when Horizon reports successful: false', async () => {
-      mockServer.transactions().transaction().call.mockResolvedValue({
+      mockTransactionRecord = {
         successful: false,
         ledger_attr: 4242,
-      });
+      };
 
       const res = await client.confirmTransaction('failed-hash');
       expect(res.status).toBe('failed');
@@ -380,10 +448,7 @@ describe('StellarTransactionClient', () => {
     });
 
     it('returns unknown status on 404 pending confirmation', async () => {
-      mockServer.transactions().transaction().call.mockRejectedValue({
-        response: { status: 404 },
-        name: 'NotFoundError',
-      });
+      mockTransactionRecord = 404;
 
       const res = await client.confirmTransaction('pending-hash');
       expect(res.status).toBe('unknown');
@@ -401,35 +466,18 @@ describe('StellarTransactionClient', () => {
       ];
 
       for (const bytes of testCases) {
-        const expected = Buffer.from(bytes).toString('base64');
+        const buf = (globalThis as any).Buffer;
+        const expected = buf
+          ? buf.from(bytes).toString('base64')
+          : btoa(String.fromCharCode(...bytes));
         expect(uint8ArrayToBase64(bytes)).toBe(expected);
       }
     });
 
     it('sendXlm signs and submits successfully when globalThis.Buffer is undefined', async () => {
-      const sourceAccountObj = {
-        id: sourceAddress,
-        sequence: '12345',
-        subentry_count: 0,
-        balances: [{ asset_type: 'native', balance: '100.0000000' }],
-        accountId: () => sourceAddress,
-        sequenceNumber: () => '12345',
-        incrementSequenceNumber: () => {},
-      };
-
-      mockServer.loadAccount.mockResolvedValue(sourceAccountObj);
-      mockServer.fetchBaseFee.mockResolvedValue(100);
-      mockServer.fetchTimebounds.mockResolvedValue({ minTime: 0, maxTime: 0 });
-      mockServer.submitTransaction.mockResolvedValue({
-        hash: 'b78a3b4c469b284360d131dab7c3c313abf9e606b9705e0e7e9953a360fb1275',
-        ledger: 123456,
-      });
-
-      // Simulate browser extension environment where Buffer is undefined
-      const originalBuffer = globalThis.Buffer;
+      const originalBuffer = (globalThis as any).Buffer;
       try {
-        // @ts-expect-error simulating browser environment
-        delete globalThis.Buffer;
+        delete (globalThis as any).Buffer;
 
         const result = await client.sendXlm({
           sourceAccountIndex: 0,
@@ -443,8 +491,325 @@ describe('StellarTransactionClient', () => {
           'b78a3b4c469b284360d131dab7c3c313abf9e606b9705e0e7e9953a360fb1275',
         );
       } finally {
-        globalThis.Buffer = originalBuffer;
+        (globalThis as any).Buffer = originalBuffer;
       }
+    });
+  });
+
+  describe('Transport Integrity & Fail-Closed Enforcement (Module 1A)', () => {
+    it('rejects construction if fetchImpl is missing, undefined, null, or not a function', () => {
+      expect(
+        () =>
+          new StellarTransactionClient(
+            'https://horizon-testnet.stellar.org',
+            mockKeyManager,
+            mockSigner,
+            Networks.TESTNET,
+            undefined as any,
+          ),
+      ).toThrow(StellarTransportMissingError);
+
+      expect(
+        () =>
+          new StellarTransactionClient(
+            'https://horizon-testnet.stellar.org',
+            mockKeyManager,
+            mockSigner,
+            Networks.TESTNET,
+            null as any,
+          ),
+      ).toThrow(StellarTransportMissingError);
+
+      expect(
+        () =>
+          new StellarTransactionClient(
+            'https://horizon-testnet.stellar.org',
+            mockKeyManager,
+            mockSigner,
+            Networks.TESTNET,
+            'not-a-function' as any,
+          ),
+      ).toThrow(StellarTransportMissingError);
+    });
+
+    it('verifies no production test-only bypass exists on StellarTransactionClient', () => {
+      expect((StellarTransactionClient as any).createForTesting).toBeUndefined();
+      expect((client as any)._horizon).toBeDefined();
+    });
+
+    it('routes GET requests through injected transport', async () => {
+      const globalFetchSpy = vi.spyOn(globalThis, 'fetch');
+
+      const review = await client.reviewXlmTransfer({
+        sourceAccountIndex: 0,
+        destination: destAddress,
+        amountXlm: '5.0',
+      });
+
+      expect(review.amountXlm).toBe('5.0');
+      expect(mockFetch).toHaveBeenCalled();
+      expect(globalFetchSpy).not.toHaveBeenCalled();
+
+      globalFetchSpy.mockRestore();
+    });
+
+    it('routes POST submission through injected transport with URL-encoded form data', async () => {
+      const globalFetchSpy = vi.spyOn(globalThis, 'fetch');
+
+      const result = await client.sendXlm({
+        sourceAccountIndex: 0,
+        destination: destAddress,
+        amountXlm: '5.0',
+        approvedFeeStroops: 100,
+      });
+
+      expect(result.status).toBe('confirmed');
+
+      const postCall = mockFetch.mock.calls.find(
+        ([url, init]: [string, RequestInit]) => url.includes('/transactions') && init?.method === 'POST',
+      );
+      expect(postCall).toBeDefined();
+      expect(postCall[1].headers['content-type']).toContain('application/x-www-form-urlencoded');
+      expect(postCall[1].body).toContain('tx=');
+      expect(globalFetchSpy).not.toHaveBeenCalled();
+
+      globalFetchSpy.mockRestore();
+    });
+
+    it('preserves usable Horizon error information on HTTP error', async () => {
+      mockSubmitHandler = () =>
+        new Response(
+          JSON.stringify({
+            type: 'https://stellar.org/horizon-errors/transaction_failed',
+            title: 'Transaction Failed',
+            status: 400,
+            detail: 'The transaction failed when submitted to the stellar network.',
+            extras: {
+              result_codes: {
+                transaction: 'tx_bad_seq',
+              },
+            },
+          }),
+          {
+            status: 400,
+            statusText: 'Bad Request',
+            headers: { 'Content-Type': 'application/problem+json' },
+          },
+        );
+
+      await expect(
+        client.sendXlm({
+          sourceAccountIndex: 0,
+          destination: destAddress,
+          amountXlm: '5.0',
+          approvedFeeStroops: 100,
+        }),
+      ).rejects.toThrow(/tx_bad_seq/);
+    });
+
+    it('handles JSON content types with charset parameters', async () => {
+      expect(isJsonMediaType('application/json; charset=utf-8')).toBe(true);
+
+      let capturedUrl = '';
+      const testFetch = vi.fn().mockImplementation(async (url: string) => {
+        capturedUrl = url;
+        return new Response(JSON.stringify({ parsed: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        });
+      });
+
+      const fakeServer: any = { httpClient: { defaults: {} } };
+      attachHorizonFetchAdapter(fakeServer, testFetch);
+
+      const res = await fakeServer.httpClient.defaults.adapter({
+        method: 'GET',
+        url: 'https://horizon-testnet.stellar.org/fee_stats',
+      });
+
+      expect(res.data).toEqual({ parsed: true });
+      expect(capturedUrl).toContain('/fee_stats');
+    });
+
+    it('handles vendor +json responses', async () => {
+      expect(isJsonMediaType('application/problem+json')).toBe(true);
+      expect(isJsonMediaType('application/problem+json; charset=utf-8')).toBe(true);
+      expect(isJsonMediaType('application/vnd.stellar-horizon.v1+json')).toBe(true);
+
+      const testFetch = vi.fn().mockImplementation(async () => {
+        return new Response(JSON.stringify({ error_type: 'bad_request' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/problem+json; charset=utf-8' },
+        });
+      });
+
+      const fakeServer: any = { httpClient: { defaults: {} } };
+      attachHorizonFetchAdapter(fakeServer, testFetch);
+
+      const res = await fakeServer.httpClient.defaults.adapter({
+        method: 'GET',
+        url: 'https://horizon-testnet.stellar.org/test_error',
+      });
+
+      expect(res.data).toEqual({ error_type: 'bad_request' });
+    });
+
+    it('handles malformed JSON responses safely without throwing stream read errors', async () => {
+      const malformedBody = '{"not": valid json...';
+      const testFetch = vi.fn().mockImplementation(async () => {
+        return new Response(malformedBody, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      });
+
+      const fakeServer: any = { httpClient: { defaults: {} } };
+      attachHorizonFetchAdapter(fakeServer, testFetch);
+
+      const res = await fakeServer.httpClient.defaults.adapter({
+        method: 'GET',
+        url: 'https://horizon-testnet.stellar.org/malformed',
+      });
+
+      expect(res.data).toBe(malformedBody);
+    });
+
+    it('correctly serializes repeated and array query parameters', async () => {
+      let requestedUrl = '';
+      const testFetch = vi.fn().mockImplementation(async (url: string) => {
+        requestedUrl = url;
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      });
+
+      const fakeServer: any = { httpClient: { defaults: {} } };
+      attachHorizonFetchAdapter(fakeServer, testFetch);
+
+      await fakeServer.httpClient.defaults.adapter({
+        method: 'GET',
+        url: 'https://horizon-testnet.stellar.org/ledgers',
+        params: {
+          tag: ['alpha', 'beta'],
+          order: 'desc',
+          limit: 10,
+        },
+      });
+
+      expect(requestedUrl).toContain('tag=alpha');
+      expect(requestedUrl).toContain('tag=beta');
+      expect(requestedUrl).toContain('order=desc');
+      expect(requestedUrl).toContain('limit=10');
+
+      // Test with URLSearchParams
+      const searchParams = new URLSearchParams();
+      searchParams.append('cursor', 'now');
+      searchParams.append('filter', 'op_payment');
+      searchParams.append('filter', 'op_create_account');
+
+      await fakeServer.httpClient.defaults.adapter({
+        method: 'GET',
+        url: 'https://horizon-testnet.stellar.org/operations',
+        params: searchParams,
+      });
+
+      expect(requestedUrl).toContain('cursor=now');
+      expect(requestedUrl).toContain('filter=op_payment&filter=op_create_account');
+    });
+
+    it('handles supported Axios header representations safely', async () => {
+      let sentHeaders: any;
+      const testFetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+        sentHeaders = init?.headers;
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      });
+
+      const fakeServer: any = { httpClient: { defaults: {} } };
+      attachHorizonFetchAdapter(fakeServer, testFetch);
+
+      // Plain object
+      await fakeServer.httpClient.defaults.adapter({
+        method: 'GET',
+        url: 'https://horizon-testnet.stellar.org/test',
+        headers: { 'X-Header-One': 'val1' },
+      });
+      expect(sentHeaders['x-header-one']).toBe('val1');
+
+      // AxiosHeaders with toJSON
+      const mockAxiosHeaders = {
+        toJSON: () => ({ 'X-Header-Two': 'val2' }),
+      };
+      await fakeServer.httpClient.defaults.adapter({
+        method: 'GET',
+        url: 'https://horizon-testnet.stellar.org/test',
+        headers: mockAxiosHeaders,
+      });
+      expect(sentHeaders['x-header-two']).toBe('val2');
+
+      // Iterable / array entries
+      await fakeServer.httpClient.defaults.adapter({
+        method: 'GET',
+        url: 'https://horizon-testnet.stellar.org/test',
+        headers: [['X-Header-Three', 'val3']],
+      });
+      expect(sentHeaders['x-header-three']).toBe('val3');
+    });
+
+    it('respects cancellation and timeout behavior', async () => {
+      const testFetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+        if (init?.signal?.aborted) {
+          throw new Error('aborted');
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      });
+
+      const fakeServer: any = { httpClient: { defaults: {} } };
+      attachHorizonFetchAdapter(fakeServer, testFetch);
+
+      const controller = new AbortController();
+      controller.abort(new Error('User cancelled'));
+
+      await expect(
+        fakeServer.httpClient.defaults.adapter({
+          method: 'GET',
+          url: 'https://horizon-testnet.stellar.org/test',
+          signal: controller.signal,
+        }),
+      ).rejects.toThrow('aborted');
+    });
+
+    it('propagates transport error directly without falling back to clearnet fetch', async () => {
+      const nymError = new Error('Nym mixnet gateway unavailable');
+      const failFetch = vi.fn().mockRejectedValue(nymError);
+      const globalFetchSpy = vi.spyOn(globalThis, 'fetch');
+
+      const injectedClient = new StellarTransactionClient(
+        'https://horizon-testnet.stellar.org',
+        mockKeyManager,
+        mockSigner,
+        Networks.TESTNET,
+        failFetch,
+      );
+
+      await expect(
+        injectedClient.reviewXlmTransfer({
+          sourceAccountIndex: 0,
+          destination: destAddress,
+          amountXlm: '5.0',
+        }),
+      ).rejects.toThrow('Nym mixnet gateway unavailable');
+
+      expect(failFetch).toHaveBeenCalled();
+      expect(globalFetchSpy).not.toHaveBeenCalled();
+
+      globalFetchSpy.mockRestore();
     });
   });
 });

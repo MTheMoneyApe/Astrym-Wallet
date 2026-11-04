@@ -1,5 +1,5 @@
-import { TransactionClient } from '@solanym/wallet-core/src/solana/transaction/TransactionClient.js';
 import { StellarTransactionClient } from '@solanym/wallet-core';
+import { Networks } from '@stellar/stellar-sdk';
 import browser from 'webextension-polyfill';
 import { VaultService } from '@solanym/wallet-core/src/vault/VaultService.js';
 import { PasswordUnlocker } from '@solanym/wallet-core/src/vault/PasswordUnlocker.js';
@@ -8,17 +8,12 @@ import { ChromeSessionStorage } from '@solanym/wallet-core/src/vault/ChromeSessi
 import { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import { SoftwareSigner } from '@solanym/wallet-core/src/signer/SoftwareSigner.js';
 import { ChromeAccountStorage } from '@solanym/wallet-core/src/keyManager/ChromeAccountStorage.js';
-import { AccountService } from '@solanym/wallet-core/src/solana/accounts/AccountService.js';
 import { StellarAccountService } from '@solanym/wallet-core/src/stellar/accounts/StellarAccountService.js';
 import {
   STELLAR_TESTNET_FRIENDBOT_URL,
   STELLAR_TESTNET_HORIZON_URL,
   StellarReadClient,
 } from '@solanym/wallet-core/src/stellar/read/StellarReadClient.js';
-import { createHttpTransport } from '@solanym/wallet-core/src/solana/transport/HttpTransport.js';
-import { resolveNetworkConfig } from '@solanym/wallet-core/src/solana/rpc/endpoints.js';
-import { createRpcClient } from '@solanym/wallet-core/src/solana/rpc/RpcClient.js';
-import { SolanaReadClient } from '@solanym/wallet-core/src/solana/read/SolanaReadClient.js';
 import { ChromeAlarmService } from './alarms/ChromeAlarmService.js';
 import { MessageRouter } from './MessageRouter.js';
 import { stateCoordinator } from './StateCoordinator.js';
@@ -59,7 +54,6 @@ import {
 import { 
   createGetAccountsHandler, 
   createGetActiveAccountHandler,
-  createGetBalanceHandler,
   createGetStellarBalanceHandler,
   createFundStellarTestnetHandler,
   createAddAccountHandler,
@@ -67,19 +61,9 @@ import {
   createRenameAccountHandler
 } from './handlers/accountHandlers.js';
 
-import { 
-  handleDappConnect, 
-  handleDappDisconnect, 
-  handleDappSignTransaction,
-  handleGetPendingApprovals,
-  handleApprovePendingRequest
-} from './handlers/dappHandlers.js';
+// Founder Decision A: Solana dApp handlers disabled in Stellar-first mode.
+// Source preserved in ./handlers/dappHandlers.js but not imported or routed.
 import {
-  createConfirmTransferHandler,
-  createEstimateTransferHandler,
-  createReviewTransferHandler,
-  createSendTransferHandler,
-  TransferConfirmationTracker,
   createConfirmStellarTransferHandler,
   createEstimateStellarTransferHandler,
   createReviewStellarTransferHandler,
@@ -103,10 +87,11 @@ function initBackgroundSynchronous() {
   const nymRuntime = getNymRuntimeController();
   // CDP / live-smoke harness may call connect via this handle (no vault access).
   (globalThis as any).nymRuntime = nymRuntime;
+
   // Stellar Horizon/Friendbot → FailClosedTransportRouter via MixFetch-aware adapter.
   // Logical Horizon base = SDF testnet. In mode=nym, getStellarFetch() remaps to the
   // validated effective base (default Ankr) — see stellarHorizonNymConfig.ts. No silent
-  // clearnet fallback. Default router mode stays 'direct' until Connect / setMode('nym').
+  // clearnet fallback. Default router mode starts as 'nym' (Nym-first). Direct requires explicit user action.
   const stellarFetch = nymRuntime.getStellarFetch();
   const stellarReadClient = new StellarReadClient(
     STELLAR_TESTNET_HORIZON_URL,
@@ -114,25 +99,20 @@ function initBackgroundSynchronous() {
     90_000,
     stellarFetch,
   );
-  
-  const config = resolveNetworkConfig('https://api.devnet.solana.com');
-  const transport = createHttpTransport(config);
-  const rpcClient = createRpcClient(transport);
-  const readClient = new SolanaReadClient(rpcClient);
 
-  // Expose globally for dappHandlers
-  (globalThis as any).keyManager = keyManager;
-
-  const txClient = new TransactionClient(rpcClient, keyManager, { sign: (index, data) => signer.signTransaction(data, index) });
+  // Both Stellar read and transaction clients use the exact same Nym-aware transport.
+  // Missing transport causes immediate failure. Never silently bypasses to clearnet default.
   const stellarTxClient = new StellarTransactionClient(
     STELLAR_TESTNET_HORIZON_URL,
     keyManager,
     signer,
-    undefined,
-    undefined,
+    Networks.TESTNET,
     stellarFetch,
   );
-  (globalThis as any).txClient = txClient;
+
+  // Expose globally for testing/harness access
+  (globalThis as any).keyManager = keyManager;
+  (globalThis as any).txClient = undefined; // Solana client disabled
   (globalThis as any).stellarTxClient = stellarTxClient;
   (globalThis as any).vaultService = vaultService;
   (globalThis as any).accountService = accountService;
@@ -152,27 +132,36 @@ function initBackgroundSynchronous() {
 
   router.registerHandler('GET_ACCOUNTS', createGetAccountsHandler(accountService));
   router.registerHandler('GET_ACTIVE_ACCOUNT', createGetActiveAccountHandler(accountService));
-  router.registerHandler('GET_BALANCE', createGetBalanceHandler(readClient));
   router.registerHandler('GET_STELLAR_BALANCE', createGetStellarBalanceHandler(stellarReadClient));
   router.registerHandler('FUND_STELLAR_TESTNET_ACCOUNT', createFundStellarTestnetHandler(stellarReadClient));
   router.registerHandler('ADD_ACCOUNT', createAddAccountHandler(keyManager));
   router.registerHandler('SET_ACTIVE_ACCOUNT', createSetActiveAccountHandler(accountService));
   router.registerHandler('RENAME_ACCOUNT', createRenameAccountHandler(keyManager));
 
-  // Register DApp routes
-  router.registerHandler('DAPP_CONNECT', handleDappConnect as any);
-  router.registerHandler('DAPP_DISCONNECT', handleDappDisconnect as any);
-  router.registerHandler('DAPP_SIGN_TRANSACTION', handleDappSignTransaction as any);
-  
-  // Register popup approval routes
-  router.registerHandler('GET_PENDING_APPROVALS', handleGetPendingApprovals as any);
-  router.registerHandler('APPROVE_DAPP_REQUEST', handleApprovePendingRequest as any);
+  // Founder Decision A: Solana runtime is disabled; source preserved in packages/wallet-core/src/solana/.
+  // Solana RPC transports, clients, and confirmation trackers are not instantiated on startup.
+  const createDisabledSolanaHandler = (opName: string) => async () => {
+    throw new Error(`Solana runtime is disabled (${opName}). Astrym Wallet operates in Stellar-first mode.`);
+  };
 
-  const transferConfirmationTracker = new TransferConfirmationTracker(txClient);
-  router.registerHandler('ESTIMATE_TRANSFER', createEstimateTransferHandler(txClient) as any);
-  router.registerHandler('REVIEW_TRANSFER', createReviewTransferHandler(txClient) as any);
-  router.registerHandler('SEND_TRANSFER', createSendTransferHandler(txClient, transferConfirmationTracker) as any);
-  router.registerHandler('CONFIRM_TRANSFER', createConfirmTransferHandler(transferConfirmationTracker) as any);
+  router.registerHandler('GET_BALANCE', createDisabledSolanaHandler('GET_BALANCE') as any);
+  router.registerHandler('ESTIMATE_TRANSFER', createDisabledSolanaHandler('ESTIMATE_TRANSFER') as any);
+  router.registerHandler('REVIEW_TRANSFER', createDisabledSolanaHandler('REVIEW_TRANSFER') as any);
+  router.registerHandler('SEND_TRANSFER', createDisabledSolanaHandler('SEND_TRANSFER') as any);
+  router.registerHandler('CONFIRM_TRANSFER', createDisabledSolanaHandler('CONFIRM_TRANSFER') as any);
+
+  // Register DApp routes (Solana dApp operations disabled per Founder Decision A)
+  const createDisabledDappHandler = (opName: string) => async () => {
+    throw new Error(`Solana dApp operations (${opName}) are disabled. Astrym Wallet operates in Stellar-first mode.`);
+  };
+  router.registerHandler('DAPP_CONNECT', createDisabledDappHandler('DAPP_CONNECT') as any);
+  router.registerHandler('DAPP_DISCONNECT', createDisabledDappHandler('DAPP_DISCONNECT') as any);
+  router.registerHandler('DAPP_SIGN_TRANSACTION', createDisabledDappHandler('DAPP_SIGN_TRANSACTION') as any);
+  
+  // Register popup approval routes (Solana approval/signing disabled per Founder Decision A)
+  // APPROVE_DAPP_REQUEST contains reachable Solana signTransaction code paths; disabled fail-closed.
+  router.registerHandler('GET_PENDING_APPROVALS', createDisabledSolanaHandler('GET_PENDING_APPROVALS') as any);
+  router.registerHandler('APPROVE_DAPP_REQUEST', createDisabledSolanaHandler('APPROVE_DAPP_REQUEST') as any);
 
   const stellarTransferConfirmationTracker = new StellarTransferConfirmationTracker(stellarTxClient);
   router.registerHandler('ESTIMATE_STELLAR_TRANSFER', createEstimateStellarTransferHandler(stellarTxClient) as any);
