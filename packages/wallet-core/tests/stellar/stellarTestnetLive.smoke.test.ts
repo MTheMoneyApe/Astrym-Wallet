@@ -25,6 +25,7 @@ import {
   StellarReadClient,
 } from '../../src/stellar/read/StellarReadClient.js';
 import { StellarTransactionClient } from '../../src/stellar/transaction/StellarTransactionClient.js';
+import type { StellarSubmissionLifecycle, UncertainTxSessionFlag } from '../../src/stellar/transaction/types.js';
 import type { IPersistentStorage, ISessionStorage } from '../../src/vault/IVaultStorage.js';
 import { PasswordUnlocker } from '../../src/vault/PasswordUnlocker.js';
 import type { EncryptedVaultBlob } from '../../src/vault/types.js';
@@ -275,7 +276,27 @@ describe.skipIf(!LIVE || !LIVE_SEND)('Stellar Testnet live send (write)', () => 
     const destination = Keypair.random().publicKey();
     const amountXlm = '2.0000000';
 
-    const client = new StellarTransactionClient(horizonUrl, keyManager, signer, networkPassphrase, globalThis.fetch.bind(globalThis));
+    let pendingSubmission: UncertainTxSessionFlag | null = null;
+    const liveSubmissionLifecycle: StellarSubmissionLifecycle = {
+      beforeDispatch: async (record) => {
+        if (pendingSubmission !== null) throw new Error('Uncertain submission already exists');
+        pendingSubmission = record;
+      },
+      resolve: async (record) => {
+        if (pendingSubmission?.txHash !== record.txHash) {
+          throw new Error('Uncertain submission record does not match');
+        }
+        pendingSubmission = null;
+      },
+    };
+    const client = new StellarTransactionClient(
+      horizonUrl,
+      keyManager,
+      signer,
+      networkPassphrase,
+      globalThis.fetch.bind(globalThis),
+      liveSubmissionLifecycle,
+    );
 
     const review = await client.reviewXlmTransfer({
       sourceAccountIndex: 0,

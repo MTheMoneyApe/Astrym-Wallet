@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MessageRouter } from '../../src/background/MessageRouter.js';
+import { NymRuntimeSnapshotSchema } from '../../src/shared/ipcSchemas.js';
 
 vi.mock('webextension-polyfill', () => {
   return {
@@ -18,6 +19,71 @@ const mockTrustedSender = {
 } as any;
 
 describe('MessageRouter', () => {
+  describe('Nym live smoke authorization', () => {
+    const request = {
+      id: 'nym-live-smoke-1',
+      type: 'NYM_LIVE_SMOKE',
+      payload: { confirmLiveSmoke: true },
+    };
+    const response = {
+      authorizedFlag: true,
+      confirmLiveSmoke: true,
+      executedCreateMixFetch: true,
+      assetsReady: true,
+      gatewayConfigured: true,
+      hostPermissionGranted: true,
+      steps: ['createMixFetch-connected', 'disconnect'],
+      snapshot: {
+        state: 'disconnected',
+        lastError: null,
+        connected: false,
+        implementation: 'mix-fetch-offscreen',
+        mode: 'direct',
+        documentReady: false,
+      },
+    };
+
+    it('accepts the exact popup sender', async () => {
+      const router = new MessageRouter();
+      const handler = vi.fn().mockResolvedValue(response);
+      router.registerHandler('NYM_LIVE_SMOKE', handler);
+
+      const result = await router.routeMessage(request, mockTrustedSender);
+
+      expect(handler).toHaveBeenCalledWith(request.payload, mockTrustedSender);
+      expect(result.error).toBeUndefined();
+      expect(result.payload).toEqual(response);
+    });
+
+    it.each([
+      {
+        name: 'content script',
+        sender: { id: 'test-extension-id', url: 'https://example.com/page' },
+      },
+      {
+        name: 'webpage',
+        sender: { id: 'other-extension', url: 'https://example.com/page' },
+      },
+      {
+        name: 'another internal extension page',
+        sender: { id: 'test-extension-id', url: 'chrome-extension://test-extension-id/options.html' },
+      },
+      {
+        name: 'another extension',
+        sender: { id: 'other-extension', url: 'chrome-extension://test-extension-id/popup.html' },
+      },
+    ])('rejects $name before invoking the handler', async ({ sender }) => {
+      const router = new MessageRouter();
+      const handler = vi.fn().mockResolvedValue(response);
+      router.registerHandler('NYM_LIVE_SMOKE', handler);
+
+      const result = await router.routeMessage(request, sender as any);
+
+      expect(result.error?.name).toBe('UnauthorizedSenderError');
+      expect(handler).not.toHaveBeenCalled();
+    });
+  });
+
   it('rejects unauthorized senders', async () => {
     const router = new MessageRouter();
     const result = await router.routeMessage({ id: '1', type: 'UNLOCK_VAULT' }, { id: 'other', url: 'https://evil.com' } as any);
@@ -180,6 +246,115 @@ describe('MessageRouter', () => {
         expect(result.payload).toEqual({
           recoveryPhrase: Array.from({ length: 24 }, (_, index) => `synthetic-${index}`),
         });
+      });
+    });
+
+    describe('transport preference mode authorization', () => {
+      const request = {
+        id: 'nym-set-mode-1',
+        type: 'NYM_SET_MODE',
+        payload: { mode: 'direct' },
+      };
+      const validSnapshot = {
+        state: 'disconnected',
+        lastError: null,
+        connected: false,
+        implementation: 'mix-fetch-offscreen',
+        mode: 'direct',
+        preferredMode: 'direct',
+        preferenceLoaded: true,
+        preferenceError: null,
+        documentReady: false,
+      };
+
+      it('accepts null, Nym, and Direct preferences with the exact service error vocabulary', () => {
+        for (const preferredMode of [null, 'nym', 'direct'] as const) {
+          expect(
+            NymRuntimeSnapshotSchema.safeParse({
+              ...validSnapshot,
+              preferredMode,
+            }).success,
+          ).toBe(true);
+        }
+
+        for (const preferenceError of [
+          null,
+          'STORAGE_READ_FAILED',
+          'STORAGE_WRITE_FAILED',
+          'INVALID_STORED_VALUE',
+        ] as const) {
+          expect(
+            NymRuntimeSnapshotSchema.safeParse({
+              ...validSnapshot,
+              preferenceError,
+            }).success,
+          ).toBe(true);
+        }
+
+        expect(
+          NymRuntimeSnapshotSchema.safeParse({
+            ...validSnapshot,
+            preferenceError: 'UNKNOWN_PREFERENCE_ERROR',
+          }).success,
+        ).toBe(false);
+      });
+
+      it('remains compatible with existing Nym snapshots that omit preference fields', () => {
+        const {
+          preferredMode: _preferredMode,
+          preferenceLoaded: _preferenceLoaded,
+          preferenceError: _preferenceError,
+          ...legacySnapshot
+        } = validSnapshot;
+        expect(NymRuntimeSnapshotSchema.safeParse(legacySnapshot).success).toBe(true);
+      });
+
+      it('allows the exact popup sender when extension ID and URL both match', async () => {
+        const router = new MessageRouter();
+        const handler = vi.fn().mockResolvedValue(validSnapshot);
+        router.registerHandler('NYM_SET_MODE', handler);
+
+        const result = await router.routeMessage(request, mockTrustedSender);
+
+        expect(handler).toHaveBeenCalledWith(request.payload, mockTrustedSender);
+        expect(result.error).toBeUndefined();
+        expect(result.payload).toEqual(validSnapshot);
+      });
+
+      it.each([
+        {
+          id: 'other-extension',
+          url: 'chrome-extension://test-extension-id/popup.html',
+        },
+        {
+          id: 'test-extension-id',
+          url: 'chrome-extension://test-extension-id/options.html',
+        },
+        {
+          id: 'test-extension-id',
+          url: 'chrome-extension://test-extension-id/popup.html?source=other',
+        },
+        {
+          id: 'test-extension-id',
+          url: 'chrome-extension://test-extension-id/popup.html#fragment',
+        },
+        {
+          id: 'test-extension-id',
+          url: 'chrome-extension://test-extension-id/popup.html/extra',
+        },
+        {
+          id: 'test-extension-id',
+          url: 'https://example.com/popup.html',
+        },
+      ])('rejects non-exact popup senders before invoking the handler: %j', async (sender) => {
+        const router = new MessageRouter();
+        const handler = vi.fn().mockResolvedValue(validSnapshot);
+        router.registerHandler('NYM_SET_MODE', handler);
+
+        const result = await router.routeMessage(request, sender as any);
+
+        expect(result.error?.name).toBe('UnauthorizedSenderError');
+        expect(handler).not.toHaveBeenCalled();
       });
     });
   });

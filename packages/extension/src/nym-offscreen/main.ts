@@ -1,14 +1,20 @@
 /**
  * Offscreen document entry — hosts official Nym mix-fetch.
- * Only chrome.runtime messaging is used (MV3 offscreen constraint).
+ * A named runtime port lets the background authenticate this document through sender metadata.
  */
 
 import { classifyNymFailure } from './diagnostics.js';
+import {
+  createOffscreenBridgeReconnectController,
+  dispatchOffscreenBridgePortMessage,
+  registerOffscreenBridgePagehideHandler,
+} from './bridgeReconnect.js';
 import { NymOffscreenRuntime } from './runtime.js';
 import {
   isNymOffscreenRequest,
   nymOffscreenError,
   nymOffscreenOk,
+  NYM_OFFSCREEN_PORT_NAME,
   type NymOffscreenResponse,
 } from './protocol.js';
 
@@ -40,13 +46,25 @@ async function handleMessage(raw: unknown): Promise<NymOffscreenResponse> {
         return nymOffscreenOk(requestId, status);
       }
       case 'disconnect': {
-        const status = await runtime.disconnect();
+        const status =
+          raw.strict === undefined
+            ? await runtime.disconnect()
+            : await runtime.disconnect({ strict: raw.strict });
         return nymOffscreenOk(requestId, status);
       }
       case 'fetch': {
-        const result = await runtime.performProtectedRequest(raw.url, raw.init);
+        const result = await runtime.performProtectedRequest(
+          raw.url,
+          raw.init,
+          raw.operationId,
+        );
         return nymOffscreenOk(requestId, result);
       }
+      case 'httpSmokeStatus':
+        return nymOffscreenOk(
+          requestId,
+          runtime.getHttpSmokeOperationStatus(raw.operationId, raw.runtimeGeneration),
+        );
       default:
         return nymOffscreenError(requestId, 'UNSUPPORTED', 'Unsupported Nym offscreen operation');
     }
@@ -62,13 +80,34 @@ async function handleMessage(raw: unknown): Promise<NymOffscreenResponse> {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message || typeof message !== 'object') return false;
-  if ((message as { channel?: unknown }).channel !== 'nym-offscreen') return false;
-  if ((message as { target?: unknown }).target !== 'nym-runtime') return false;
+const bridgeReconnect = createOffscreenBridgeReconnectController(
+  ({ onAuthenticated, onDisconnect }) => {
+    try {
+      console.info('[Astrym][OffscreenBridge] connect_attempt');
+    } catch {
+      // Diagnostic logging must not affect Port connection behavior.
+    }
+    const port = chrome.runtime.connect({ name: NYM_OFFSCREEN_PORT_NAME });
+    port.onMessage.addListener((message) => {
+      dispatchOffscreenBridgePortMessage(message, onAuthenticated, (request) => {
+        void handleMessage(request).then((response) => {
+          port.postMessage(response);
+        });
+      });
+    });
+    port.onDisconnect.addListener(onDisconnect);
+  },
+  (lastConnectError) => {
+    try {
+      console.warn(
+        '[Astrym][OffscreenBridge] reconnect_limit_reached',
+        lastConnectError,
+      );
+    } catch {
+      // Diagnostic logging must not affect Port lifecycle handling.
+    }
+  },
+);
 
-  void handleMessage(message).then((response) => {
-    sendResponse(response);
-  });
-  return true;
-});
+registerOffscreenBridgePagehideHandler(bridgeReconnect);
+bridgeReconnect.start();

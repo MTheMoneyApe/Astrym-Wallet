@@ -342,7 +342,7 @@ describe('transactionHandlers', () => {
 
       mockStellarClient.sendXlm.mockResolvedValue({ hash: 'stellar-hash', status: 'confirmed' });
       await expect(createSendStellarTransferHandler(mockStellarClient)({ id })).resolves.toMatchObject({
-        txHash: 'stellar-hash', status: 'PENDING',
+        txHash: 'stellar-hash', status: 'SUBMITTED_INGESTED',
       });
       expect(mockStellarClient.sendXlm).toHaveBeenCalledWith(
         expect.objectContaining({ approvedFeeStroops: 100 }),

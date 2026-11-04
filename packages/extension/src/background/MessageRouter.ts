@@ -66,6 +66,34 @@ export class MessageRouter {
           error: { name: 'UnauthorizedSenderError', message: 'DApp routes only allowed from http/https origins' }
         };
       }
+    } else if (envelope.type === 'NYM_LIVE_SMOKE') {
+      if (
+        sender.id !== browser.runtime.id ||
+        sender.url !== browser.runtime.getURL('/popup.html')
+      ) {
+        return {
+          id: envelope.id,
+          type: 'ERROR',
+          error: {
+            name: 'UnauthorizedSenderError',
+            message: 'Nym live smoke must originate from the trusted popup',
+          },
+        };
+      }
+    } else if (envelope.type === 'NYM_SET_MODE') {
+      if (
+        sender.id !== browser.runtime.id ||
+        sender.url !== browser.runtime.getURL('/popup.html')
+      ) {
+        return {
+          id: envelope.id,
+          type: 'ERROR',
+          error: {
+            name: 'UnauthorizedSenderError',
+            message: 'Transport preference changes must originate from the trusted popup',
+          },
+        };
+      }
     } else if (envelope.type === 'REVEAL_RECOVERY_PHRASE') {
       if (
         !isInternalSender ||

@@ -7,8 +7,7 @@
  * Success only when response JSON contains the same id under
  * `json.solanymProbeId` (or `data.solanymProbeId` when object).
  *
- * Override at build time: VITE_NYM_HTTP_SMOKE_URL=https://host/path
- * Override per call: NYM_HTTP_SMOKE payload.url
+ * Overrides are accepted only when they resolve to the approved endpoint.
  *
  * Chrome host permission for the echo origin is NOT required when traffic
  * exits via Mixnet (gateway WSS already permitted). Clearnet probe of this
@@ -18,17 +17,18 @@
  * requests set RequestInit.mode = 'unsafe-ignore-cors' (official v1 flag) so
  * destinations that omit ACAO for chrome-extension:// still work over Mixnet.
  *
- * To supply your own echo:
- * 1. HTTPS endpoint that accepts POST application/json
- * 2. Echoes the request JSON (same field name `solanymProbeId`) in the
- *    response body under `.json.solanymProbeId` or top-level `.solanymProbeId`
- * 3. Pass that URL via UI override or VITE_NYM_HTTP_SMOKE_URL
+ * mix-fetch@1.4.2 does not expose a documented redirect policy through this
+ * bridge. This allowlist validates the initial URL; redirects are not
+ * guaranteed to be blocked or revalidated.
  */
 
 export const NYM_HTTP_SMOKE_PROBE_FIELD = 'solanymProbeId' as const;
 
 /** Documented default — verified POST JSON echo (not Solana/Stellar). */
 export const NYM_HTTP_SMOKE_DEFAULT_URL = 'https://postman-echo.com/post';
+
+/** Only explicitly approved HTTP Smoke destination. */
+export const NYM_HTTP_SMOKE_ALLOWED_URLS = [NYM_HTTP_SMOKE_DEFAULT_URL] as const;
 
 export const NYM_HTTP_SMOKE_DEFAULT_TIMEOUT_MS = 60_000;
 
@@ -59,22 +59,19 @@ export function validateNymHttpSmokeUrl(raw: string): {
   if (parsed.protocol !== 'https:') {
     return { ok: false, message: 'HTTP smoke URL must use https:' };
   }
-  if (!parsed.hostname) {
-    return { ok: false, message: 'HTTP smoke URL missing hostname' };
-  }
-  // Refuse wallet / chain RPC hostnames by convention (defense in depth).
-  const host = parsed.hostname.toLowerCase();
-  if (
-    /horizon|stellar|soroban|friendbot|solana|mainnet|testnet\.rpc|helius|quicknode/i.test(
-      host,
-    )
-  ) {
+  if (parsed.username || parsed.password) {
     return {
       ok: false,
-      message: 'HTTP smoke URL must not target Stellar/Solana RPC hosts',
+      message: 'HTTP smoke URL must not contain embedded credentials',
     };
   }
-  return { ok: true, url: parsed.toString() };
+  if (!NYM_HTTP_SMOKE_ALLOWED_URLS.some((approvedUrl) => parsed.href === approvedUrl)) {
+    return {
+      ok: false,
+      message: 'HTTP smoke URL is not an approved destination',
+    };
+  }
+  return { ok: true, url: parsed.href };
 }
 
 /**

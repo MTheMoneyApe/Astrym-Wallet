@@ -6,6 +6,7 @@
   "dependencies": {
     "@solana/kit": "^2.3.0",
     "@solanym/wallet-core": "workspace:*",
+    "@stellar/stellar-sdk": "^17.3.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "webextension-polyfill": "^0.12.0",
@@ -18,8 +19,8 @@
     "smoke:nym:public": "node scripts/smoke-nym-mixfetch-assets.mjs --public",
     "smoke:spp": "node scripts/smoke-spp-assets.mjs",
     "smoke:spp:public": "node scripts/smoke-spp-assets.mjs --public",
-    "build": "node scripts/copy-spp-assets.mjs && node scripts/copy-nym-mixfetch-assets.mjs && vite build --config vite.config.ts && vite build --config vite.background.config.ts && node scripts/smoke-spp-assets.mjs && node scripts/smoke-nym-mixfetch-assets.mjs --dist",
-    "build:nym-dev": "node scripts/copy-nym-mixfetch-assets.mjs && vite build --config vite.config.ts && vite build --config vite.background.config.ts && node scripts/smoke-nym-mixfetch-assets.mjs --dist",
+    "build": "node scripts/build-extension.mjs",
+    "build:nym-dev": "node scripts/build-extension.mjs --nym-dev",
     "build:nym-live-smoke": "node scripts/build-nym-live-smoke.mjs",
     "build:spp-host": "vite build --config vite.spp-host.config.ts",
     "test": "vitest run",

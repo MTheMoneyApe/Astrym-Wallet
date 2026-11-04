@@ -55,7 +55,7 @@ describe('SignedXdrValidator', () => {
     amount?: string;
     fee?: number;
     sequence?: string;
-    memo?: Memo;
+    memo?: Memo | undefined;
     timebounds?: { minTime: number | string; maxTime: number | string };
     asset?: Asset;
     opSource?: string;
@@ -74,20 +74,11 @@ describe('SignedXdrValidator', () => {
     const builder = new TransactionBuilder(account, {
       fee: String(opts?.fee ?? DEFAULT_FEE_STROOPS),
       networkPassphrase,
+      timebounds: opts?.timebounds ?? {
+        minTime: DEFAULT_MIN_TIME,
+        maxTime: DEFAULT_MAX_TIME,
+      },
     });
-
-    if (opts?.timebounds) {
-      builder.setTimeout(0); // Clear any default
-      (builder as any).timeBounds = {
-        minTime: String(opts.timebounds.minTime),
-        maxTime: String(opts.timebounds.maxTime),
-      };
-    } else {
-      (builder as any).timeBounds = {
-        minTime: String(DEFAULT_MIN_TIME),
-        maxTime: String(DEFAULT_MAX_TIME),
-      };
-    }
 
     if (opts?.memo) {
       builder.addMemo(opts.memo);
@@ -134,7 +125,7 @@ describe('SignedXdrValidator', () => {
     startingBalance?: string;
     fee?: number;
     sequence?: string;
-    memo?: Memo;
+    memo?: Memo | undefined;
     timebounds?: { minTime: number | string; maxTime: number | string };
     opSource?: string;
     networkPassphrase?: string;
@@ -147,12 +138,11 @@ describe('SignedXdrValidator', () => {
     const builder = new TransactionBuilder(account, {
       fee: String(opts?.fee ?? DEFAULT_FEE_STROOPS),
       networkPassphrase,
+      timebounds: opts?.timebounds ?? {
+        minTime: DEFAULT_MIN_TIME,
+        maxTime: DEFAULT_MAX_TIME,
+      },
     });
-
-    (builder as any).timeBounds = {
-      minTime: String(opts?.timebounds?.minTime ?? DEFAULT_MIN_TIME),
-      maxTime: String(opts?.timebounds?.maxTime ?? DEFAULT_MAX_TIME),
-    };
 
     if (opts?.memo) {
       builder.addMemo(opts.memo);
@@ -368,6 +358,76 @@ describe('SignedXdrValidator', () => {
         SignedXdrValidator.assertValid(tx, review, Networks.TESTNET);
       }).toThrow(/Starting balance mismatch/);
     });
+
+    it('compares equivalent decimal representations exactly in stroops', () => {
+      const review = buildValidReview({ amountXlm: '1' });
+      const tx = buildPaymentTx({ amount: '1.0000000', memo: Memo.text('test memo') });
+
+      expect(() => {
+        SignedXdrValidator.assertValid(tx, review, Networks.TESTNET);
+      }).not.toThrow();
+    });
+
+    it('rejects amounts with more than seven fractional digits, including trailing zeroes', () => {
+      // The validator uses a strict <=7 fractional digit policy, matching Stellar XDR precision.
+      const review = buildValidReview({ amountXlm: '0.00000010' });
+      const tx = buildPaymentTx({ amount: '0.0000001', memo: Memo.text('test memo') });
+
+      expect(() => {
+        SignedXdrValidator.assertValid(tx, review, Networks.TESTNET);
+      }).toThrow(/Amount mismatch/);
+    });
+
+    it('rejects amount precision beyond one stroop', () => {
+      const review = buildValidReview({ amountXlm: '1.00000001' });
+      const tx = buildPaymentTx({ amount: '1.0000000', memo: Memo.text('test memo') });
+
+      expect(() => {
+        SignedXdrValidator.assertValid(tx, review, Networks.TESTNET);
+      }).toThrow(/Amount mismatch/);
+    });
+
+    it('rejects malformed decimal strings rather than normalizing them', () => {
+      const review = buildValidReview({ amountXlm: '1e1' });
+      const tx = buildPaymentTx({ amount: '10.0000000', memo: Memo.text('test memo') });
+
+      expect(() => {
+        SignedXdrValidator.assertValid(tx, review, Networks.TESTNET);
+      }).toThrow(/Amount mismatch/);
+    });
+
+    it('does not lose precision for large amounts above Number.MAX_SAFE_INTEGER stroops', () => {
+      const review = buildValidReview({ amountXlm: '900719925.4740992' });
+      const tx = buildPaymentTx({
+        amount: '900719925.4740992',
+        memo: Memo.text('test memo'),
+      });
+
+      expect(() => {
+        SignedXdrValidator.assertValid(tx, review, Networks.TESTNET);
+      }).not.toThrow();
+    });
+
+    it('never treats adjacent large stroop amounts as equal', () => {
+      const review = buildValidReview({ amountXlm: '900719925.4740993' });
+      const tx = buildPaymentTx({
+        amount: '900719925.4740992',
+        memo: Memo.text('test memo'),
+      });
+
+      expect(() => {
+        SignedXdrValidator.assertValid(tx, review, Networks.TESTNET);
+      }).toThrow(/Amount mismatch/);
+    });
+
+    it('never treats adjacent ordinary stroop amounts as equal', () => {
+      const review = buildValidReview({ amountXlm: '1.0000002' });
+      const tx = buildPaymentTx({ amount: '1.0000001', memo: Memo.text('test memo') });
+
+      expect(() => {
+        SignedXdrValidator.assertValid(tx, review, Networks.TESTNET);
+      }).toThrow(/Amount mismatch/);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -439,15 +499,31 @@ describe('SignedXdrValidator', () => {
       }).toThrow(/Unexpected memo of type "id"/);
     });
 
-    it('supports memo text stored as Buffer in XDR', () => {
+    it('supports memo text stored as Uint8Array in XDR without global Buffer', () => {
       const review = buildValidReview({ memo: 'utf8-memo' });
       const tx = buildPaymentTx({ memo: Memo.text('utf8-memo') });
-
-      // Emulate Buffer in rawMemo
       const envelopeBase64 = tx.toEnvelope().toXDR('base64');
+      const originalBuffer = globalThis.Buffer;
+      try {
+        // @ts-expect-error Simulate a browser runtime without Node's Buffer global.
+        delete globalThis.Buffer;
+        expect(() => {
+          SignedXdrValidator.assertValid(envelopeBase64, review, Networks.TESTNET);
+        }).not.toThrow();
+      } finally {
+        globalThis.Buffer = originalBuffer;
+      }
+    });
+
+    it('rejects malformed UTF-8 bytes in a text memo', () => {
+      const review = buildValidReview({ memo: 'memo' });
+      const tx = buildPaymentTx({
+        memo: Memo.text(new Uint8Array([0xff])),
+      });
+
       expect(() => {
-        SignedXdrValidator.assertValid(envelopeBase64, review, Networks.TESTNET);
-      }).not.toThrow();
+        SignedXdrValidator.assertValid(tx, review, Networks.TESTNET);
+      }).toThrow(/Memo mismatch/);
     });
   });
 
@@ -483,10 +559,10 @@ describe('SignedXdrValidator', () => {
 
     it('rejects maxTime mismatch', () => {
       const review = buildValidReview({
-        timebounds: { minTime: DEFAULT_MIN_TIME, maxTime: 500 },
+        timebounds: { minTime: 500, maxTime: 600 },
       });
       const tx = buildPaymentTx({
-        timebounds: { minTime: DEFAULT_MIN_TIME, maxTime: 600 },
+        timebounds: { minTime: 500, maxTime: 700 },
         memo: Memo.text('test memo'),
       });
 
@@ -515,8 +591,12 @@ describe('SignedXdrValidator', () => {
   // -------------------------------------------------------------------------
   describe('12. Zero operations', () => {
     it('rejects transaction envelope with 0 operations', () => {
-      const review = buildValidReview();
-      const tx = buildPaymentTx({ noOperations: true, memo: Memo.text('test memo') });
+      const review = buildValidReview({ approvedFeeStroops: 0 });
+      const tx = buildPaymentTx({
+        fee: 0,
+        noOperations: true,
+        memo: Memo.text('test memo'),
+      });
 
       expect(() => {
         SignedXdrValidator.assertValid(tx, review, Networks.TESTNET);
@@ -529,7 +609,7 @@ describe('SignedXdrValidator', () => {
   // -------------------------------------------------------------------------
   describe('13. Multiple operations', () => {
     it('rejects transaction envelope with more than 1 operation', () => {
-      const review = buildValidReview();
+      const review = buildValidReview({ approvedFeeStroops: 200 });
       const tx = buildPaymentTx({ extraOperation: true, memo: Memo.text('test memo') });
 
       expect(() => {
@@ -627,6 +707,15 @@ describe('SignedXdrValidator', () => {
   // 18. Additional edge cases required by ARCH-03
   // -------------------------------------------------------------------------
   describe('18. Additional ARCH-03 edge cases', () => {
+    it('preserves the original error cause when creating validation errors', () => {
+      const cause = new Error('decode failure');
+      const error = new StellarXdrValidationError('Invalid XDR', cause);
+
+      expect(error.name).toBe('StellarXdrValidationError');
+      expect(error.message).toBe('Invalid XDR');
+      expect(error.cause).toBe(cause);
+    });
+
     it('T-24: strictly rejects per-operation source account override', () => {
       const review = buildValidReview();
       const tx = buildPaymentTx({
@@ -639,22 +728,22 @@ describe('SignedXdrValidator', () => {
       }).toThrow(/Per-operation source override detected/);
     });
 
-    it('rejects invalid or negative fee', () => {
+    it('rejects a negative approved fee when it does not match the signed envelope', () => {
       const review = buildValidReview({ approvedFeeStroops: -1 });
-      const tx = buildPaymentTx({ fee: -1, memo: Memo.text('test memo') });
+      const tx = buildPaymentTx({ memo: Memo.text('test memo') });
 
       expect(() => {
         SignedXdrValidator.assertValid(tx, review, Networks.TESTNET);
-      }).toThrow(/Invalid envelope fee/);
+      }).toThrow(/Fee mismatch/);
     });
 
-    it('rejects invalid source public key on review', () => {
+    it('rejects a malformed source address in the review', () => {
       const review = buildValidReview({ sourceAddress: 'not-a-valid-stellar-key' });
       const tx = buildPaymentTx({ memo: Memo.text('test memo') });
 
       expect(() => {
         SignedXdrValidator.assertValid(tx, review, Networks.TESTNET);
-      }).toThrow(/Invalid source public key/);
+      }).toThrow(/Source address mismatch/);
     });
   });
 });

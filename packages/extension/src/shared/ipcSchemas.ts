@@ -353,6 +353,14 @@ export const RenameAccountResponseSchema = z.object({
 });
 
 export const NymTransportModeSchema = z.enum(['direct', 'nym']);
+export const NymReadinessTokenSchema = z.object({
+  controllerEpoch: z.string().min(1),
+  readinessRevision: z.number().int().nonnegative(),
+});
+export type NymReadinessToken = z.infer<typeof NymReadinessTokenSchema>;
+export const NymTransportPreferenceErrorSchema = z
+  .enum(['STORAGE_READ_FAILED', 'STORAGE_WRITE_FAILED', 'INVALID_STORED_VALUE'])
+  .nullable();
 
 export const NymRuntimeSnapshotSchema = z.object({
   state: z.enum(['disconnected', 'connecting', 'connected', 'error', 'closed']),
@@ -361,6 +369,9 @@ export const NymRuntimeSnapshotSchema = z.object({
   implementation: z.string(),
   selfAddress: z.string().nullable().optional(),
   mode: NymTransportModeSchema,
+  preferredMode: NymTransportModeSchema.nullable().optional(),
+  preferenceLoaded: z.boolean().optional(),
+  preferenceError: NymTransportPreferenceErrorSchema.optional(),
   documentReady: z.boolean(),
   diagnosticCode: z.string().optional(),
   diagnosticStage: z.string().nullable().optional(),
@@ -370,6 +381,7 @@ export const NymRuntimeSnapshotSchema = z.object({
   gatewayIdentityKey: z.string().nullable().optional(),
   gatewayHostPermissionGranted: z.boolean().nullable().optional(),
   gatewayHostPermissionPattern: z.string().nullable().optional(),
+  readinessToken: NymReadinessTokenSchema.optional(),
 });
 
 export const NymConnectRequestSchema = z.object({
@@ -460,9 +472,11 @@ export const NymHttpSmokeRequestSchema = z.object({
   /** Optional HTTPS echo URL (default: postman-echo.com/post). */
   url: z.string().min(1).optional(),
   timeoutMs: z.number().int().positive().max(300_000).optional(),
+  readinessToken: NymReadinessTokenSchema,
 });
 export const NymHttpSmokeResponseSchema = z.object({
   state: NymHttpSmokeStateSchema,
+  code: z.enum(['STALE_READINESS']).optional(),
   url: z.string(),
   probeId: z.string(),
   durationMs: z.number(),
@@ -472,6 +486,7 @@ export const NymHttpSmokeResponseSchema = z.object({
   echoedProbeId: z.string().nullable(),
   message: z.string(),
   mixFetchInvoked: z.boolean(),
+  snapshot: NymRuntimeSnapshotSchema.optional(),
 });
 
 export const NymPublicDataFetchRequestSchema = z.object({
@@ -708,8 +723,3 @@ export const MessageSchemas = {
     }),
   },
 } as const;
-
-
-
-
-

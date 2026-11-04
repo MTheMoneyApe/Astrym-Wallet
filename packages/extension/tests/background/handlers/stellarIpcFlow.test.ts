@@ -156,7 +156,7 @@ describe('Stellar Transfer End-to-End IPC Flow (Mocked Network)', () => {
     expect(sendResponse.error).toBeUndefined();
     const sendData = sendResponse.payload as any;
     expect(sendData.txHash).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
-    expect(sendData.status).toBe('PENDING');
+    expect(sendData.status).toBe('SUBMITTED_INGESTED');
     expect(mockStellarTxClient.sendXlm).toHaveBeenCalledWith(
       expect.objectContaining({
         approvedFeeStroops: 100,

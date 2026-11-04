@@ -18,6 +18,7 @@ import type {
   NymOffscreenConnectOptions,
   NymOffscreenFetchInit,
   NymOffscreenFetchResult,
+  NymOffscreenHttpSmokeOperationStatus,
   NymOffscreenStatusPayload,
   NymOffscreenRuntimeState,
 } from './protocol.js';
@@ -101,6 +102,10 @@ function clearMixFetchGlobalSingleton(): void {
 }
 
 export class NymOffscreenRuntime {
+  private readonly _runtimeGeneration =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   private _state: NymOffscreenRuntimeState = 'disconnected';
   private _lastError: string | null = null;
   private _diagnosticCode: NymDiagnosticCode = 'OK';
@@ -110,6 +115,14 @@ export class NymOffscreenRuntime {
     null;
   private _mod: MixFetchModule | null = null;
   private _allowlist: NymNetworkAllowlistConfig;
+  private _diagnosticRevision = 0;
+  private _latestSmokeDiagnosticSequence = 0;
+  private _smokeDiagnosticSequence = 0;
+  private _httpSmokeOperation: {
+    operationId: string;
+    state: 'pending' | 'completed' | 'failed';
+    sequence: number;
+  } | null = null;
 
   constructor(allowlist: NymNetworkAllowlistConfig = DEFAULT_NYM_NETWORK_ALLOWLIST) {
     this._allowlist = allowlist;
@@ -126,14 +139,55 @@ export class NymOffscreenRuntime {
       documentReady: true,
       assetsReady: this._assetsReady,
       gatewayAllowlistConfigured: this._allowlist.gatewayOrigins.length > 0,
+      runtimeGeneration: this._runtimeGeneration,
     };
   }
 
   private setDiagnostic(cause: unknown, fallback: NymDiagnosticCode): void {
+    this._diagnosticRevision += 1;
     const d = classifyNymFailure(cause, fallback);
     this._diagnosticCode = d.code;
     this._diagnosticStage = d.stage ?? null;
     this._lastError = d.message;
+  }
+
+  getHttpSmokeOperationStatus(
+    operationId: string,
+    expectedRuntimeGeneration: string,
+  ): NymOffscreenHttpSmokeOperationStatus {
+    if (expectedRuntimeGeneration !== this._runtimeGeneration) {
+      return {
+        operationId,
+        runtimeGeneration: this._runtimeGeneration,
+        state: 'unknown',
+      };
+    }
+    return {
+      operationId,
+      runtimeGeneration: this._runtimeGeneration,
+      state:
+        this._httpSmokeOperation?.operationId === operationId
+          ? this._httpSmokeOperation.state
+          : 'unknown',
+    };
+  }
+
+  private updateSmokeDiagnostic(
+    operationId: string,
+    sequence: number,
+    diagnosticRevision: number,
+    cause: unknown,
+  ): void {
+    if (
+      this._httpSmokeOperation?.operationId !== operationId ||
+      this._diagnosticRevision !== diagnosticRevision ||
+      sequence < this._latestSmokeDiagnosticSequence
+    ) return;
+    this._latestSmokeDiagnosticSequence = sequence;
+    const diagnostic = classifyNymFailure(cause, 'REQUEST_FAILED');
+    this._diagnosticCode = diagnostic.code;
+    this._diagnosticStage = diagnostic.stage ?? null;
+    this._lastError = diagnostic.message;
   }
 
   /**
@@ -353,7 +407,9 @@ export class NymOffscreenRuntime {
     }
   }
 
-  async disconnect(): Promise<NymOffscreenStatusPayload> {
+  async disconnect(options?: { strict?: boolean }): Promise<NymOffscreenStatusPayload> {
+    let disconnectError: unknown;
+    let disconnectFailed = false;
     if (this._connectInFlight) {
       try {
         await this._connectInFlight;
@@ -369,6 +425,10 @@ export class NymOffscreenRuntime {
       }
     } catch (cause) {
       this.setDiagnostic(cause, 'RUNTIME_UNAVAILABLE');
+      if (options?.strict) {
+        disconnectError = cause;
+        disconnectFailed = true;
+      }
     } finally {
       this._instance = null;
       clearMixFetchGlobalSingleton();
@@ -378,12 +438,18 @@ export class NymOffscreenRuntime {
       this._diagnosticCode = 'OK';
       this._diagnosticStage = null;
     }
+    if (disconnectFailed) {
+      throw disconnectError instanceof Error
+        ? disconnectError
+        : new Error(`MixFetch disconnect failed: ${String(disconnectError)}`);
+    }
     return this.getStatus();
   }
 
   async performProtectedRequest(
     url: string,
     init?: NymOffscreenFetchInit,
+    httpSmokeOperationId?: string,
   ): Promise<NymOffscreenFetchResult> {
     if (this._state !== 'connected' || !this._instance) {
       throw Object.assign(
@@ -401,23 +467,72 @@ export class NymOffscreenRuntime {
     // mix-fetch@1.4.2 Go client applies CORS to Mixnet responses unless opted out.
     if (init?.mode) requestInit.mode = init.mode;
 
-    let response: Response;
-    try {
-      response = await this._instance.mixFetch(url, requestInit);
-    } catch (cause) {
-      this.setDiagnostic(cause, 'REQUEST_FAILED');
-      throw Object.assign(new Error(this._lastError!), {
-        code: this._diagnosticCode,
-      });
+    let smokeOperation: {
+      operationId: string;
+      sequence: number;
+      diagnosticRevision: number;
+    } | null = null;
+    if (httpSmokeOperationId) {
+      if (this._httpSmokeOperation?.state === 'pending') {
+        throw Object.assign(new Error('A Nym HTTP Smoke operation is still unresolved'), {
+          code: 'HTTP_SMOKE_OPERATION_PENDING',
+        });
+      }
+      if (this._httpSmokeOperation?.operationId === httpSmokeOperationId) {
+        throw Object.assign(new Error('Nym HTTP Smoke operation ID has already been used'), {
+          code: 'HTTP_SMOKE_OPERATION_DUPLICATE',
+        });
+      }
+      const sequence = ++this._smokeDiagnosticSequence;
+      smokeOperation = {
+        operationId: httpSmokeOperationId,
+        sequence,
+        diagnosticRevision: this._diagnosticRevision,
+      };
+      this._httpSmokeOperation = {
+        operationId: httpSmokeOperationId,
+        state: 'pending',
+        sequence,
+      };
     }
 
-    const buf = new Uint8Array(await response.arrayBuffer());
-    return {
-      ok: response.ok,
-      status: response.status,
-      statusText: response.statusText,
-      headers: headersToRecord(response.headers),
-      bodyBase64: bytesToBase64(buf),
-    };
+    try {
+      const response = await this._instance.mixFetch(url, requestInit);
+      const buf = new Uint8Array(await response.arrayBuffer());
+      if (smokeOperation) {
+        this._httpSmokeOperation = {
+          operationId: smokeOperation.operationId,
+          state: 'completed',
+          sequence: smokeOperation.sequence,
+        };
+      }
+      return {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        headers: headersToRecord(response.headers),
+        bodyBase64: bytesToBase64(buf),
+      };
+    } catch (cause) {
+      if (smokeOperation) {
+        this._httpSmokeOperation = {
+          operationId: smokeOperation.operationId,
+          state: 'failed',
+          sequence: smokeOperation.sequence,
+        };
+        this.updateSmokeDiagnostic(
+          smokeOperation.operationId,
+          smokeOperation.sequence,
+          smokeOperation.diagnosticRevision,
+          cause,
+        );
+      } else {
+        this.setDiagnostic(cause, 'REQUEST_FAILED');
+      }
+      const diagnostic = classifyNymFailure(cause, 'REQUEST_FAILED');
+      throw Object.assign(new Error(diagnostic.message), {
+        code: diagnostic.code,
+      });
+    }
   }
 }

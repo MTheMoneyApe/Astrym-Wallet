@@ -24,7 +24,7 @@ export { toSetupMixFetchOps } from './MixFetchOpts.js';
 export type NymMixFetchBridge = {
   setup(options?: NymMixFetchSetupOptions): Promise<void>;
   mixFetch(url: string, init?: RequestInit): Promise<Response>;
-  disconnect(): Promise<void>;
+  disconnect(options?: { strict?: boolean }): Promise<void>;
 };
 
 type MixFetchInstance = {

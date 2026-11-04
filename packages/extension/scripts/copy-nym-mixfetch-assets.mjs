@@ -10,12 +10,12 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertNymMixfetchDestinationSafe } from './nym-mixfetch-destination-safety.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXTENSION_ROOT = resolve(__dirname, '..');
@@ -24,6 +24,8 @@ const DEST_ROOT = join(EXTENSION_ROOT, 'public', 'nym-mixfetch');
 
 const EXPECTED_NAME = '@nymproject/mix-fetch';
 const EXPECTED_VERSION = '1.4.2';
+const META_NAME = 'NYM_MIXFETCH_ASSET_META.json';
+const MANAGED_BY = 'solanym-extension-copy-nym-mixfetch-assets';
 
 /** Keep in sync with src/nym-offscreen/assetManifest.ts */
 const REQUIRED_FILES = [
@@ -72,7 +74,13 @@ if (pkg.version !== EXPECTED_VERSION) {
   fail(`Unexpected mix-fetch version ${pkg.version}; expected ${EXPECTED_VERSION}`);
 }
 
-rmSync(DEST_ROOT, { recursive: true, force: true });
+assertNymMixfetchDestinationSafe(DEST_ROOT, {
+  files: REQUIRED_FILES,
+  metaName: META_NAME,
+  managedBy: MANAGED_BY,
+  packageName: EXPECTED_NAME,
+  version: EXPECTED_VERSION,
+});
 mkdirSync(DEST_ROOT, { recursive: true });
 
 for (const file of REQUIRED_FILES) {
@@ -92,10 +100,10 @@ if (!workerJs.includes('mix_fetch_wasm_bg.wasm') || !workerJs.includes('go_conn.
 }
 
 writeFileSync(
-  join(DEST_ROOT, 'NYM_MIXFETCH_ASSET_META.json'),
+  join(DEST_ROOT, META_NAME),
   JSON.stringify(
     {
-      managedBy: 'solanym-extension-copy-nym-mixfetch-assets',
+      managedBy: MANAGED_BY,
       package: EXPECTED_NAME,
       version: EXPECTED_VERSION,
       files: REQUIRED_FILES,

@@ -8,13 +8,40 @@ import type { NymDiagnosticCode } from './diagnostics.js';
 
 export const NYM_OFFSCREEN_CHANNEL = 'nym-offscreen' as const;
 export const NYM_OFFSCREEN_TARGET = 'nym-runtime' as const;
+export const NYM_OFFSCREEN_PORT_NAME = 'nym-offscreen-runtime' as const;
+export const NYM_OFFSCREEN_BRIDGE_AUTHENTICATED_SIGNAL = Object.freeze({
+  channel: NYM_OFFSCREEN_CHANNEL,
+  target: NYM_OFFSCREEN_TARGET,
+  type: 'bridgeAuthenticated',
+} as const);
+
+export type NymOffscreenBridgeAuthenticatedSignal =
+  typeof NYM_OFFSCREEN_BRIDGE_AUTHENTICATED_SIGNAL;
+
+export function isNymOffscreenBridgeAuthenticatedSignal(
+  value: unknown,
+): value is NymOffscreenBridgeAuthenticatedSignal {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  return (
+    keys.length === 3 &&
+    keys.includes('channel') &&
+    keys.includes('target') &&
+    keys.includes('type') &&
+    record['channel'] === NYM_OFFSCREEN_CHANNEL &&
+    record['target'] === NYM_OFFSCREEN_TARGET &&
+    record['type'] === 'bridgeAuthenticated'
+  );
+}
 
 export type NymOffscreenRequestType =
   | 'ping'
   | 'connect'
   | 'disconnect'
   | 'status'
-  | 'fetch';
+  | 'fetch'
+  | 'httpSmokeStatus';
 
 export type NymOffscreenRuntimeState =
   | 'disconnected'
@@ -38,6 +65,14 @@ export type NymOffscreenStatusPayload = {
   assetsReady: boolean;
   /** Operator note: empty gateway allowlist → dynamic gateways need explicit config. */
   gatewayAllowlistConfigured: boolean;
+  /** Unique to this offscreen document instance; absent only in legacy responders. */
+  runtimeGeneration?: string;
+};
+
+export type NymOffscreenHttpSmokeOperationStatus = {
+  operationId: string;
+  runtimeGeneration: string;
+  state: 'pending' | 'completed' | 'failed' | 'unknown';
 };
 
 export type NymOffscreenFetchInit = {
@@ -82,7 +117,13 @@ export type NymOffscreenRequest =
       id: string;
       options?: NymOffscreenConnectOptions;
     }
-  | { channel: typeof NYM_OFFSCREEN_CHANNEL; target: typeof NYM_OFFSCREEN_TARGET; type: 'disconnect'; id: string }
+  | {
+      channel: typeof NYM_OFFSCREEN_CHANNEL;
+      target: typeof NYM_OFFSCREEN_TARGET;
+      type: 'disconnect';
+      id: string;
+      strict?: boolean;
+    }
   | { channel: typeof NYM_OFFSCREEN_CHANNEL; target: typeof NYM_OFFSCREEN_TARGET; type: 'status'; id: string }
   | {
       channel: typeof NYM_OFFSCREEN_CHANNEL;
@@ -90,7 +131,16 @@ export type NymOffscreenRequest =
       type: 'fetch';
       id: string;
       url: string;
+      operationId?: string;
       init?: NymOffscreenFetchInit;
+    }
+  | {
+      channel: typeof NYM_OFFSCREEN_CHANNEL;
+      target: typeof NYM_OFFSCREEN_TARGET;
+      type: 'httpSmokeStatus';
+      id: string;
+      operationId: string;
+      runtimeGeneration: string;
     };
 
 export type NymOffscreenSuccessResponse<T = unknown> = {
@@ -127,12 +177,25 @@ export function isNymOffscreenRequest(value: unknown): value is NymOffscreenRequ
     type !== 'connect' &&
     type !== 'disconnect' &&
     type !== 'status' &&
-    type !== 'fetch'
+    type !== 'fetch' &&
+    type !== 'httpSmokeStatus'
   ) {
     return false;
   }
   if (type === 'fetch') {
     if (typeof v['url'] !== 'string' || (v['url'] as string).length === 0) return false;
+    if (
+      v['operationId'] !== undefined &&
+      (typeof v['operationId'] !== 'string' || v['operationId'].length === 0)
+    ) return false;
+  }
+  if (type === 'httpSmokeStatus') {
+    if (
+      typeof v['operationId'] !== 'string' ||
+      v['operationId'].length === 0 ||
+      typeof v['runtimeGeneration'] !== 'string' ||
+      v['runtimeGeneration'].length === 0
+    ) return false;
   }
   return true;
 }

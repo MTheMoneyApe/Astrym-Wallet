@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { sendIpcMessage } from './ipc.js';
+import { requestNymStatus, sendIpcMessage } from './ipc.js';
 import { Send } from './Send.js';
 import { SppStatusPanel } from './SppStatusPanel.js';
 import { NymTransportPanel } from './NymTransportPanel.js';
@@ -21,16 +21,44 @@ import type {
   NymStellarHorizonUiResult,
   NymUiSnapshot,
 } from './NymTransportPanel.js';
+import { NymRuntimeSnapshotSchema } from '../shared/ipcSchemas.js';
 import { beginGatewayPermissionRequestFromUserGesture } from './nymPermissionGesture.js';
+import { beginStellarDirectPermissionRequestFromUserGesture } from './stellarDirectPermission.js';
 import { NYM_LIVE_SMOKE_EXECUTION_AUTHORIZED } from '../nym-offscreen/liveSmokeAuth.js';
 
-function coerceNymUiSnapshot(snap: {
+type NymTransportPreferenceError =
+  | 'STORAGE_READ_FAILED'
+  | 'STORAGE_WRITE_FAILED'
+  | 'INVALID_STORED_VALUE';
+
+const NYM_PREFERENCE_ERRORS: readonly NymTransportPreferenceError[] = [
+  'STORAGE_READ_FAILED',
+  'STORAGE_WRITE_FAILED',
+  'INVALID_STORED_VALUE',
+];
+
+function isNymTransportPreferenceError(
+  value: unknown,
+): value is NymTransportPreferenceError {
+  return NYM_PREFERENCE_ERRORS.some((error) => error === value);
+}
+
+function isNymTransportModeOrNull(
+  value: unknown,
+): value is NymTransportMode | null {
+  return value === null || value === 'direct' || value === 'nym';
+}
+
+export function coerceNymUiSnapshot(snap: {
   state: NymUiSnapshot['state'];
   lastError: string | null;
   connected: boolean;
   implementation: string;
   selfAddress?: string | null | undefined;
   mode: NymTransportMode;
+  preferredMode?: unknown;
+  preferenceLoaded?: unknown;
+  preferenceError?: unknown;
   documentReady: boolean;
   diagnosticCode?: string | undefined;
   diagnosticStage?: string | null | undefined;
@@ -40,6 +68,7 @@ function coerceNymUiSnapshot(snap: {
   gatewayIdentityKey?: string | null | undefined;
   gatewayHostPermissionGranted?: boolean | null | undefined;
   gatewayHostPermissionPattern?: string | null | undefined;
+  readinessToken?: unknown;
 }): NymUiSnapshot {
   const out: NymUiSnapshot = {
     state: snap.state,
@@ -64,7 +93,84 @@ function coerceNymUiSnapshot(snap: {
   if (snap.gatewayHostPermissionPattern !== undefined) {
     out.gatewayHostPermissionPattern = snap.gatewayHostPermissionPattern;
   }
+  if (
+    snap.readinessToken &&
+    typeof snap.readinessToken === 'object' &&
+    'controllerEpoch' in snap.readinessToken &&
+    typeof snap.readinessToken.controllerEpoch === 'string' &&
+    snap.readinessToken.controllerEpoch.length > 0 &&
+    'readinessRevision' in snap.readinessToken &&
+    typeof snap.readinessToken.readinessRevision === 'number' &&
+    Number.isInteger(snap.readinessToken.readinessRevision) &&
+    snap.readinessToken.readinessRevision >= 0
+  ) {
+    out.readinessToken = {
+      controllerEpoch: snap.readinessToken.controllerEpoch,
+      readinessRevision: snap.readinessToken.readinessRevision,
+    };
+  }
+
+  const hasPreferenceFields =
+    snap.preferredMode !== undefined ||
+    snap.preferenceLoaded !== undefined ||
+    snap.preferenceError !== undefined;
+  if (hasPreferenceFields) {
+    const validPreferredMode = isNymTransportModeOrNull(snap.preferredMode);
+    const validPreferenceError =
+      snap.preferenceError === null ||
+      isNymTransportPreferenceError(snap.preferenceError);
+    out.preferenceLoaded = snap.preferenceLoaded === true;
+    out.preferredMode = isNymTransportModeOrNull(snap.preferredMode)
+      ? snap.preferredMode
+      : null;
+    out.preferenceError =
+      snap.preferenceError === null
+        ? null
+        : isNymTransportPreferenceError(snap.preferenceError)
+          ? snap.preferenceError
+          : 'INVALID_STORED_VALUE';
+    if (
+      snap.preferenceLoaded !== true ||
+      !validPreferredMode ||
+      !validPreferenceError
+    ) {
+      out.preferenceLoaded = false;
+      if (!validPreferredMode || !validPreferenceError) {
+        out.preferenceError = 'INVALID_STORED_VALUE';
+      }
+    }
+  }
   return out;
+}
+
+function parseFreshNymUiSnapshot(value: unknown): NymUiSnapshot | null {
+  const parsed = NymRuntimeSnapshotSchema.safeParse(value);
+  return parsed.success ? coerceNymUiSnapshot(parsed.data) : null;
+}
+
+export function hasConfirmedTransportPreference(
+  snapshot: NymUiSnapshot | null,
+): snapshot is NymUiSnapshot & {
+  preferenceLoaded: true;
+  preferredMode: NymTransportMode;
+  preferenceError: null;
+} {
+  return (
+    snapshot?.preferenceLoaded === true &&
+    (snapshot.preferredMode === 'direct' || snapshot.preferredMode === 'nym') &&
+    snapshot.preferenceError === null
+  );
+}
+
+function preferenceErrorMessage(error: NymTransportPreferenceError): string {
+  switch (error) {
+    case 'STORAGE_READ_FAILED':
+      return 'Could not load the saved transport preference. Choose explicitly to retry.';
+    case 'STORAGE_WRITE_FAILED':
+      return 'Could not save the transport preference. Please retry.';
+    case 'INVALID_STORED_VALUE':
+      return 'The saved transport preference is invalid. Choose explicitly to replace it.';
+  }
 }
 
 function isLockTimeoutMinutes(value: number): value is LockTimeoutMinutes {
@@ -496,6 +602,20 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   const [fundingLoading, setFundingLoading] = useState(false);
   const [fundingMessage, setFundingMessage] = useState('');
   const [view, setView] = useState<'dashboard' | 'send' | 'receive' | 'settings'>('dashboard');
+  const [transportPreferenceStatus, setTransportPreferenceStatus] =
+    useState<'loading' | 'ready' | 'unavailable'>('loading');
+  const transportPreferenceStatusRef = useRef<'loading' | 'ready' | 'unavailable'>('loading');
+  const confirmedPreferenceRef = useRef<NymTransportMode | null>(null);
+  const pendingBalanceRef = useRef<{ address: string; accountIndex?: number } | null>(null);
+  const balanceRequestsInFlightRef = useRef(new Set<string>());
+  const balanceSelectionGenerationRef = useRef(0);
+  const balanceSelectionRef = useRef<{ index: number; address: string } | null>(null);
+  const nymStatusRequestRef = useRef(0);
+  const nymConnectOperationRef = useRef<number | null>(null);
+  const nymStatusRefreshRef = useRef<(() => Promise<NymUiSnapshot | null>) | null>(null);
+  const [nymReadinessCurrent, setNymReadinessCurrent] = useState(false);
+  const [preferenceActionError, setPreferenceActionError] =
+    useState<NymTransportPreferenceError | null>(null);
   const latestBalanceRequest = useRef(0);
   const selectedIndexRef = useRef<number | null>(null);
   const accountMutationInFlight = useRef<ReturnType<typeof createAccountOperationGate> | null>(null);
@@ -590,6 +710,19 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     chrome.storage.local.set({ themePreset: 'custom', customColors: newColors });
   };
 
+  const updateBalanceSelection = (
+    nextSelection: { index: number; address: string } | null,
+  ) => {
+    const currentSelection = balanceSelectionRef.current;
+    if (
+      currentSelection?.index !== nextSelection?.index ||
+      currentSelection?.address !== nextSelection?.address
+    ) {
+      balanceSelectionGenerationRef.current += 1;
+      balanceSelectionRef.current = nextSelection;
+    }
+  };
+
   const loadAccounts = async () => {
     setLoadingAccounts(true);
     setAccountError('');
@@ -604,6 +737,7 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
       setAccounts(nextAccounts);
 
       if (nextAccounts.length === 0) {
+        updateBalanceSelection(null);
         setSelectedIndex(null);
         selectedIndexRef.current = null;
         setConfirmedActiveIndex(null);
@@ -614,6 +748,10 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
 
       const restored = resolveRestoredAccountSelection(nextAccounts, activeState);
       if (restored.account) {
+        updateBalanceSelection({
+          index: restored.account.index,
+          address: restored.account.address,
+        });
         setSelectedIndex(restored.selectedIndex);
         selectedIndexRef.current = restored.selectedIndex;
         setConfirmedActiveIndex(restored.confirmedActiveIndex);
@@ -628,12 +766,14 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         setAccountManagerOpen(true);
       }
 
+      updateBalanceSelection(null);
       setSelectedIndex(null);
       selectedIndexRef.current = null;
       setConfirmedActiveIndex(null);
       setAccount(null);
     } catch (err: any) {
       setAccountError(err.message || 'Failed to load active account state');
+      updateBalanceSelection(null);
       setSelectedIndex(null);
       selectedIndexRef.current = null;
       setConfirmedActiveIndex(null);
@@ -645,6 +785,22 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   };
 
   const fetchBalance = async (address: string, accountIndex?: number) => {
+    if (
+      transportPreferenceStatusRef.current !== 'ready' ||
+      confirmedPreferenceRef.current === null
+    ) {
+      pendingBalanceRef.current =
+        accountIndex === undefined ? { address } : { address, accountIndex };
+      setBalanceLoading(false);
+      setRpcStatus('idle');
+      return;
+    }
+
+    const balanceRequestKey =
+      `${balanceSelectionGenerationRef.current}:${accountIndex ?? 'none'}:${address}`;
+    if (balanceRequestsInFlightRef.current.has(balanceRequestKey)) return;
+    balanceRequestsInFlightRef.current.add(balanceRequestKey);
+    pendingBalanceRef.current = null;
     const requestId = ++latestBalanceRequest.current;
     setBalanceLoading(true);
     setBalanceError('');
@@ -697,10 +853,18 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
       if (latestBalanceRequest.current === requestId) {
         setBalanceLoading(false);
       }
+      balanceRequestsInFlightRef.current.delete(balanceRequestKey);
     }
   };
 
   const handleFundTestnet = async (targetAddress: string) => {
+    if (
+      transportPreferenceStatusRef.current !== 'ready' ||
+      confirmedPreferenceRef.current === null
+    ) {
+      setFundingMessage('Choose a transport preference before requesting testnet funds.');
+      return;
+    }
     setFundingLoading(true);
     setFundingMessage('');
     try {
@@ -735,6 +899,7 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     try {
       const response = await sendIpcMessage('SET_ACTIVE_ACCOUNT', { index });
       if (!response.success) throw new Error('The wallet did not confirm the account change.');
+      updateBalanceSelection({ index: nextAccount.index, address: nextAccount.publicKey });
       setSelectedIndex(index);
       selectedIndexRef.current = index;
       setConfirmedActiveIndex(index);
@@ -934,43 +1099,154 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     lastError: null,
     connected: false,
     implementation: 'mix-fetch-offscreen',
-    mode: 'direct',
     documentReady: false,
+    preferredMode: null,
+    preferenceLoaded: false,
+    preferenceError: null,
   });
   const [nymBusy, setNymBusy] = useState(false);
+  const [directPermissionError, setDirectPermissionError] = useState(false);
   const [nymHttpSmokeResult, setNymHttpSmokeResult] = useState<NymHttpSmokeUiResult | null>(
     null,
   );
+  const [nymHttpSmokeErrorName, setNymHttpSmokeErrorName] = useState<string | null>(null);
   const [nymPublicDataResult, setNymPublicDataResult] =
     useState<NymPublicDataUiResult | null>(null);
   const [nymStellarHorizonResult, setNymStellarHorizonResult] =
     useState<NymStellarHorizonUiResult | null>(null);
 
-  useEffect(() => {
-    if (view !== 'settings') return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const snap = await sendIpcMessage('NYM_STATUS', {});
-        if (!cancelled) setNymSnapshot(coerceNymUiSnapshot(snap));
-      } catch (err: unknown) {
-        if (!cancelled) {
-          setNymSnapshot((prev) => ({
-            ...prev,
-            state: 'error',
-            connected: false,
-            lastError: err instanceof Error ? err.message : 'NYM_STATUS failed',
-            documentReady: false,
-          }));
-        }
+  const refreshNymStatus = async (): Promise<NymUiSnapshot | null> => {
+    const requestId = ++nymStatusRequestRef.current;
+    const statusRequest = requestNymStatus();
+    if (
+      nymConnectOperationRef.current !== null &&
+      nymConnectOperationRef.current < requestId
+    ) {
+      nymConnectOperationRef.current = null;
+      setNymBusy(false);
+    }
+    setNymReadinessCurrent(false);
+    setNymSnapshot((previous) => ({
+      ...previous,
+      state: 'disconnected',
+      connected: false,
+      readinessToken: undefined,
+      lastError: null,
+    }));
+    try {
+      const { generation, response } = await statusRequest.promise;
+      if (requestId !== nymStatusRequestRef.current || !statusRequest.isCurrent()) return null;
+      if (generation !== statusRequest.generation) return null;
+      const nextSnapshot = parseFreshNymUiSnapshot(response);
+      if (!nextSnapshot) throw new Error('Background returned an invalid Nym status snapshot');
+      setNymSnapshot(nextSnapshot);
+      setNymReadinessCurrent(nextSnapshot.readinessToken !== undefined);
+      setPreferenceActionError(null);
+      const preferenceIsAvailable =
+        nextSnapshot.preferenceLoaded === true &&
+        nextSnapshot.preferenceError === null &&
+        (nextSnapshot.preferredMode === null ||
+          nextSnapshot.preferredMode === 'direct' ||
+          nextSnapshot.preferredMode === 'nym');
+      const nextStatus = preferenceIsAvailable ? 'ready' : 'unavailable';
+      transportPreferenceStatusRef.current = nextStatus;
+      confirmedPreferenceRef.current =
+        nextStatus === 'ready' &&
+        (nextSnapshot.preferredMode === 'direct' || nextSnapshot.preferredMode === 'nym')
+          ? nextSnapshot.preferredMode
+          : null;
+      setTransportPreferenceStatus(nextStatus);
+      if (confirmedPreferenceRef.current !== null && pendingBalanceRef.current) {
+        const pending = pendingBalanceRef.current;
+        pendingBalanceRef.current = null;
+        void fetchBalance(pending.address, pending.accountIndex);
       }
-    })();
+      return nextSnapshot;
+    } catch {
+      if (requestId !== nymStatusRequestRef.current || !statusRequest.isCurrent()) return null;
+      setNymReadinessCurrent(false);
+      transportPreferenceStatusRef.current = 'unavailable';
+      confirmedPreferenceRef.current = null;
+      setTransportPreferenceStatus('unavailable');
+      setPreferenceActionError('STORAGE_READ_FAILED');
+      setNymSnapshot((previous) => ({
+        ...previous,
+        state: 'error',
+        connected: false,
+        readinessToken: undefined,
+        lastError: 'Could not refresh Nym status. Please retry.',
+        diagnosticCode: 'STATUS_REFRESH_FAILED',
+        preferenceError: 'STORAGE_READ_FAILED',
+      }));
+      return null;
+    }
+  };
+  nymStatusRefreshRef.current = refreshNymStatus;
+
+  useEffect(() => {
+    if (view !== 'dashboard' && view !== 'settings') return;
+    let active = true;
+    let lifecycleRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const popupWindow = typeof window === 'undefined' ? null : window;
+    const popupDocument = typeof document === 'undefined' ? null : document;
+    const refreshIfIdle = () => {
+      if (active) {
+        void nymStatusRefreshRef.current?.();
+      }
+    };
+    const scheduleLifecycleRefresh = () => {
+      if (!active || popupDocument?.visibilityState !== 'visible') return;
+      const lifecycleRequestId = ++nymStatusRequestRef.current;
+      if (nymConnectOperationRef.current !== null) {
+        nymConnectOperationRef.current = null;
+        setNymBusy(false);
+      }
+      setNymReadinessCurrent(false);
+      setNymSnapshot((previous) => ({
+        ...previous,
+        state: 'disconnected',
+        connected: false,
+        readinessToken: undefined,
+        lastError: null,
+      }));
+      if (lifecycleRefreshTimer !== null) clearTimeout(lifecycleRefreshTimer);
+      lifecycleRefreshTimer = setTimeout(() => {
+        lifecycleRefreshTimer = null;
+        if (
+          active &&
+          popupDocument?.visibilityState === 'visible' &&
+          lifecycleRequestId === nymStatusRequestRef.current
+        ) {
+          refreshIfIdle();
+        }
+      }, 120);
+    };
+    const onVisibilityChange = () => {
+      if (popupDocument?.visibilityState === 'visible') scheduleLifecycleRefresh();
+    };
+    const onFocus = () => {
+      if (popupDocument?.visibilityState === 'visible') scheduleLifecycleRefresh();
+    };
+    refreshIfIdle();
+    const pollTimer = setInterval(() => {
+      if (popupDocument?.visibilityState === 'visible') refreshIfIdle();
+    }, 30_000);
+    popupWindow?.addEventListener('focus', onFocus);
+    popupDocument?.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
-      cancelled = true;
+      active = false;
+      nymStatusRequestRef.current += 1;
+      if (lifecycleRefreshTimer !== null) clearTimeout(lifecycleRefreshTimer);
+      clearInterval(pollTimer);
+      popupWindow?.removeEventListener('focus', onFocus);
+      popupDocument?.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [view]);
 
   const handleNymConnect = async () => {
+    const operationId = ++nymStatusRequestRef.current;
+    nymConnectOperationRef.current = operationId;
+    setNymReadinessCurrent(false);
     setNymBusy(true);
     setNymSnapshot((prev) => ({
       ...prev,
@@ -980,8 +1256,14 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     }));
     try {
       const snap = await sendIpcMessage('NYM_CONNECT', {});
-      setNymSnapshot(coerceNymUiSnapshot(snap));
+      if (operationId !== nymStatusRequestRef.current) return;
+      const nextSnapshot = parseFreshNymUiSnapshot(snap);
+      if (!nextSnapshot) throw new Error('Background returned an invalid Nym connect snapshot');
+      setNymSnapshot(nextSnapshot);
+      setNymReadinessCurrent(nextSnapshot.readinessToken !== undefined);
     } catch (err: unknown) {
+      if (operationId !== nymStatusRequestRef.current) return;
+      setNymReadinessCurrent(false);
       setNymSnapshot((prev) => ({
         ...prev,
         state: 'error',
@@ -990,16 +1272,25 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         lastError: err instanceof Error ? err.message : 'NYM_CONNECT failed',
       }));
     } finally {
-      setNymBusy(false);
+      if (nymConnectOperationRef.current === operationId) {
+        nymConnectOperationRef.current = null;
+        setNymBusy(false);
+      }
     }
   };
 
   const handleNymDisconnect = async () => {
+    nymStatusRequestRef.current += 1;
+    setNymReadinessCurrent(false);
     setNymBusy(true);
     try {
       const snap = await sendIpcMessage('NYM_DISCONNECT', {});
-      setNymSnapshot(coerceNymUiSnapshot(snap));
+      const nextSnapshot = parseFreshNymUiSnapshot(snap);
+      if (!nextSnapshot) throw new Error('Background returned an invalid Nym disconnect snapshot');
+      setNymSnapshot(nextSnapshot);
+      setNymReadinessCurrent(nextSnapshot.readinessToken !== undefined);
     } catch (err: unknown) {
+      setNymReadinessCurrent(false);
       setNymSnapshot((prev) => ({
         ...prev,
         state: 'error',
@@ -1011,19 +1302,72 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     }
   };
 
-  const handleNymSetMode = async (mode: NymTransportMode) => {
-    setNymBusy(true);
-    try {
-      const snap = await sendIpcMessage('NYM_SET_MODE', { mode });
-      setNymSnapshot(coerceNymUiSnapshot(snap));
-    } catch (err: unknown) {
-      setNymSnapshot((prev) => ({
-        ...prev,
-        lastError: err instanceof Error ? err.message : 'NYM_SET_MODE failed',
-      }));
-    } finally {
-      setNymBusy(false);
+  const handleNymSetMode = (
+    mode: NymTransportMode,
+    navigateToNymSetup = false,
+  ): Promise<void> => {
+    let directPermissionPromise: Promise<void> | null = null;
+    if (mode === 'direct') {
+      try {
+        directPermissionPromise = beginStellarDirectPermissionRequestFromUserGesture();
+        setDirectPermissionError(false);
+      } catch {
+        setDirectPermissionError(true);
+        return Promise.resolve();
+      }
+    } else {
+      setDirectPermissionError(false);
     }
+
+    nymStatusRequestRef.current += 1;
+    setNymBusy(true);
+    setPreferenceActionError(null);
+    return (async () => {
+      try {
+        if (directPermissionPromise) {
+          try {
+            await directPermissionPromise;
+          } catch {
+            setDirectPermissionError(true);
+            return;
+          }
+        }
+
+        const snap = await sendIpcMessage('NYM_SET_MODE', { mode });
+        const nextSnapshot = parseFreshNymUiSnapshot(snap);
+        if (!nextSnapshot) throw new Error('Background returned an invalid Nym status snapshot');
+        if (
+          !hasConfirmedTransportPreference(nextSnapshot) ||
+          nextSnapshot.preferredMode !== mode
+        ) {
+          const errorCode = nextSnapshot.preferenceError ?? 'STORAGE_WRITE_FAILED';
+          setPreferenceActionError(errorCode);
+          setNymSnapshot((previous) => ({ ...previous, preferenceError: errorCode }));
+          return;
+        }
+
+        setNymSnapshot(nextSnapshot);
+        setNymReadinessCurrent(nextSnapshot.readinessToken !== undefined);
+        confirmedPreferenceRef.current = mode;
+        transportPreferenceStatusRef.current = 'ready';
+        setTransportPreferenceStatus('ready');
+        if (pendingBalanceRef.current) {
+          const pending = pendingBalanceRef.current;
+          pendingBalanceRef.current = null;
+          void fetchBalance(pending.address, pending.accountIndex);
+        }
+        if (navigateToNymSetup && mode === 'nym') setView('settings');
+      } catch {
+        const errorCode: NymTransportPreferenceError = 'STORAGE_WRITE_FAILED';
+        setPreferenceActionError(errorCode);
+        setNymSnapshot((prev) => ({
+          ...prev,
+          preferenceError: errorCode,
+        }));
+      } finally {
+        setNymBusy(false);
+      }
+    })();
   };
 
   const handleNymConfigureGateway = async (origin: string, identityKey?: string) => {
@@ -1204,7 +1548,6 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         message: res.message,
         transportFetchInvoked: res.transportFetchInvoked,
       });
-      setNymSnapshot((prev) => ({ ...prev, mode: res.transport }));
     } catch (err: unknown) {
       setNymStellarHorizonResult({
         state: 'error',
@@ -1264,7 +1607,6 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         message: res.message,
         transportFetchInvoked: res.transportFetchInvoked,
       });
-      setNymSnapshot((prev) => ({ ...prev, mode: res.transport }));
     } catch (err: unknown) {
       setNymPublicDataResult({
         state: 'error',
@@ -1286,7 +1628,9 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   };
 
   const handleNymHttpSmoke = async (url?: string) => {
+    const smokeRequestId = ++nymStatusRequestRef.current;
     setNymBusy(true);
+    setNymHttpSmokeErrorName(null);
     setNymHttpSmokeResult({
       state: 'running',
       url: url?.trim() || '(resolving…)',
@@ -1300,11 +1644,33 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
       mixFetchInvoked: false,
     });
     try {
-      const payload: { url?: string } = {};
+      if (!nymSnapshot.readinessToken) {
+        const freshSnapshot = await nymStatusRefreshRef.current?.();
+        setNymHttpSmokeResult({
+          state: 'error',
+          code: 'STALE_READINESS',
+          url: url?.trim() || '',
+          probeId: '',
+          durationMs: 0,
+          httpStatus: null,
+          httpOk: null,
+          probeMatched: false,
+          echoedProbeId: null,
+          message: 'MixFetch readiness refreshed. Connect before retrying HTTP Smoke.',
+          mixFetchInvoked: false,
+          ...(freshSnapshot ? { snapshot: freshSnapshot } : {}),
+        });
+        return;
+      }
+      const payload: {
+        url?: string;
+        readinessToken: NonNullable<NymUiSnapshot['readinessToken']>;
+      } = { readinessToken: nymSnapshot.readinessToken };
       if (url?.trim()) payload.url = url.trim();
       const res = await sendIpcMessage('NYM_HTTP_SMOKE', payload);
       setNymHttpSmokeResult({
         state: res.state,
+        ...(res.code ? { code: res.code } : {}),
         url: res.url,
         probeId: res.probeId,
         durationMs: res.durationMs,
@@ -1314,8 +1680,31 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         echoedProbeId: res.echoedProbeId,
         message: res.message,
         mixFetchInvoked: res.mixFetchInvoked,
+        ...(res.snapshot ? { snapshot: coerceNymUiSnapshot(res.snapshot) } : {}),
       });
+      setNymHttpSmokeErrorName(null);
+      if (res.code === 'STALE_READINESS') {
+        if (smokeRequestId === nymStatusRequestRef.current) {
+          setNymReadinessCurrent(false);
+          setNymSnapshot((previous) => ({
+            ...previous,
+            state: 'disconnected',
+            connected: false,
+            readinessToken: undefined,
+          }));
+          const freshSnapshot = res.snapshot
+            ? parseFreshNymUiSnapshot(res.snapshot)
+            : null;
+          if (freshSnapshot) {
+            setNymSnapshot(freshSnapshot);
+            setNymReadinessCurrent(freshSnapshot.readinessToken !== undefined);
+          }
+        }
+      }
     } catch (err: unknown) {
+      const errorName = err instanceof Error ? err.name : null;
+      const message = err instanceof Error ? err.message : 'NYM_HTTP_SMOKE failed';
+      setNymHttpSmokeErrorName(errorName);
       setNymHttpSmokeResult({
         state: 'error',
         url: url?.trim() || '',
@@ -1325,7 +1714,7 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         httpOk: null,
         probeMatched: false,
         echoedProbeId: null,
-        message: err instanceof Error ? err.message : 'NYM_HTTP_SMOKE failed',
+        message,
         mixFetchInvoked: false,
       });
     } finally {
@@ -1383,6 +1772,24 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     }
   };
 
+  const directPermissionErrorBanner = directPermissionError ? (
+    <div className="card" role="alert" data-testid="direct-permission-error">
+      <p>
+        Direct mode requires Chrome permissions for Stellar Testnet Horizon and Friendbot.
+        Grant both permissions and retry.
+      </p>
+      <button
+        type="button"
+        className="btn-secondary"
+        disabled={nymBusy}
+        data-testid="direct-permission-retry"
+        onClick={() => void handleNymSetMode('direct')}
+      >
+        Retry Direct
+      </button>
+    </div>
+  ) : null;
+
   if (view === 'receive') {
     return <ReceiveAddressView account={account} onBack={() => setView('dashboard')} />;
   }
@@ -1405,8 +1812,19 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           probing={!sppProbeDone}
           sessionGeneration={sppSessionGeneration}
         />
+        {directPermissionErrorBanner}
+        {nymHttpSmokeErrorName === 'NymPreferenceRequiredError' ? (
+          <p
+            role="alert"
+            data-testid="nym-http-smoke-preference-error"
+            data-error-name={nymHttpSmokeErrorName}
+          >
+            HTTP Smoke requires the Nym transport preference.
+          </p>
+        ) : null}
         <NymTransportPanel
           snapshot={nymSnapshot}
+          readinessCurrent={nymReadinessCurrent}
           busy={nymBusy}
           onConnect={handleNymConnect}
           onDisconnect={handleNymDisconnect}
@@ -1552,6 +1970,93 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           <button onClick={handleLock} className="btn-outline" style={{ padding: '6px 8px', fontSize: '0.82rem' }}>Lock</button>
         </div>
       </div>
+
+      {transportPreferenceStatus === 'loading' ? (
+        <div className="card" role="status" aria-live="polite" data-testid="transport-preference-loading">
+          Checking saved transport preference…
+        </div>
+      ) : null}
+      {transportPreferenceStatus === 'ready' &&
+      nymSnapshot.preferredMode === null &&
+      nymSnapshot.preferenceError === null ? (
+        <div className="card" role="region" aria-labelledby="transport-choice-title" data-testid="transport-choice-notice">
+          <h3 id="transport-choice-title">Protect your connection metadata</h3>
+          <p>
+            Nym protects network metadata and connection privacy. It does NOT make public Stellar
+            transactions private.
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={nymBusy}
+              data-testid="transport-choice-nym"
+              onClick={() => void handleNymSetMode('nym', true)}
+            >
+              Activate Nym
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={nymBusy}
+              data-testid="transport-choice-direct"
+              onClick={() => void handleNymSetMode('direct')}
+            >
+              Continue without Nym
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {directPermissionErrorBanner}
+      {transportPreferenceStatus === 'ready' &&
+      (nymSnapshot.preferredMode === 'direct' || nymSnapshot.preferredMode === 'nym') &&
+      !nymSnapshot.preferenceError ? (
+        <div
+          className="card"
+          role="status"
+          data-testid="transport-preference-confirmed"
+          data-preferred-mode={nymSnapshot.preferredMode}
+        >
+          Preferred transport: {nymSnapshot.preferredMode === 'nym' ? 'Nym' : 'Direct'}
+        </div>
+      ) : null}
+      {transportPreferenceStatus === 'unavailable' || nymSnapshot.preferenceError ? (
+        <div className="card" role="alert" data-testid="transport-preference-error">
+          <p>
+            {nymSnapshot.preferenceError
+              ? preferenceErrorMessage(nymSnapshot.preferenceError)
+              : preferenceActionError
+                ? preferenceErrorMessage(preferenceActionError)
+                : 'The saved transport preference is not available. Choose explicitly to retry.'}
+          </p>
+          {nymSnapshot.preferredMode === 'direct' || nymSnapshot.preferredMode === 'nym' ? (
+            <p>
+              Last confirmed preference:{' '}
+              {nymSnapshot.preferredMode === 'nym' ? 'Nym' : 'Direct'}
+            </p>
+          ) : null}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={nymBusy}
+              data-testid="transport-choice-nym-retry"
+              onClick={() => void handleNymSetMode('nym', true)}
+            >
+              Choose Nym
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={nymBusy}
+              data-testid="transport-choice-direct-retry"
+              onClick={() => void handleNymSetMode('direct')}
+            >
+              Choose Direct
+            </button>
+          </div>
+        </div>
+      ) : null}
       
       {accountError && (
         <div className="error-card">
@@ -1595,7 +2100,12 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
                 <button
                   type="button"
                   onClick={() => handleFundTestnet(account.address)}
-                  disabled={fundingLoading}
+                  disabled={
+                    fundingLoading ||
+                    transportPreferenceStatus !== 'ready' ||
+                    nymSnapshot.preferredMode === null ||
+                    nymSnapshot.preferenceError !== null
+                  }
                   className="btn-outline"
                   style={{ width: '100%', padding: '8px 12px', fontSize: '0.82rem', fontWeight: 600, color: 'var(--accent-color)', borderColor: 'var(--accent-color)', cursor: 'pointer' }}
                 >

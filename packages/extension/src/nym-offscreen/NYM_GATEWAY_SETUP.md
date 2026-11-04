@@ -95,12 +95,13 @@ Offscreen open / Connect / createMixFetch alone are **not** a completed Mixnet r
 | Method | `POST` `application/json` `{ "solanymProbeId": "<id>" }` |
 | Success | HTTP 2xx **and** response JSON echoes the same id under `json.solanymProbeId` (or `data` / top-level) |
 | Timeout | 60s (Mixnet latency) |
-| Override | UI URL field, or `VITE_NYM_HTTP_SMOKE_URL`, or IPC `NYM_HTTP_SMOKE.url` |
+| Override | UI URL field, `VITE_NYM_HTTP_SMOKE_URL`, or IPC `NYM_HTTP_SMOKE.url`; values must resolve exactly to the approved default URL |
 
-Custom echo: HTTPS POST JSON that returns the same `solanymProbeId` field. Do not point at
-Stellar/Solana RPC. No extra Chrome host permission is required for Mixnet egress (gateway
-WSS permission already covers the MixFetch path). Traffic uses `mixFetch` only — never clearnet
-`fetch` for this smoke.
+Only `https://postman-echo.com/post` is approved; arbitrary custom echo destinations are
+rejected before MixFetch is invoked. The MixFetch bridge does not expose a documented redirect
+policy, so redirects are not guaranteed to be blocked or revalidated. No extra Chrome host
+permission is required for Mixnet egress (gateway WSS permission already covers the MixFetch
+path). Traffic uses `mixFetch` only — never clearnet `fetch` for this smoke.
 
 ## Public data via transport (architecture check)
 

@@ -15,6 +15,9 @@ import {
   StellarReadClient,
 } from '@solanym/wallet-core/src/stellar/read/StellarReadClient.js';
 import { ChromeAlarmService } from './alarms/ChromeAlarmService.js';
+import { ChromeUncertainSubmissionStorage } from './storage/ChromeUncertainSubmissionStorage.js';
+import { createStellarSubmissionLifecycle, restoreUncertainSubmission } from './uncertainSubmissionLifecycle.js';
+import { NymTransportPreferenceService } from './nym/NymTransportPreferenceService.js';
 import { MessageRouter } from './MessageRouter.js';
 import { stateCoordinator } from './StateCoordinator.js';
 import { activeAccountManager } from './accounts/ActiveAccountManager.js';
@@ -75,6 +78,17 @@ function initBackgroundSynchronous() {
   const alarmService = new ChromeAlarmService((lock) => stateCoordinator.runLockOperation(lock));
   const persistentStorage = new ChromePersistentStorage(browser.storage.local);
   const sessionStorage = new ChromeSessionStorage(browser.storage.session as any);
+  const uncertainSubmissionStorage = new ChromeUncertainSubmissionStorage(
+    browser.storage.local as any,
+    browser.storage.session as any,
+  );
+  const stellarSubmissionLifecycle = createStellarSubmissionLifecycle(uncertainSubmissionStorage);
+  const nymTransportPreferenceService = new NymTransportPreferenceService({
+    get: async (key) => browser.storage.local.get(key),
+    set: async (items) => {
+      await browser.storage.local.set(items);
+    },
+  });
   const accountStorage = new ChromeAccountStorage(browser.storage.local);
 
   // 2. Initialize Core Services synchronously
@@ -83,14 +97,15 @@ function initBackgroundSynchronous() {
   const signer = new SoftwareSigner(vaultService, 'stellar');
   const keyManager = new KeyManager(signer, accountStorage);
   const accountService = new StellarAccountService(keyManager);
-  const nymRuntime = getNymRuntimeController();
+  const nymRuntime = getNymRuntimeController(nymTransportPreferenceService);
   // CDP / live-smoke harness may call connect via this handle (no vault access).
   (globalThis as any).nymRuntime = nymRuntime;
 
   // Stellar Horizon/Friendbot → FailClosedTransportRouter via MixFetch-aware adapter.
   // Logical Horizon base = SDF testnet. In mode=nym, getStellarFetch() remaps to the
   // validated effective base (default Ankr) — see stellarHorizonNymConfig.ts. No silent
-  // clearnet fallback. Default router mode starts as 'nym' (Nym-first). Direct requires explicit user action.
+  // clearnet fallback. The initial Nym router mode is a placeholder; requests stay gated
+  // until the persisted preference records an explicit choice.
   const stellarFetch = nymRuntime.getStellarFetch();
   const stellarReadClient = new StellarReadClient(
     STELLAR_TESTNET_HORIZON_URL,
@@ -107,6 +122,7 @@ function initBackgroundSynchronous() {
     signer,
     Networks.TESTNET,
     stellarFetch,
+    stellarSubmissionLifecycle,
   );
 
   // Expose globally for testing/harness access
@@ -209,7 +225,9 @@ function initBackgroundSynchronous() {
     }
 
     await stateCoordinator.initializeHolistic(hasVault, hasValidAccounts, hasOrphanedIntent);
+    await restoreUncertainSubmission(uncertainSubmissionStorage, stateCoordinator);
     await activeAccountManager.initialize();
+    await nymRuntime.restorePreference();
 
     try {
       // A restarted MV3 worker always requires password unlock. Do not trust

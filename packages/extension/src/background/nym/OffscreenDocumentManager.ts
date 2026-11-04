@@ -32,6 +32,10 @@ export class OffscreenDocumentManager {
     return this._api != null && typeof this._api.createDocument === 'function';
   }
 
+  getDocumentUrl(): string {
+    return this._getUrl(OFFSCREEN_PATH);
+  }
+
   async hasOpenDocument(): Promise<boolean> {
     if (!this._api) return false;
     if (typeof this._api.hasDocument === 'function') {
@@ -57,7 +61,7 @@ export class OffscreenDocumentManager {
     this._creating = (async () => {
       try {
         await this._api!.createDocument({
-          url: this._getUrl(OFFSCREEN_PATH),
+          url: this.getDocumentUrl(),
           reasons: [OFFSCREEN_REASON],
           justification: OFFSCREEN_JUSTIFICATION,
         });
@@ -84,6 +88,38 @@ export class OffscreenDocumentManager {
       await this._api.closeDocument();
     } catch {
       /* already closed */
+    }
+  }
+
+  async closeDocumentStrict(): Promise<void> {
+    if (!this._api) {
+      throw new Error('chrome.offscreen API unavailable; cannot verify document closure');
+    }
+
+    let closeError: unknown;
+    let closeFailed = false;
+    try {
+      await this._api.closeDocument();
+    } catch (cause) {
+      closeError = cause;
+      closeFailed = true;
+    }
+
+    if (typeof this._api.hasDocument === 'function') {
+      if (await this._api.hasDocument()) {
+        throw new Error(
+          closeFailed
+            ? `Failed to close offscreen document: ${closeError instanceof Error ? closeError.message : String(closeError)}`
+            : 'Offscreen document remains open after close request',
+        );
+      }
+      return;
+    }
+
+    if (closeFailed) {
+      throw closeError instanceof Error
+        ? closeError
+        : new Error(`Failed to close offscreen document: ${String(closeError)}`);
     }
   }
 }

@@ -219,11 +219,16 @@ export class MixFetchNymTransport implements NymHttpTransport {
    * `disconnected` state. Historical snapshots may still show `closed` briefly
    * for callers that race; Connect always recovers.
    */
-  async close(): Promise<void> {
+  async close(options?: { strict?: boolean }): Promise<void> {
     try {
-      await this._bridge.disconnect();
-    } catch {
-      /* still mark disconnected */
+      await this._bridge.disconnect(options);
+    } catch (cause) {
+      if (options?.strict) {
+        this._state = 'error';
+        this._lastError =
+          cause instanceof Error ? cause.message : 'MixFetch cleanup could not be verified';
+        throw cause;
+      }
     }
     this._state = 'disconnected';
     this._lastError = null;

@@ -88,7 +88,7 @@ vi.mock('@solanym/wallet-core/src/nym/NymTransportPolicy.js', () => {
 import { NymRuntimeController } from '../../../src/background/nym/NymRuntimeController.js';
 import { NymGatewayConfigService } from '../../../src/background/nym/NymGatewayConfigService.js';
 import { NymHostPermissionService } from '../../../src/background/nym/NymHostPermissionService.js';
-import { createNymSetModeHandler } from '../../../src/background/handlers/nymHandlers.js';
+import { NymTransportPreferenceService } from '../../../src/background/nym/NymTransportPreferenceService.js';
 
 function memoryStorage() {
   const mem = new Map<string, unknown>();
@@ -109,7 +109,10 @@ function memoryStorage() {
 
 import { NYM_VERIFIED_GATEWAY } from '../../../src/nym-offscreen/verifiedGateway.js';
 
-async function createTestController(bridgeOverrides: any = {}) {
+async function createTestController(
+  bridgeOverrides: any = {},
+  preferredMode: 'nym' | 'direct' | null = 'nym',
+) {
   const bridge = {
     setup: vi.fn(async () => {}),
     disconnect: vi.fn(async () => {}),
@@ -133,45 +136,43 @@ async function createTestController(bridgeOverrides: any = {}) {
     request: async () => true,
     remove: async () => true,
   });
+  const preferenceService = new NymTransportPreferenceService(memoryStorage());
+  await preferenceService.load();
+  if (preferredMode !== null) {
+    await preferenceService.setPreferredMode(preferredMode);
+  }
 
   const controller = new NymRuntimeController({
     bridge: bridge as any,
     gatewayConfig,
     hostPermissions,
+    preferenceService,
   });
+  await controller.restorePreference();
 
   return { controller, bridge };
 }
 
-describe('Nym Diagnostic Isolation & Global Direct Mode Rejection', () => {
-  it('controller starts in Nym mode by default', async () => {
+describe('Nym diagnostic isolation and persisted transport preference', () => {
+  it('restores the selected Nym mode independently from connection state', async () => {
     const { controller } = await createTestController();
     expect(controller.mode).toBe('nym');
-    expect(controller.getSnapshot().mode).toBe('nym');
+    expect(controller.getSnapshot()).toMatchObject({
+      mode: 'nym',
+      preferredMode: 'nym',
+      preferenceLoaded: true,
+      connected: false,
+    });
   });
 
-  it('rejects global Direct mode via setMode() with typed error and leaves mode unchanged', async () => {
+  it('persists and applies a newly selected transport', async () => {
     const { controller } = await createTestController();
-    expect(controller.mode).toBe('nym');
-
-    expect(() => controller.setMode('direct')).toThrow(/Global Direct mode is disabled/i);
-    expect(controller.mode).toBe('nym');
-  });
-
-  it('rejects global Direct mode via createNymSetModeHandler() IPC handler', async () => {
-    const { controller } = await createTestController();
-    // Expose controller globally as handler retrieves it via getNymRuntimeController
-    (globalThis as any).nymRuntime = controller;
-
-    const handler = createNymSetModeHandler();
-    await expect(handler({ mode: 'direct' })).rejects.toThrow(/Global Direct mode is disabled/i);
-    expect(controller.mode).toBe('nym');
-  });
-
-  it('allows setting Nym mode via setMode("nym")', async () => {
-    const { controller } = await createTestController();
-    expect(() => controller.setMode('nym')).not.toThrow();
-    expect(controller.mode).toBe('nym');
+    const snapshot = await controller.setPreferredMode('direct');
+    expect(snapshot).toMatchObject({
+      mode: 'direct',
+      preferredMode: 'direct',
+      preferenceLoaded: true,
+    });
   });
 
   it('Nym public-data diagnostics call the Nym transport directly (not router.fetch)', async () => {
@@ -277,6 +278,7 @@ describe('Nym Diagnostic Isolation & Global Direct Mode Rejection', () => {
     await controller.fetchPublicData({ transport: 'nym' });
     expect(controller.mode).toBe('nym');
     expect((controller as any)._router.mode).toBe('nym');
+    expect(controller.getSnapshot().preferredMode).toBe('nym');
 
     // Run direct diagnostic
     const directMock = vi.fn(async () => new Response('{}', { status: 200 }));
@@ -285,6 +287,7 @@ describe('Nym Diagnostic Isolation & Global Direct Mode Rejection', () => {
       await controller.fetchPublicData({ transport: 'direct' });
       expect(controller.mode).toBe('nym');
       expect((controller as any)._router.mode).toBe('nym');
+      expect(controller.getSnapshot().preferredMode).toBe('nym');
     } finally {
       vi.unstubAllGlobals();
     }
@@ -315,6 +318,36 @@ describe('Nym Diagnostic Isolation & Global Direct Mode Rejection', () => {
       expect(result.transport).toBe('direct');
       expect(controller.mode).toBe('nym');
       expect((controller as any)._router.mode).toBe('nym');
+      expect(controller.getSnapshot().preferredMode).toBe('nym');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('explicit diagnostic transport cannot bypass the missing-preference network gate', async () => {
+    const { controller, bridge } = await createTestController({}, null);
+    const transportFetchSpy = vi.spyOn((controller as any)._transport, 'fetch');
+    const directFetch = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', directFetch);
+
+    try {
+      expect(controller.mode).toBe('nym');
+      expect((controller as any)._router.mode).toBe('nym');
+      expect(controller.getSnapshot().preferredMode).toBeNull();
+
+      await expect(
+        controller.fetchPublicData({ transport: 'direct' }),
+      ).rejects.toMatchObject({ code: 'TRANSPORT_PREFERENCE_REQUIRED' });
+      await expect(
+        controller.probeStellarHorizon({ transport: 'nym' }),
+      ).rejects.toMatchObject({ code: 'TRANSPORT_PREFERENCE_REQUIRED' });
+
+      expect(directFetch).not.toHaveBeenCalled();
+      expect(transportFetchSpy).not.toHaveBeenCalled();
+      expect(bridge.mixFetch).not.toHaveBeenCalled();
+      expect(controller.mode).toBe('nym');
+      expect((controller as any)._router.mode).toBe('nym');
+      expect(controller.getSnapshot().preferredMode).toBeNull();
     } finally {
       vi.unstubAllGlobals();
     }

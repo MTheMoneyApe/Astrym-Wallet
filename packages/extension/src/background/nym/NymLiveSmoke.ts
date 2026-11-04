@@ -142,17 +142,48 @@ export async function runNymLiveSmoke(deps: {
 
   // Real createMixFetch path (offscreen). Permission grant ≠ connected until this succeeds.
   steps.push('createMixFetch-connect');
-  snapshot = await controller.connect({ preferredGateway: identityKey });
-  if (!snapshot.connected) {
+  let connectionError: unknown;
+  let cleanupError: unknown;
+  let connectionFailed = false;
+  let cleanupFailed = false;
+  try {
+    snapshot = await controller.connect({ preferredGateway: identityKey });
+    if (!snapshot.connected) {
+      throw Object.assign(
+        new Error(snapshot.lastError ?? 'createMixFetch did not report connected'),
+        { code: snapshot.diagnosticCode ?? 'CONNECT_FAILED' },
+      );
+    }
+    steps.push('createMixFetch-connected');
+  } catch (error) {
+    connectionError = error;
+    connectionFailed = true;
+  } finally {
+    try {
+      snapshot = await controller.disconnectForLiveSmoke();
+      if (snapshot.connected || snapshot.documentReady) {
+        throw new Error(
+          'Live smoke cleanup returned while MixFetch or the offscreen document remained active',
+        );
+      }
+      steps.push('disconnect');
+    } catch (error) {
+      cleanupError = error;
+      cleanupFailed = true;
+    }
+  }
+
+  if (connectionFailed) {
+    throw connectionError;
+  }
+  if (cleanupFailed) {
+    const cleanupMessage =
+      cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
     throw Object.assign(
-      new Error(snapshot.lastError ?? 'createMixFetch did not report connected'),
-      { code: snapshot.diagnosticCode ?? 'CONNECT_FAILED' },
+      new Error(`Live smoke connection succeeded but cleanup failed: ${cleanupMessage}`),
+      { code: 'SMOKE_CLEANUP_FAILED', cause: cleanupError },
     );
   }
-  steps.push('createMixFetch-connected');
-
-  snapshot = await controller.disconnect();
-  steps.push('disconnect');
 
   return {
     authorizedFlag: true,

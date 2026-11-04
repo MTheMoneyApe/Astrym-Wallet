@@ -25,6 +25,7 @@ export type NymHttpSmokeRequest = {
 
 export type NymHttpSmokeResult = {
   state: NymHttpSmokeState;
+  code?: 'STALE_READINESS';
   /** Destination used for the MixFetch request. */
   url: string;
   probeId: string;
@@ -40,9 +41,29 @@ export type NymHttpSmokeResult = {
   mixFetchInvoked: boolean;
 };
 
+export function createStaleReadinessResult(
+  request?: NymHttpSmokeRequest,
+): NymHttpSmokeResult {
+  const resolved = resolveNymHttpSmokeUrl(request?.url);
+  const validated = validateNymHttpSmokeUrl(resolved);
+  return {
+    state: 'error',
+    code: 'STALE_READINESS',
+    url: validated.ok ? validated.url : resolved,
+    probeId: '',
+    durationMs: 0,
+    httpStatus: null,
+    httpOk: null,
+    probeMatched: false,
+    echoedProbeId: null,
+    message: 'MixFetch readiness changed. Refresh status and explicitly connect before retrying.',
+    mixFetchInvoked: false,
+  };
+}
+
 export type NymHttpSmokeMixFetch = (
   url: string,
-  init?: RequestInit,
+  init?: RequestInit & { httpSmokeOperationId?: string },
 ) => Promise<Response>;
 
 function newProbeId(): string {
@@ -66,6 +87,7 @@ export async function runNymHttpSmoke(deps: {
   request?: NymHttpSmokeRequest;
   now?: () => number;
   randomId?: () => string;
+  operationId?: string;
 }): Promise<NymHttpSmokeResult> {
   const now = deps.now ?? (() => Date.now());
   const started = now();
@@ -112,7 +134,7 @@ export async function runNymHttpSmoke(deps: {
   // mix-fetch@1.4.2 Go WASM enforces browser CORS on Mixnet responses by default.
   // Official v1 flag: mode 'unsafe-ignore-cors' (removed in v2 — no CORS checks).
   // Does NOT switch to clearnet; egress remains via MixFetch / Mixnet.
-  const init: RequestInit & { mode?: string } = {
+  const init: RequestInit & { mode?: string; httpSmokeOperationId?: string } = {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -120,6 +142,7 @@ export async function runNymHttpSmoke(deps: {
     },
     body,
     mode: 'unsafe-ignore-cors',
+    ...(deps.operationId ? { httpSmokeOperationId: deps.operationId } : {}),
   };
 
   type RaceOk = { kind: 'ok'; response: Response };

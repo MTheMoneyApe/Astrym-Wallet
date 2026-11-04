@@ -31,6 +31,9 @@ describe('Stellar transactionHandlers', () => {
     (stateCoordinator as any)._activeSignatures = new Map();
     (stateCoordinator as any)._lockRequested = false;
     (stateCoordinator as any)._lockOperation = null;
+    (stateCoordinator as any)._uncertainContext = null;
+    (stateCoordinator as any).mutex._locked = false;
+    (stateCoordinator as any).mutex._queue = [];
     notificationCreate.mockReset();
     notificationCreate.mockResolvedValue('notification-id');
   });
@@ -132,7 +135,7 @@ describe('Stellar transactionHandlers', () => {
     const sendResult = await sendHandler({ id: reviewResult.id });
 
     expect(sendResult.txHash).toBe('abc123hash');
-    expect(sendResult.status).toBe('PENDING');
+    expect(sendResult.status).toBe('SUBMITTED_INGESTED');
 
     // F3: approved fee from REVIEW is propagated; SEND IPC cannot substitute it.
     expect(mockStellarClient.sendXlm).toHaveBeenCalledWith({
@@ -145,6 +148,81 @@ describe('Stellar transactionHandlers', () => {
 
     // Replay attempt throws error
     await expect(sendHandler({ id: reviewResult.id })).rejects.toThrow('not found or already consumed');
+  });
+
+  it('returns SUBMISSION_UNKNOWN and keeps signing blocked after an ambiguous POST', async () => {
+    mockStellarClient.reviewXlmTransfer.mockResolvedValue({
+      sourceAddress: 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H',
+      destinationAddress: 'GCGNF2T34X56JBNM3ZMQSFQ7Z72VDFTR6J7Z3P76WJ3N7C6XZQ4Q4Q4Q',
+      amountXlm: '1.0',
+      feeXlm: '0.0000100',
+      feeStroops: 100,
+      balanceXlm: '50.0000000',
+      destinationExists: true,
+      operationType: 'payment',
+    });
+    const { id } = await createReviewStellarTransferHandler(mockStellarClient)({
+      accountIndex: 0,
+      destination: 'GCGNF2T34X56JBNM3ZMQSFQ7Z72VDFTR6J7Z3P76WJ3N7C6XZQ4Q4Q4Q',
+      amountXlm: '1.0',
+    });
+    const txHash = 'a'.repeat(64);
+    mockStellarClient.sendXlm.mockImplementationOnce(async (_request: unknown, beforeSign: () => void) => {
+      beforeSign();
+      stateCoordinator.enterUncertainTransaction(0, txHash);
+      return { hash: txHash, status: 'SUBMISSION_UNKNOWN' };
+    });
+
+    await expect(createSendStellarTransferHandler(mockStellarClient)({ id })).resolves.toEqual({
+      txHash,
+      status: 'SUBMISSION_UNKNOWN',
+    });
+    expect(stateCoordinator.getUncertainContext()?.txHash).toBe(txHash);
+    expect(() => stateCoordinator.authorizeSignature()).toThrow(/UNCERTAIN_TRANSACTION/);
+  });
+
+  it('serializes concurrent sends and rejects the second without changing the uncertainty context', async () => {
+    mockStellarClient.reviewXlmTransfer.mockResolvedValue({
+      sourceAddress: 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H',
+      destinationAddress: 'GCGNF2T34X56JBNM3ZMQSFQ7Z72VDFTR6J7Z3P76WJ3N7C6XZQ4Q4Q4Q',
+      amountXlm: '1.0',
+      feeXlm: '0.0000100',
+      feeStroops: 100,
+      balanceXlm: '50.0000000',
+      destinationExists: true,
+      operationType: 'payment',
+    });
+    const reviewHandler = createReviewStellarTransferHandler(mockStellarClient);
+    const first = await reviewHandler({
+      accountIndex: 0,
+      destination: 'GCGNF2T34X56JBNM3ZMQSFQ7Z72VDFTR6J7Z3P76WJ3N7C6XZQ4Q4Q4Q',
+      amountXlm: '1.0',
+    });
+    const second = await reviewHandler({
+      accountIndex: 0,
+      destination: 'GCGNF2T34X56JBNM3ZMQSFQ7Z72VDFTR6J7Z3P76WJ3N7C6XZQ4Q4Q4Q',
+      amountXlm: '1.0',
+    });
+    const txHash = 'c'.repeat(64);
+    mockStellarClient.sendXlm.mockImplementationOnce(async (_request: unknown, beforeSign: () => void) => {
+      beforeSign();
+      stateCoordinator.enterUncertainTransaction(0, txHash);
+      return { hash: txHash, status: 'SUBMISSION_UNKNOWN' };
+    });
+    const sendHandler = createSendStellarTransferHandler(mockStellarClient);
+
+    const results = await Promise.allSettled([
+      sendHandler({ id: first.id }),
+      sendHandler({ id: second.id }),
+    ]);
+
+    expect(results[0]).toMatchObject({
+      status: 'fulfilled',
+      value: { txHash, status: 'SUBMISSION_UNKNOWN' },
+    });
+    expect(results[1]).toMatchObject({ status: 'rejected' });
+    expect(mockStellarClient.sendXlm).toHaveBeenCalledOnce();
+    expect(stateCoordinator.getUncertainContext()).toEqual({ accountIndex: 0, txHash });
   });
 
   it('StellarTransferConfirmationTracker confirms and notifies on testnet result', async () => {

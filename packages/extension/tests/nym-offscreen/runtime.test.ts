@@ -102,6 +102,119 @@ describe('NymOffscreenRuntime', () => {
     expect(mixFetch).toHaveBeenCalledOnce();
   });
 
+  it('tracks a Smoke request through pending and completion without blocking unrelated Nym fetches', async () => {
+    let resolveSmoke!: (response: Response) => void;
+    const smokeResponse = new Promise<Response>((resolve) => {
+      resolveSmoke = resolve;
+    });
+    const mixFetch = vi
+      .fn()
+      .mockImplementationOnce(async () => smokeResponse)
+      .mockImplementationOnce(async () => new Response('unrelated'));
+    const rt = new NymOffscreenRuntime({
+      bootstrapApiOrigins: ['https://validator.nymtech.net'],
+      gatewayOrigins: [DOC_WSS],
+    });
+    (rt as unknown as { ensureModule: () => Promise<unknown> }).ensureModule = async () => ({
+      createMixFetch: async () => ({
+        mixFetch,
+        disconnectMixFetch: async () => undefined,
+      }),
+      disconnectMixFetch: async () => undefined,
+    });
+    (rt as unknown as { probePackagedAssets: () => Promise<boolean> }).probePackagedAssets =
+      async () => true;
+    await rt.connect({ preferredGateway: DOC_IDENTITY });
+
+    const smoke = rt.performProtectedRequest(
+      'https://example.invalid/smoke',
+      undefined,
+      'smoke-operation-1',
+    );
+    expect(
+      rt.getHttpSmokeOperationStatus(
+        'smoke-operation-1',
+        rt.getStatus().runtimeGeneration!,
+      ).state,
+    ).toBe('pending');
+    await expect(
+      rt.performProtectedRequest(
+        'https://example.invalid/duplicate',
+        undefined,
+        'smoke-operation-2',
+      ),
+    ).rejects.toMatchObject({ code: 'HTTP_SMOKE_OPERATION_PENDING' });
+
+    await expect(
+      rt.performProtectedRequest('https://example.invalid/unrelated'),
+    ).resolves.toMatchObject({ status: 200 });
+    resolveSmoke(new Response('smoke'));
+    await expect(smoke).resolves.toMatchObject({ status: 200 });
+    expect(
+      rt.getHttpSmokeOperationStatus(
+        'smoke-operation-1',
+        rt.getStatus().runtimeGeneration!,
+      ).state,
+    ).toBe('completed');
+    expect(mixFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let a late Smoke failure overwrite a newer diagnostic', async () => {
+    let rejectSmoke!: (reason: Error) => void;
+    const smokeResponse = new Promise<Response>((_resolve, reject) => {
+      rejectSmoke = reject;
+    });
+    const mixFetch = vi
+      .fn()
+      .mockImplementationOnce(async () => smokeResponse)
+      .mockRejectedValueOnce(new Error('newer unrelated failure'));
+    const rt = new NymOffscreenRuntime({
+      bootstrapApiOrigins: ['https://validator.nymtech.net'],
+      gatewayOrigins: [DOC_WSS],
+    });
+    (rt as unknown as { ensureModule: () => Promise<unknown> }).ensureModule = async () => ({
+      createMixFetch: async () => ({
+        mixFetch,
+        disconnectMixFetch: async () => undefined,
+      }),
+      disconnectMixFetch: async () => undefined,
+    });
+    (rt as unknown as { probePackagedAssets: () => Promise<boolean> }).probePackagedAssets =
+      async () => true;
+    await rt.connect({ preferredGateway: DOC_IDENTITY });
+
+    const smoke = rt.performProtectedRequest(
+      'https://example.invalid/smoke',
+      undefined,
+      'smoke-operation-late-failure',
+    );
+    await expect(
+      rt.performProtectedRequest('https://example.invalid/unrelated'),
+    ).rejects.toThrow('newer unrelated failure');
+    rejectSmoke(new Error('late Smoke failure'));
+    await expect(smoke).rejects.toThrow('late Smoke failure');
+    expect(rt.getStatus().lastError).toContain('newer unrelated failure');
+    expect(
+      rt.getHttpSmokeOperationStatus(
+        'smoke-operation-late-failure',
+        rt.getStatus().runtimeGeneration!,
+      ).state,
+    ).toBe('failed');
+  });
+
+  it('reports unknown for an operation from another offscreen generation', () => {
+    const rt = new NymOffscreenRuntime();
+    const currentGeneration = rt.getStatus().runtimeGeneration;
+
+    expect(
+      rt.getHttpSmokeOperationStatus('old-operation', 'previous-generation'),
+    ).toEqual({
+      operationId: 'old-operation',
+      runtimeGeneration: currentGeneration,
+      state: 'unknown',
+    });
+  });
+
   it('connect without gateway allowlist refuses silent fallback', async () => {
     const rt = new NymOffscreenRuntime();
     (rt as unknown as { ensureModule: () => Promise<unknown> }).ensureModule = async () => ({
@@ -144,5 +257,35 @@ describe('NymOffscreenRuntime', () => {
     expect(createMixFetch).toHaveBeenCalledTimes(2);
     expect(again.connected).toBe(true);
     expect(again.state).toBe('connected');
+  });
+
+  it('strict disconnect reports MixFetch teardown errors after resetting runtime state', async () => {
+    const disconnectMixFetch = vi.fn(async () => {
+      throw new Error('mix-fetch teardown failed');
+    });
+    const createMixFetch = vi.fn(async () => ({
+      mixFetch: async () => new Response('ok'),
+      disconnectMixFetch,
+    }));
+    const rt = new NymOffscreenRuntime({
+      bootstrapApiOrigins: ['https://validator.nymtech.net'],
+      gatewayOrigins: [DOC_WSS],
+    });
+    (rt as unknown as { ensureModule: () => Promise<unknown> }).ensureModule = async () => ({
+      createMixFetch,
+      disconnectMixFetch,
+    });
+    (rt as unknown as { probePackagedAssets: () => Promise<boolean> }).probePackagedAssets =
+      async () => true;
+    await rt.connect({ preferredGateway: DOC_IDENTITY });
+
+    await expect(rt.disconnect({ strict: true })).rejects.toThrow(
+      /mix-fetch teardown failed/,
+    );
+    expect(disconnectMixFetch).toHaveBeenCalledOnce();
+    expect(rt.getStatus()).toMatchObject({
+      connected: false,
+      state: 'disconnected',
+    });
   });
 });

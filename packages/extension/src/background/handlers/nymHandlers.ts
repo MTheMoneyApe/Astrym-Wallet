@@ -1,3 +1,4 @@
+import browser from 'webextension-polyfill';
 import type { ValidatedRequestPayload, ValidatedResponsePayload } from '../../shared/ipcTypes.js';
 import { runNymLiveSmoke } from '../nym/NymLiveSmoke.js';
 import {
@@ -13,6 +14,9 @@ function toSnapshot(snap: NymRuntimeUiSnapshot): ValidatedResponsePayload<'NYM_S
     implementation: snap.implementation,
     selfAddress: snap.selfAddress ?? null,
     mode: snap.mode,
+    preferredMode: snap.preferredMode,
+    preferenceLoaded: snap.preferenceLoaded,
+    preferenceError: snap.preferenceError,
     documentReady: snap.documentReady,
     diagnosticCode: snap.diagnosticCode,
     diagnosticStage: snap.diagnosticStage ?? null,
@@ -22,6 +26,7 @@ function toSnapshot(snap: NymRuntimeUiSnapshot): ValidatedResponsePayload<'NYM_S
     gatewayIdentityKey: snap.gatewayIdentityKey ?? null,
     gatewayHostPermissionGranted: snap.gatewayHostPermissionGranted ?? null,
     gatewayHostPermissionPattern: snap.gatewayHostPermissionPattern ?? null,
+    readinessToken: snap.readinessToken,
   };
 }
 
@@ -66,16 +71,24 @@ export function createNymStatusHandler() {
 export function createNymSetModeHandler() {
   return async (
     payload: ValidatedRequestPayload<'NYM_SET_MODE'>,
+    sender?: browser.Runtime.MessageSender,
   ): Promise<ValidatedResponsePayload<'NYM_SET_MODE'>> => {
-    if (payload.mode === 'direct') {
+    if (
+      !sender ||
+      sender.id !== browser.runtime.id ||
+      sender.url !== browser.runtime.getURL('/popup.html')
+    ) {
       throw new Error(
-        'Global Direct mode is disabled. Astrym Wallet operates in Nym-first mode fail-closed. Operation-specific Direct authorization is required.',
+        'Transport preference changes must originate from the trusted popup',
       );
     }
+
+    if (payload.mode !== 'direct' && payload.mode !== 'nym') {
+      throw new Error('Invalid transport mode');
+    }
+
     const ctrl = getNymRuntimeController();
-    ctrl.setMode(payload.mode);
-    await ctrl.syncGatewayConfigUi();
-    return toSnapshot(ctrl.getSnapshot());
+    return toSnapshot(await ctrl.setPreferredMode(payload.mode));
   };
 }
 
@@ -184,9 +197,10 @@ export function createNymHttpSmokeHandler() {
     const request: { url?: string; timeoutMs?: number } = {};
     if (payload.url !== undefined) request.url = payload.url;
     if (payload.timeoutMs !== undefined) request.timeoutMs = payload.timeoutMs;
-    const result = await ctrl.runHttpSmoke(request);
+    const result = await ctrl.runHttpSmoke(request, payload.readinessToken);
     return {
       state: result.state,
+      ...(result.code ? { code: result.code } : {}),
       url: result.url,
       probeId: result.probeId,
       durationMs: result.durationMs,
@@ -196,6 +210,7 @@ export function createNymHttpSmokeHandler() {
       echoedProbeId: result.echoedProbeId,
       message: result.message,
       mixFetchInvoked: result.mixFetchInvoked,
+      ...(result.snapshot ? { snapshot: toSnapshot(result.snapshot) } : {}),
     };
   };
 }

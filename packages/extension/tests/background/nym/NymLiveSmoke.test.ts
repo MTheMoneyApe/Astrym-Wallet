@@ -49,7 +49,7 @@ describe('runNymLiveSmoke', () => {
         assetsReady: true,
       })),
       connect,
-      disconnect: vi.fn(),
+      disconnectForLiveSmoke: vi.fn(),
     } as unknown as NymRuntimeController;
 
     const gatewayConfig = new NymGatewayConfigService(memoryStorage());
@@ -73,6 +73,7 @@ describe('runNymLiveSmoke', () => {
     expect(result.steps).toContain('smoke-dry-run');
     expect(result.snapshot.diagnosticCode).toBe('SMOKE_DRY_RUN');
     expect(result.snapshot.connected).toBe(false);
+    expect(controller.disconnectForLiveSmoke).not.toHaveBeenCalled();
   });
 
   it('refuses authorized path while flag is false even if confirmLiveSmoke=true', async () => {
@@ -88,7 +89,7 @@ describe('runNymLiveSmoke', () => {
         gatewayAllowlistConfigured: true,
       })),
       connect: vi.fn(),
-      disconnect: vi.fn(),
+      disconnectForLiveSmoke: vi.fn(),
       getSnapshot: vi.fn(),
     } as unknown as NymRuntimeController;
 
@@ -138,7 +139,7 @@ describe('runNymLiveSmoke', () => {
         assetsReady: true,
       })),
       connect,
-      disconnect: vi.fn(),
+      disconnectForLiveSmoke: vi.fn(),
     } as unknown as NymRuntimeController;
 
     const gatewayConfig = new NymGatewayConfigService(memoryStorage());
@@ -168,5 +169,6 @@ describe('runNymLiveSmoke', () => {
     expect(result.steps).toContain('smoke-dry-run');
     expect(result.snapshot.diagnosticCode).toBe('SMOKE_DRY_RUN');
     expect(connect).not.toHaveBeenCalled();
+    expect(controller.disconnectForLiveSmoke).not.toHaveBeenCalled();
   });
 });

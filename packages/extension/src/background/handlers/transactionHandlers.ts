@@ -405,11 +405,13 @@ export function createSendStellarTransferHandler(
   tracker = new StellarTransferConfirmationTracker(client),
 ) {
   return async (payload: SendStellarTransferRequest): Promise<SendStellarTransferResponse> => {
-    const originalRequest = transferManager.consumeReview(payload.id, 'stellar');
-
-    const authorization = stateCoordinator.authorizeSignature();
-
+    // This shared mutex serializes all production sends through the non-atomic session-storage guard.
+    await stateCoordinator.mutex.acquire();
+    let authorization: ReturnType<typeof stateCoordinator.authorizeSignature> | undefined;
     try {
+      const originalRequest = transferManager.consumeReview(payload.id, 'stellar');
+      const signatureAuthorization = stateCoordinator.authorizeSignature();
+      authorization = signatureAuthorization;
       const result = await client.sendXlm(
         {
           sourceAccountIndex: originalRequest.accountIndex,
@@ -418,17 +420,25 @@ export function createSendStellarTransferHandler(
           memo: originalRequest.memo,
           approvedFeeStroops: originalRequest.approvedFeeStroops,
         },
-        () => stateCoordinator.assertSignatureActive(authorization),
+        () => stateCoordinator.assertSignatureActive(signatureAuthorization),
       );
 
-      if (!stateCoordinator.validateExit(authorization)) {
+      if (
+        result.status !== 'SUBMISSION_UNKNOWN' &&
+        !stateCoordinator.validateExit(signatureAuthorization)
+      ) {
         throw new Error('Wallet state changed during broadcast. Signature delivered but local state invalidated.');
       }
 
+      if (result.status === 'SUBMISSION_UNKNOWN') {
+        return { txHash: result.hash, status: 'SUBMISSION_UNKNOWN' };
+      }
+
       tracker.start(result.hash);
-      return { txHash: result.hash, status: 'PENDING' };
+      return { txHash: result.hash, status: 'SUBMITTED_INGESTED' };
     } finally {
-      stateCoordinator.endSignature(authorization);
+      if (authorization) stateCoordinator.endSignature(authorization);
+      stateCoordinator.mutex.release();
     }
   };
 }

@@ -26,7 +26,9 @@
     "https://validator.nymtech.net/*"
   ],
   "optional_host_permissions": [
-    "https://nym-node-cli.devrel.nymte.ch:9001/*"
+    "https://nym-node-cli.devrel.nymte.ch:9001/*",
+    "https://horizon-testnet.stellar.org/*",
+    "https://friendbot.stellar.org/*"
   ],
   "content_scripts": [
     {

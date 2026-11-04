@@ -11,14 +11,41 @@ import {
 
 export const MAX_STELLAR_FEE_STROOPS = 100_000;
 
+const STROOPS_PER_XLM = 10_000_000n;
+const MAX_STELLAR_AMOUNT_STROOPS = 9_223_372_036_854_775_807n;
+
+function decimalToStroops(amount: string): bigint | undefined {
+  // Match Stellar's decimal amount precision; extra trailing zeroes are rejected too.
+  if (typeof amount !== 'string' || !/^\d+(?:\.\d{1,7})?$/.test(amount)) return undefined;
+
+  const [whole, fraction = ''] = amount.split('.');
+  const normalizedWhole = whole!.replace(/^0+(?=\d)/, '');
+  if (normalizedWhole.length > 12) return undefined;
+
+  const stroops =
+    BigInt(normalizedWhole) * STROOPS_PER_XLM +
+    BigInt(fraction.padEnd(7, '0') || '0');
+  return stroops <= MAX_STELLAR_AMOUNT_STROOPS ? stroops : undefined;
+}
+
 function amountsEqual(a: string, b: string): boolean {
-  if (a === b) return true;
-  const numA = Number(a);
-  const numB = Number(b);
-  if (!Number.isFinite(numA) || !Number.isFinite(numB)) return false;
-  const stroopsA = Math.round(numA * 1e7);
-  const stroopsB = Math.round(numB * 1e7);
-  return stroopsA === stroopsB;
+  const stroopsA = decimalToStroops(a);
+  const stroopsB = decimalToStroops(b);
+  return stroopsA !== undefined && stroopsB !== undefined && stroopsA === stroopsB;
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function memoTextEquals(value: unknown, expected: string): boolean {
+  if (typeof value === 'string') return value === expected;
+  if (!(value instanceof Uint8Array)) return false;
+  return bytesEqual(value, new TextEncoder().encode(expected));
 }
 
 /**
@@ -32,7 +59,7 @@ function amountsEqual(a: string, b: string): boolean {
  * 4. Exact Fee Match & Fee Ceiling (enforces MAX_STELLAR_FEE_STROOPS = 100,000)
  * 5. Sequence Number Match
  * 6. Timebounds Verification (rejects unbounded maxTime: 0 and mismatches)
- * 7. Defensive Memo Handling (Buffer vs string, unexpected memo types)
+ * 7. Defensive Memo Handling (byte array or string, unexpected memo types)
  * 8. Operation Verification & Override Guard (exactly 1 op, rejects op.source override)
  * 9. Cryptographic Ed25519 Signature Verification over tx.hash() and source account
  */
@@ -126,7 +153,7 @@ export class SignedXdrValidator {
     // 7. Defensive Memo Handling (DEFECT-05)
     const expectedMemo = trusted.memo && trusted.memo !== '' ? trusted.memo : undefined;
     if (expectedMemo === undefined) {
-      if (decoded.memo.type !== 'none' && decoded.memo.value !== null && decoded.memo.value !== undefined) {
+      if (decoded.memo.type !== 'none' || decoded.memo.value !== null) {
         throw new StellarXdrValidationError(
           `Unexpected memo of type "${decoded.memo.type}" found in signed XDR when none was approved`,
         );
@@ -138,12 +165,9 @@ export class SignedXdrValidator {
         );
       }
       const rawMemo = decoded.memo.value;
-      const actualMemo = Buffer.isBuffer(rawMemo)
-        ? rawMemo.toString('utf8')
-        : String(rawMemo ?? '');
-      if (actualMemo !== expectedMemo) {
+      if (!memoTextEquals(rawMemo, expectedMemo)) {
         throw new StellarXdrValidationError(
-          `Memo mismatch: expected "${expectedMemo}", got "${actualMemo}"`,
+          `Memo mismatch: expected "${expectedMemo}"`,
         );
       }
     }
@@ -156,6 +180,9 @@ export class SignedXdrValidator {
     }
 
     const op = decoded.operations[0];
+    if (!op) {
+      throw new StellarXdrValidationError('Expected exactly 1 operation, found 0');
+    }
 
     // DEFECT-04: Strict check against per-operation source override
     if (op.source !== undefined && op.source !== null) {
@@ -213,6 +240,9 @@ export class SignedXdrValidator {
     }
 
     const decoratedSig = decoded.signatures[0];
+    if (!decoratedSig) {
+      throw new StellarXdrValidationError('Expected exactly 1 signature, found 0');
+    }
     let keypair: Keypair;
     try {
       keypair = Keypair.fromPublicKey(trusted.sourceAddress);
@@ -223,17 +253,21 @@ export class SignedXdrValidator {
       );
     }
 
-    const hintBytes = (decoratedSig as any).hint?.value ??
-      (typeof (decoratedSig as any).hint === 'function' ? (decoratedSig as any).hint() : (decoratedSig as any).hint);
+    const hintBytes: unknown = decoratedSig.hint?.value;
     const expectedHint = keypair.signatureHint();
-    if (!hintBytes || !expectedHint || !Buffer.from(hintBytes).equals(Buffer.from(expectedHint))) {
+    if (
+      !(hintBytes instanceof Uint8Array) ||
+      hintBytes.length !== expectedHint.length ||
+      !bytesEqual(hintBytes, expectedHint)
+    ) {
       throw new StellarXdrValidationError('Signature hint mismatch for source account');
     }
 
-    const sigBytes = (decoratedSig as any).signature?.value ??
-      (typeof (decoratedSig as any).signature === 'function' ? (decoratedSig as any).signature() : (decoratedSig as any).signature);
-    if (!sigBytes) {
-      throw new StellarXdrValidationError('Missing signature payload in decorated signature');
+    const sigBytes: unknown = decoratedSig.signature?.value;
+    if (!(sigBytes instanceof Uint8Array) || sigBytes.length !== 64) {
+      throw new StellarXdrValidationError(
+        'Missing or malformed signature payload in decorated signature',
+      );
     }
 
     let isValidSignature = false;

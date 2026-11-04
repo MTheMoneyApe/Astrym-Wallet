@@ -136,6 +136,29 @@ describe('MixFetchNymTransport (mocked bridge)', () => {
     expect(bridge.mixFetch).not.toHaveBeenCalled();
   });
 
+  it('normal close remains best-effort while strict close reports bridge cleanup errors', async () => {
+    const disconnect = vi.fn().mockRejectedValue(new Error('offscreen close failed'));
+    const bridge = mockBridge({ disconnect });
+    const transport = new MixFetchNymTransport(bridge);
+    await transport.connect();
+
+    await expect(transport.close()).resolves.toBeUndefined();
+    expect(transport.getSnapshot()).toMatchObject({
+      state: 'disconnected',
+      connected: false,
+    });
+
+    await transport.connect();
+    await expect(transport.close({ strict: true })).rejects.toThrow(
+      /offscreen close failed/,
+    );
+    expect(transport.getSnapshot()).toMatchObject({
+      state: 'error',
+      connected: false,
+      lastError: 'offscreen close failed',
+    });
+  });
+
   it('reconnects after close without permanently rejecting Connect', async () => {
     const bridge = mockBridge();
     const t = new MixFetchNymTransport(bridge);

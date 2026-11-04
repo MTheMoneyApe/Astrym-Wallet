@@ -6,12 +6,14 @@
 import React, { useState } from 'react';
 import type { NymTransportSnapshot } from '@solanym/wallet-core/src/nym/NymTransport.js';
 import type { NymTransportMode } from '@solanym/wallet-core/src/nym/NymTransportPolicy.js';
+import type { NymReadinessToken } from '../shared/ipcSchemas.js';
 import { NYM_VERIFIED_GATEWAY } from '../nym-offscreen/verifiedGateway.js';
 import { NYM_HTTP_SMOKE_DEFAULT_URL } from '../nym-offscreen/httpSmokeConfig.js';
 import { NYM_PUBLIC_DATA_DEFAULT_URL } from '../nym-offscreen/publicDataConfig.js';
 
 export type NymHttpSmokeUiResult = {
   state: 'idle' | 'running' | 'success' | 'error' | 'timeout';
+  code?: 'STALE_READINESS';
   url: string;
   probeId: string;
   durationMs: number;
@@ -21,6 +23,7 @@ export type NymHttpSmokeUiResult = {
   echoedProbeId: string | null;
   message: string;
   mixFetchInvoked: boolean;
+  snapshot?: NymUiSnapshot;
 };
 
 export type NymPublicDataUiResult = {
@@ -62,6 +65,9 @@ export type NymStellarHorizonUiResult = {
 
 export type NymUiSnapshot = NymTransportSnapshot & {
   mode?: NymTransportMode;
+  preferredMode?: NymTransportMode | null;
+  preferenceLoaded?: boolean;
+  preferenceError?: 'STORAGE_READ_FAILED' | 'STORAGE_WRITE_FAILED' | 'INVALID_STORED_VALUE' | null;
   documentReady?: boolean;
   diagnosticCode?: string;
   diagnosticStage?: string | null;
@@ -71,10 +77,12 @@ export type NymUiSnapshot = NymTransportSnapshot & {
   gatewayIdentityKey?: string | null;
   gatewayHostPermissionGranted?: boolean | null;
   gatewayHostPermissionPattern?: string | null;
+  readinessToken?: NymReadinessToken;
 };
 
 export type NymTransportPanelProps = {
   snapshot: NymUiSnapshot;
+  readinessCurrent?: boolean;
   busy?: boolean;
   onConnect?: () => void;
   onDisconnect?: () => void;
@@ -95,7 +103,10 @@ export type NymTransportPanelProps = {
   stellarHorizonResult?: NymStellarHorizonUiResult | null;
 };
 
-function describeState(snapshot: NymUiSnapshot): string {
+function describeState(snapshot: NymUiSnapshot, readinessCurrent: boolean): string {
+  if (!readinessCurrent && snapshot.state !== 'error') {
+    return 'Mixnet status not verified';
+  }
   switch (snapshot.state) {
     case 'connected':
       return snapshot.connected ? 'Ready (Mixnet)' : 'Mixnet desconectado';
@@ -113,6 +124,7 @@ function describeState(snapshot: NymUiSnapshot): string {
 
 export function NymTransportPanel({
   snapshot,
+  readinessCurrent = false,
   busy = false,
   onConnect,
   onDisconnect,
@@ -129,8 +141,17 @@ export function NymTransportPanel({
   onStellarHorizonProbe,
   stellarHorizonResult = null,
 }: NymTransportPanelProps) {
-  const mode = snapshot.mode ?? 'nym';
-  const ready = snapshot.connected && snapshot.state === 'connected';
+  const mode = snapshot.mode;
+  const preferredMode = snapshot.preferredMode;
+  const preferenceConfirmed =
+    snapshot.preferenceLoaded === true &&
+    (preferredMode === 'nym' || preferredMode === 'direct') &&
+    snapshot.preferenceError === null;
+  const ready =
+    readinessCurrent === true &&
+    snapshot.connected &&
+    snapshot.state === 'connected' &&
+    snapshot.readinessToken !== undefined;
   const [gatewayInput, setGatewayInput] = useState('');
   const [identityInput, setIdentityInput] = useState('');
   const [httpSmokeUrl, setHttpSmokeUrl] = useState('');
@@ -145,14 +166,25 @@ export function NymTransportPanel({
         data-nym-state={snapshot.state}
         data-nym-connected={snapshot.connected ? 'true' : 'false'}
         data-nym-impl={snapshot.implementation}
-        data-nym-mode={mode}
+        data-nym-mode={mode ?? 'unknown'}
+        data-nym-preferred-mode={preferredMode ?? 'unselected'}
         data-nym-document-ready={snapshot.documentReady ? 'true' : 'false'}
       >
-        {describeState(snapshot)}
+        {describeState(snapshot, readinessCurrent)}
       </p>
       <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.78rem', color: 'var(--muted, #888)' }}>
         <li>Implementación: {snapshot.implementation}</li>
-        <li>Modo: {mode}</li>
+        <li data-testid="nym-preferred-mode">
+          Transporte preferido:{' '}
+          {preferredMode === 'nym'
+            ? 'Nym'
+            : preferredMode === 'direct'
+              ? 'Direct'
+              : 'No seleccionado'}
+        </li>
+        <li data-testid="nym-applied-mode">
+          Modo del router: {mode ?? 'No disponible'}
+        </li>
         <li>Conectado: {snapshot.connected ? 'sí' : 'no'}</li>
         <li>
           Documento offscreen: {snapshot.documentReady ? 'abierto' : 'no'} (≠ Mixnet Ready)
@@ -206,6 +238,20 @@ export function NymTransportPanel({
       {snapshot.lastError ? (
         <p style={{ margin: '10px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
           {snapshot.lastError}
+        </p>
+      ) : null}
+      {snapshot.preferenceError ? (
+        <p
+          role="alert"
+          data-testid="nym-preference-error"
+          data-preference-error={snapshot.preferenceError}
+          style={{ margin: '10px 0 0', fontSize: '0.78rem', color: 'var(--danger, #c44)' }}
+        >
+          {snapshot.preferenceError === 'STORAGE_READ_FAILED'
+            ? 'Could not load the saved transport preference. Choose explicitly to retry.'
+            : snapshot.preferenceError === 'STORAGE_WRITE_FAILED'
+              ? 'Could not save the transport preference. Please retry.'
+              : 'The saved transport preference is invalid. Choose explicitly to replace it.'}
         </p>
       ) : null}
 
@@ -272,7 +318,7 @@ export function NymTransportPanel({
           <button
             type="button"
             className="btn-secondary"
-            disabled={busy || ready}
+            disabled={busy || ready || !preferenceConfirmed || preferredMode !== 'nym'}
             onClick={onConnect}
             data-testid="nym-connect"
           >
@@ -295,21 +341,20 @@ export function NymTransportPanel({
             <button
               type="button"
               className="btn-secondary"
-              disabled={busy || mode === 'nym'}
+              disabled={busy || (preferenceConfirmed && preferredMode === 'nym')}
               onClick={() => onSetMode('nym')}
               data-testid="nym-mode-nym"
             >
-              Nym mode
+              Use Nym
             </button>
-            {/* Founder Decision F: Global Direct mode is disabled. Direct requires operation-specific authorization. */}
             <button
               type="button"
               className="btn-secondary"
-              disabled={true}
+              disabled={busy || (preferenceConfirmed && preferredMode === 'direct')}
+              onClick={() => onSetMode('direct')}
               data-testid="nym-mode-direct"
-              title="Global Direct mode is disabled. Direct requires operation-specific authorization."
             >
-              Direct (disabled)
+              Use Direct
             </button>
           </>
         ) : null}
@@ -329,7 +374,7 @@ export function NymTransportPanel({
           <button
             type="button"
             className="btn-secondary"
-            disabled={busy || !liveSmokeAuthorized}
+            disabled={busy || !liveSmokeAuthorized || !preferenceConfirmed}
             onClick={onLiveSmokeExecute}
             data-testid="nym-live-smoke-exec"
             title={
@@ -345,7 +390,13 @@ export function NymTransportPanel({
           <button
             type="button"
             className="btn-secondary"
-            disabled={busy || !ready || httpSmokeResult?.state === 'running'}
+            disabled={
+              busy ||
+              !ready ||
+              preferredMode !== 'nym' ||
+              !preferenceConfirmed ||
+              httpSmokeResult?.state === 'running'
+            }
             onClick={() => onHttpSmoke(httpSmokeUrl.trim() || undefined)}
             data-testid="nym-http-smoke"
             title="POST echo via MixFetch only — requires MixFetch Ready; ≠ document open"
@@ -357,7 +408,7 @@ export function NymTransportPanel({
           <button
             type="button"
             className="btn-secondary"
-            disabled={busy || publicDataBusy || !ready}
+            disabled={busy || publicDataBusy || !ready || !preferenceConfirmed}
             onClick={() => onPublicDataFetch('nym')}
             data-testid="nym-public-data-fetch"
             title="GET public echo via FailClosedTransportRouter → MixFetch (no clearnet fallback)"
@@ -369,7 +420,7 @@ export function NymTransportPanel({
           <button
             type="button"
             className="btn-secondary"
-            disabled={busy || stellarProbeBusy || !ready}
+            disabled={busy || stellarProbeBusy || !ready || !preferenceConfirmed}
             onClick={() => onStellarHorizonProbe('nym')}
             data-testid="nym-stellar-horizon-probe"
             title="GET Horizon fee_stats via StellarReadClient→MixFetch (HAL body)"
@@ -395,7 +446,7 @@ export function NymTransportPanel({
           >
             <li>
               Horizon probe: {stellarHorizonResult?.state ?? 'idle'} — transporte:{' '}
-              {stellarHorizonResult?.transport ?? mode}
+              {stellarHorizonResult?.transport ?? mode ?? 'unknown'}
             </li>
             {stellarHorizonResult ? (
               <>
@@ -481,7 +532,7 @@ export function NymTransportPanel({
           >
             <li>
               Public data: {publicDataResult?.state ?? 'idle'} — transporte:{' '}
-              {publicDataResult?.transport ?? mode} (default POST{' '}
+              {publicDataResult?.transport ?? mode ?? 'unknown'} (default POST{' '}
               {NYM_PUBLIC_DATA_DEFAULT_URL})
             </li>
             {publicDataResult ? (
@@ -576,7 +627,7 @@ export function NymTransportPanel({
         tras permiso y (live) build autorizado. 5) HTTP smoke solo con MixFetch Ready. Dry-run nunca
         abre Mixnet. Fallo Mixnet ≠ clearnet.
       </p>
-      {mode === 'nym' && !ready ? (
+      {preferredMode === 'nym' && !ready ? (
         <p style={{ margin: '6px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
           Protected Stellar Horizon/Friendbot requests stay blocked until Mixnet is Ready
           (no clearnet fallback).

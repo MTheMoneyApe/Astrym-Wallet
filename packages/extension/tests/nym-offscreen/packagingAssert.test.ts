@@ -65,13 +65,27 @@ describe('nym-mixfetch packaging assert', () => {
     );
   });
 
-  it('manifest optional_host_permissions lists exact verified gateway pattern only', () => {
+  it('manifest optional_host_permissions lists exact gateway and Stellar Direct origins', () => {
     const manifest = JSON.parse(
       readFileSync(resolve(__dirname, '../../public/manifest.json'), 'utf8'),
     );
     expect(manifest.optional_host_permissions).toEqual([
       NYM_VERIFIED_GATEWAY.hostPermissionPattern,
+      'https://horizon-testnet.stellar.org/*',
+      'https://friendbot.stellar.org/*',
     ]);
+    expect(manifest.optional_host_permissions).toContain(
+      'https://horizon-testnet.stellar.org/*',
+    );
+    expect(manifest.optional_host_permissions).toContain(
+      'https://friendbot.stellar.org/*',
+    );
+    expect(manifest.host_permissions).not.toContain(
+      'https://horizon-testnet.stellar.org/*',
+    );
+    expect(manifest.host_permissions).not.toContain(
+      'https://friendbot.stellar.org/*',
+    );
     expect(manifest.optional_host_permissions.join(',')).not.toContain('*://');
     expect(manifest.optional_host_permissions.join(',')).not.toContain('<all_urls>');
     // Repo allowlist stays empty — optional permission ≠ auto-configured allowlist.

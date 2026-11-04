@@ -1,12 +1,10 @@
 /**
- * SW orchestration for Nym Mixnet: offscreen host + MixFetchNymTransport +
- * FailClosedTransportRouter. Nym-first mode fail-closed. Global Direct mode is disabled (Founder Decision F).
+ * SW orchestration for the optional Nym/Direct transport and persisted user preference.
  */
 
 import {
   MixFetchNymTransport,
   NymTransportError,
-  type NymHttpTransport,
   type NymTransportSnapshot,
 } from '@solanym/wallet-core/src/nym/NymTransport.js';
 import {
@@ -14,7 +12,6 @@ import {
   type NymTransportMode,
 } from '@solanym/wallet-core/src/nym/NymTransportPolicy.js';
 import type { NymDiagnosticCode } from '../../nym-offscreen/diagnostics.js';
-import { createOffscreenDocumentManager } from './OffscreenDocumentManager.js';
 import { OffscreenMixFetchBridge } from './OffscreenMixFetchBridge.js';
 import {
   NymGatewayConfigService,
@@ -22,12 +19,15 @@ import {
 } from './NymGatewayConfigService.js';
 import { NymHostPermissionService } from './NymHostPermissionService.js';
 import {
+  createStaleReadinessResult,
   runNymHttpSmoke,
   type NymHttpSmokeRequest,
   type NymHttpSmokeResult,
 } from './NymHttpSmoke.js';
+import type { NymReadinessToken } from '../../shared/ipcSchemas.js';
 import {
   fetchPublicData,
+  type PublicDataTransportFetch,
   type PublicDataFetchRequest,
   type PublicDataFetchResult,
 } from './PublicDataClient.js';
@@ -42,9 +42,21 @@ import {
   type StellarHorizonProbeResult,
 } from './StellarHorizonProbe.js';
 import type { StellarReadFetch } from '@solanym/wallet-core/src/stellar/read/StellarReadClient.js';
+import type {
+  NymTransportPreferenceError,
+  NymTransportPreferenceService,
+  NymTransportPreferenceSnapshot,
+} from './NymTransportPreferenceService.js';
+import {
+  NymHttpSmokeOperationStore,
+  type NymHttpSmokeOperationRecord,
+} from './NymHttpSmokeOperationStore.js';
 
 export type NymRuntimeUiSnapshot = NymTransportSnapshot & {
   mode: NymTransportMode;
+  preferredMode: NymTransportMode | null;
+  preferenceLoaded: boolean;
+  preferenceError: NymTransportPreferenceError;
   documentReady: boolean;
   diagnosticCode?: NymDiagnosticCode | string;
   diagnosticStage?: string | null;
@@ -55,9 +67,30 @@ export type NymRuntimeUiSnapshot = NymTransportSnapshot & {
   gatewayIdentityKey?: string | null;
   gatewayHostPermissionGranted?: boolean | null;
   gatewayHostPermissionPattern?: string | null;
+  readinessToken: NymReadinessToken;
   /** Validated MixFetch-effective Horizon bases (Nym remap targets). */
   stellarNymHorizon?: StellarNymHorizonConfig;
 };
+
+export type NymRuntimeHttpSmokeResult = NymHttpSmokeResult & {
+  snapshot?: NymRuntimeUiSnapshot;
+};
+
+class NymPreferenceRequiredError extends Error {
+  readonly code = 'NYM_PREFERENCE_REQUIRED';
+
+  constructor() {
+    super('HTTP Smoke requires a valid persisted Nym transport preference');
+    this.name = 'NymPreferenceRequiredError';
+  }
+}
+
+function createControllerEpoch(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 function clearnetFetchImpl(
   url: string,
@@ -109,11 +142,7 @@ function defaultLocalStorage(): {
 }
 
 export class NymRuntimeController {
-  /**
-   * Nym-first: starts in Nym mode. Wallet operations fail closed if Nym is not
-   * Global Direct mode is disabled; wallet operations fail closed without silent fallback.
-   * Diagnostic requests (fetchPublicData, probeStellarHorizon) must not mutate this field.
-   */
+  /** Initial router mode is only a fail-closed placeholder until a preference is restored. */
   private _mode: NymTransportMode = 'nym';
   private readonly _bridge: OffscreenMixFetchBridge;
   private readonly _transport: MixFetchNymTransport;
@@ -133,16 +162,42 @@ export class NymRuntimeController {
   private _stellarNymHorizon: StellarNymHorizonConfig = {
     ...DEFAULT_STELLAR_NYM_HORIZON_CONFIG,
   };
-  /** Serializes Connect so duplicate createMixFetch / offscreen races cannot overlap. */
+  /** Coalesces duplicate Connect calls until a later lifecycle operation is invoked. */
   private _connectInFlight: Promise<NymRuntimeUiSnapshot> | null = null;
+  private _lifecycleOperationQueue: Promise<void> = Promise.resolve();
+  private _preferenceSnapshot: NymTransportPreferenceSnapshot = {
+    preferenceLoaded: false,
+    preferredMode: null,
+    preferenceError: null,
+  };
+  private _preferenceOperationQueue: Promise<void> = Promise.resolve();
+  private readonly _preferenceService: NymTransportPreferenceService;
+  private readonly _controllerEpoch = createControllerEpoch();
+  private _readinessRevision = 0;
+  private _readinessConfirmed = false;
+  private readonly _httpSmokeOperationStore: NymHttpSmokeOperationStore;
+  private _httpSmokeOperation: NymHttpSmokeOperationRecord | null = null;
+  private _httpSmokeCallInFlight = false;
+  private _httpSmokeTrackingUnavailable = false;
 
-  constructor(options?: {
+  constructor(options: {
     bridge?: OffscreenMixFetchBridge;
     gatewayConfig?: NymGatewayConfigService;
     hostPermissions?: NymHostPermissionService;
+    preferenceService: NymTransportPreferenceService;
+    httpSmokeOperationStore?: NymHttpSmokeOperationStore;
   }) {
-    const docs = createOffscreenDocumentManager();
-    this._bridge = options?.bridge ?? new OffscreenMixFetchBridge(docs);
+    if (!options.preferenceService) {
+      throw new Error('NymRuntimeController requires a persistent transport preference service');
+    }
+    this._preferenceService = options.preferenceService;
+    this._bridge =
+      options.bridge ??
+      new OffscreenMixFetchBridge({
+        onAuthenticated: (diagnostic) => {
+          console.info('[Astrym][OffscreenBridge] authenticated', diagnostic);
+        },
+      });
     this._transport = new MixFetchNymTransport(this._bridge);
     this._router = new FailClosedTransportRouter({
       mode: this._mode,
@@ -150,17 +205,16 @@ export class NymRuntimeController {
       directFetch: clearnetFetchImpl as typeof fetch,
     });
     this._gatewayConfig =
-      options?.gatewayConfig ?? new NymGatewayConfigService(defaultLocalStorage());
+      options.gatewayConfig ?? new NymGatewayConfigService(defaultLocalStorage());
     this._hostPermissions =
-      options?.hostPermissions ?? new NymHostPermissionService();
+      options.hostPermissions ?? new NymHostPermissionService();
+    this._httpSmokeOperationStore =
+      options.httpSmokeOperationStore ??
+      new NymHttpSmokeOperationStore(defaultLocalStorage());
   }
 
   get mode(): NymTransportMode {
     return this._mode;
-  }
-
-  get transport(): NymHttpTransport {
-    return this._transport;
   }
 
   get gatewayConfig(): NymGatewayConfigService {
@@ -172,11 +226,10 @@ export class NymRuntimeController {
   }
 
   get fetchImpl(): typeof fetch {
-    return this._router.fetch as typeof fetch;
-  }
-
-  getRouter(): FailClosedTransportRouter {
-    return this._router;
+    return ((url: string, init?: RequestInit) => {
+      this.assertPreferenceSelected();
+      return this._router.fetch(url, init);
+    }) as typeof fetch;
   }
 
   /**
@@ -186,7 +239,10 @@ export class NymRuntimeController {
   getStellarFetch(): StellarReadFetch {
     return createStellarTransportFetch({
       getMode: () => this._router.mode,
-      fetchViaRouter: (url, init) => this._router.fetch(url, init),
+      fetchViaRouter: (url, init) => {
+        this.assertPreferenceSelected();
+        return this._router.fetch(url, init);
+      },
       getNymHorizonConfig: () => this._stellarNymHorizon,
     });
   }
@@ -215,25 +271,121 @@ export class NymRuntimeController {
     return this.getStellarNymHorizonConfig();
   }
 
-  setMode(mode: NymTransportMode): void {
-    if (mode === 'direct') {
-      throw new Error(
-        'Global Direct mode is disabled. Astrym Wallet operates in Nym-first mode fail-closed. Operation-specific Direct authorization is required.',
-      );
-    }
+  private applyMode(mode: NymTransportMode): void {
     this._mode = mode;
     this._router.setMode(mode);
   }
 
+  restorePreference(): Promise<NymRuntimeUiSnapshot> {
+    return this.enqueuePreferenceOperation(async () => {
+      let snapshot: NymTransportPreferenceSnapshot;
+      try {
+        snapshot = await this._preferenceService.load();
+      } catch {
+        snapshot = {
+          preferenceLoaded: false,
+          preferredMode: null,
+          preferenceError: 'STORAGE_READ_FAILED',
+        };
+      }
+
+      if (snapshot.preferenceLoaded && snapshot.preferredMode !== null) {
+        this.applyMode(snapshot.preferredMode);
+      } else {
+        this.applyMode('nym');
+      }
+      this._preferenceSnapshot = { ...snapshot };
+      return this.getSnapshot();
+    });
+  }
+
+  setPreferredMode(mode: NymTransportMode): Promise<NymRuntimeUiSnapshot> {
+    if (mode !== 'nym' && mode !== 'direct') {
+      return Promise.reject(new Error('Invalid transport mode'));
+    }
+
+    return this.enqueuePreferenceOperation(async () => {
+      let snapshot: NymTransportPreferenceSnapshot;
+      try {
+        snapshot = await this._preferenceService.setPreferredMode(mode);
+      } catch {
+        snapshot = {
+          preferenceLoaded: this._preferenceSnapshot.preferenceLoaded,
+          preferredMode: this._preferenceSnapshot.preferredMode,
+          preferenceError: 'STORAGE_WRITE_FAILED',
+        };
+      }
+
+      if (
+        snapshot.preferenceError !== null ||
+        !snapshot.preferenceLoaded ||
+        snapshot.preferredMode !== mode
+      ) {
+        this._preferenceSnapshot = { ...snapshot };
+        return this.getSnapshot();
+      }
+
+      this.applyMode(mode);
+      this._preferenceSnapshot = { ...snapshot };
+      return this.getSnapshot();
+    });
+  }
+
+  private enqueuePreferenceOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this._preferenceOperationQueue.then(operation);
+    this._preferenceOperationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  private assertPreferenceSelected(): void {
+    if (
+      !this._preferenceSnapshot.preferenceLoaded ||
+      this._preferenceSnapshot.preferredMode === null
+    ) {
+      throw Object.assign(new Error('Choose a transport preference before making network requests'), {
+        code: 'TRANSPORT_PREFERENCE_REQUIRED',
+      });
+    }
+  }
+
+  private assertNymHttpSmokePreference(
+    snapshot: NymTransportPreferenceSnapshot = this._preferenceSnapshot,
+  ): void {
+    if (
+      !snapshot.preferenceLoaded ||
+      snapshot.preferenceError !== null ||
+      snapshot.preferredMode !== 'nym' ||
+      this._mode !== 'nym' ||
+      this._router.mode !== 'nym'
+    ) {
+      throw new NymPreferenceRequiredError();
+    }
+  }
+
   getSnapshot(): NymRuntimeUiSnapshot {
     const snap = this._transport.getSnapshot();
+    const connected = this._readinessConfirmed && snap.connected;
     return {
       ...snap,
+      state: connected
+        ? 'connected'
+        : snap.state === 'connecting'
+          ? 'connecting'
+          : snap.connected
+            ? 'disconnected'
+            : snap.state,
+      connected,
       implementation:
         snap.implementation === 'mix-fetch'
           ? 'mix-fetch-offscreen'
           : snap.implementation,
       mode: this._mode,
+      preferredMode: this._preferenceSnapshot.preferredMode,
+      preferenceLoaded: this._preferenceSnapshot.preferenceLoaded,
+      preferenceError: this._preferenceSnapshot.preferenceError,
       documentReady: this._documentReady,
       diagnosticCode: this._diagnosticCode,
       diagnosticStage: this._diagnosticStage,
@@ -243,8 +395,16 @@ export class NymRuntimeController {
       gatewayIdentityKey: this._gatewayIdentityKey,
       gatewayHostPermissionGranted: this._gatewayHostPermissionGranted,
       gatewayHostPermissionPattern: this._gatewayHostPermissionPattern,
+      readinessToken: {
+        controllerEpoch: this._controllerEpoch,
+        readinessRevision: this._readinessRevision,
+      },
       stellarNymHorizon: this.getStellarNymHorizonConfig(),
     };
+  }
+
+  private advanceReadinessRevision(): void {
+    this._readinessRevision += 1;
   }
 
   private applyRemoteFields(remote: {
@@ -300,18 +460,42 @@ export class NymRuntimeController {
     if (this._connectInFlight) {
       return this._connectInFlight;
     }
-    this._connectInFlight = this.runConnect(options).finally(() => {
+    this._readinessConfirmed = false;
+    this.advanceReadinessRevision();
+    const connectPromise = this.enqueueLifecycleOperation(() => this.runConnect(options));
+    this._connectInFlight = connectPromise;
+    void connectPromise.then(
+      () => this.clearConnectInFlight(connectPromise),
+      () => this.clearConnectInFlight(connectPromise),
+    );
+    return connectPromise;
+  }
+
+  private clearConnectInFlight(connectPromise: Promise<NymRuntimeUiSnapshot>): void {
+    if (this._connectInFlight === connectPromise) {
       this._connectInFlight = null;
-    });
-    return this._connectInFlight;
+    }
+  }
+
+  private enqueueLifecycleOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this._lifecycleOperationQueue.then(operation);
+    this._lifecycleOperationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   private async runConnect(options?: {
     disableCoverTraffic?: boolean;
     preferredGateway?: string;
   }): Promise<NymRuntimeUiSnapshot> {
+    this.assertPreferenceSelected();
     // Document open ≠ MixFetch ready — cleared until createMixFetch succeeds.
     this._documentReady = false;
+    if (this._transport.getSnapshot().connected && !this._bridge.setupComplete) {
+      await this._transport.close();
+    }
     const config = await this.syncGatewayConfigUi();
     const wssOrigin = config.selectedGateway || config.gatewayOrigins[0] || null;
     if (!wssOrigin) {
@@ -368,21 +552,26 @@ export class NymRuntimeController {
       this._diagnosticStage = null;
       this._selectedGateway = wssOrigin;
       this._gatewayIdentityKey = identityKey;
-      this.setMode('nym');
       const remote = await this._bridge.queryStatus();
       if (remote) this.applyRemoteFields(remote);
-      // Only report MixFetch ready when transport + remote agree connected.
-      if (!this._transport.getSnapshot().connected) {
+      if (
+        !this._transport.getSnapshot().connected ||
+        !this._bridge.setupComplete ||
+        remote?.connected !== true
+      ) {
         this._documentReady = false;
+        this._readinessConfirmed = false;
         this._diagnosticCode = 'CONNECT_FAILED';
         throw new NymTransportError(
           'CONNECT_FAILED',
-          'Transport connect returned without MixFetch Ready',
+          'Transport connect returned without verified MixFetch Ready',
         );
       }
+      this._readinessConfirmed = true;
       return this.getSnapshot();
     } catch (cause) {
       this._documentReady = false;
+      this._readinessConfirmed = false;
       this._diagnosticCode =
         cause && typeof cause === 'object' && 'code' in cause
           ? String((cause as { code: string }).code)
@@ -417,13 +606,282 @@ export class NymRuntimeController {
    * HTTP round-trip via the existing MixFetch instance only.
    * Requires connected transport; never clearnet fallback.
    */
-  async runHttpSmoke(request?: NymHttpSmokeRequest): Promise<NymHttpSmokeResult> {
-    const connected = this._transport.getSnapshot().connected === true;
-    return runNymHttpSmoke({
-      connected,
-      request,
-      mixFetch: (url, init) => this._transport.fetch(url, init),
+  async runHttpSmoke(
+    request: NymHttpSmokeRequest | undefined,
+    readinessToken: NymReadinessToken,
+  ): Promise<NymRuntimeHttpSmokeResult> {
+    this.assertNymHttpSmokePreference();
+    if (this._httpSmokeCallInFlight) {
+      throw Object.assign(new Error('A Nym HTTP Smoke operation is already in progress'), {
+        code: 'HTTP_SMOKE_OPERATION_PENDING',
+      });
+    }
+    if (this._httpSmokeTrackingUnavailable) {
+      throw Object.assign(
+        new Error('Nym HTTP Smoke tracking is unavailable; refusing another dispatch'),
+        { code: 'HTTP_SMOKE_TRACKING_UNAVAILABLE' },
+      );
+    }
+    this._httpSmokeCallInFlight = true;
+    try {
+      await this.reconcileHttpSmokeOperation();
+      return await this.runHttpSmokeDispatch(request, readinessToken);
+    } finally {
+      this._httpSmokeCallInFlight = false;
+    }
+  }
+
+  private async reconcileHttpSmokeOperation(): Promise<void> {
+    let records: NymHttpSmokeOperationRecord[];
+    try {
+      records = await this._httpSmokeOperationStore.loadAll();
+    } catch (cause) {
+      this._httpSmokeTrackingUnavailable = true;
+      throw new Error(
+        `Unable to load or migrate Nym HTTP Smoke operation state: ${
+          cause instanceof Error ? cause.message : 'unknown storage error'
+        }`,
+      );
+    }
+
+    for (const operation of records) {
+      if (operation.state === 'completed' || operation.state === 'failed') continue;
+      await this.reconcileHttpSmokeOperationRecord(
+        operation,
+        operation.callerTimedOut,
+      );
+    }
+
+    const unresolved = (await this._httpSmokeOperationStore.loadAll()).filter(
+      (operation) =>
+        operation.state === 'pending' ||
+        operation.state === 'timed_out_pending' ||
+        operation.state === 'unknown',
+    );
+    this._httpSmokeOperation = unresolved.at(-1) ?? null;
+    if (unresolved.length > 0) {
+      throw Object.assign(
+        new Error(
+          unresolved.some((operation) => operation.state === 'unknown')
+            ? 'Previous Nym HTTP Smoke operation cannot be resolved; refusing duplicate dispatch'
+            : 'Previous Nym HTTP Smoke operation is still pending',
+        ),
+        { code: 'HTTP_SMOKE_OPERATION_PENDING' },
+      );
+    }
+  }
+
+  private async reconcileHttpSmokeOperationRecord(
+    operation: NymHttpSmokeOperationRecord,
+    callerTimedOut: boolean,
+  ): Promise<NymHttpSmokeOperationRecord['state']> {
+    let nextState: NymHttpSmokeOperationRecord['state'] = 'unknown';
+    let authoritativeStatus: Awaited<
+      ReturnType<OffscreenMixFetchBridge['queryHttpSmokeOperation']>
+    > = null;
+    try {
+      const remoteStatus = await this._bridge.queryHttpSmokeOperation(
+        operation.operationId,
+        operation.runtimeGeneration,
+      );
+      if (
+        remoteStatus?.operationId === operation.operationId &&
+        remoteStatus.runtimeGeneration === operation.runtimeGeneration
+      ) {
+        authoritativeStatus = remoteStatus;
+        if (remoteStatus.state === 'completed' || remoteStatus.state === 'failed') {
+          nextState = remoteStatus.state;
+        } else if (remoteStatus.state === 'pending') {
+          nextState = callerTimedOut ? 'timed_out_pending' : 'pending';
+        }
+      }
+    } catch {
+      nextState = 'unknown';
+    }
+
+    const reconciled = {
+      ...operation,
+      state: nextState,
+      callerTimedOut,
+      updatedAt: Date.now(),
+    };
+    this._httpSmokeOperation = reconciled;
+    try {
+      if (nextState === 'completed' || nextState === 'failed') {
+        if (!authoritativeStatus) {
+          throw new Error('Authoritative Nym HTTP Smoke status is unavailable');
+        }
+        await this._httpSmokeOperationStore.saveVerifiedTerminal(
+          reconciled,
+          authoritativeStatus,
+        );
+      } else {
+        await this._httpSmokeOperationStore.save(reconciled);
+      }
+    } catch (cause) {
+      this._httpSmokeTrackingUnavailable = true;
+      this._httpSmokeOperation = { ...reconciled, state: 'unknown' };
+      throw new Error(
+        `Unable to persist Nym HTTP Smoke operation state: ${
+          cause instanceof Error ? cause.message : 'unknown storage error'
+        }`,
+      );
+    }
+    return nextState;
+  }
+
+  private async runHttpSmokeDispatch(
+    request: NymHttpSmokeRequest | undefined,
+    readinessToken: NymReadinessToken,
+  ): Promise<NymRuntimeHttpSmokeResult> {
+    const remote = await this._bridge.queryStatus();
+    const localConnected =
+      this._transport.getSnapshot().connected === true &&
+      this._bridge.setupComplete;
+    const remoteConnected = remote?.connected === true;
+    if (!localConnected || !remoteConnected || !this._readinessConfirmed) {
+      if (this._readinessConfirmed) {
+        this._readinessConfirmed = false;
+        this.advanceReadinessRevision();
+      }
+      if (remote) this.applyRemoteFields(remote);
+      return {
+        ...createStaleReadinessResult(request),
+        snapshot: this.getSnapshot(),
+      };
+    }
+
+    const dispatch = await this.enqueuePreferenceOperation(async () => {
+      this.assertNymHttpSmokePreference();
+      const persistedPreference = await this._preferenceService.load();
+      this._preferenceSnapshot = { ...persistedPreference };
+      this.assertNymHttpSmokePreference(persistedPreference);
+
+      const currentToken = this.getSnapshot().readinessToken;
+      if (
+        readinessToken.controllerEpoch !== currentToken.controllerEpoch ||
+        readinessToken.readinessRevision !== currentToken.readinessRevision
+      ) {
+        return {
+          kind: 'stale' as const,
+          result: {
+            ...createStaleReadinessResult(request),
+            snapshot: this.getSnapshot(),
+          },
+        };
+      }
+
+      // Recheck readiness after the preference read; start MixFetch before releasing
+      // the preference queue, but do not hold it while pending. A later preference
+      // change cannot cancel a MixFetch request that has already been dispatched.
+      if (
+        !this._readinessConfirmed ||
+        !this._transport.getSnapshot().connected ||
+        !this._bridge.setupComplete
+      ) {
+        if (this._readinessConfirmed) {
+          this._readinessConfirmed = false;
+          this.advanceReadinessRevision();
+        }
+        return {
+          kind: 'stale' as const,
+          result: {
+            ...createStaleReadinessResult(request),
+            snapshot: this.getSnapshot(),
+          },
+        };
+      }
+
+      const currentRemote = await this._bridge.queryStatus();
+      if (
+        !currentRemote?.connected ||
+        !currentRemote.runtimeGeneration ||
+        currentRemote.runtimeGeneration !== remote.runtimeGeneration
+      ) {
+        return {
+          kind: 'stale' as const,
+          result: {
+            ...createStaleReadinessResult(request),
+            snapshot: this.getSnapshot(),
+          },
+        };
+      }
+
+      const operationId = createControllerEpoch();
+      const now = Date.now();
+      const operation: NymHttpSmokeOperationRecord = {
+        operationId,
+        runtimeGeneration: currentRemote.runtimeGeneration,
+        state: 'pending',
+        createdAt: now,
+        updatedAt: now,
+        callerTimedOut: false,
+      };
+      this._httpSmokeOperation = operation;
+      try {
+        await this._httpSmokeOperationStore.save(operation);
+      } catch (cause) {
+        this._httpSmokeTrackingUnavailable = true;
+        this._httpSmokeOperation = { ...operation, state: 'unknown' };
+        throw new Error(
+          `Unable to persist Nym HTTP Smoke operation before dispatch: ${
+            cause instanceof Error ? cause.message : 'unknown storage error'
+          }`,
+        );
+      }
+
+      const smokeOptions: {
+        connected: boolean;
+        request?: NymHttpSmokeRequest;
+        mixFetch: (
+          url: string,
+          init?: RequestInit & { httpSmokeOperationId?: string },
+        ) => Promise<Response>;
+        operationId: string;
+      } = {
+        connected: true,
+        mixFetch: (url, init) => this._transport.fetch(url, init),
+        operationId,
+      };
+      if (request !== undefined) smokeOptions.request = request;
+      const smokePromise = runNymHttpSmoke(smokeOptions);
+      return { kind: 'started' as const, smokePromise, operation };
     });
+
+    if (dispatch.kind === 'stale') return dispatch.result;
+    let result: NymHttpSmokeResult;
+    try {
+      result = await dispatch.smokePromise;
+    } catch (cause) {
+      await this.reconcileHttpSmokeOperationRecord(dispatch.operation, false);
+      throw cause;
+    }
+    if (!result.mixFetchInvoked) {
+      try {
+        await this._httpSmokeOperationStore.removeUndispatched(dispatch.operation);
+        this._httpSmokeOperation = null;
+      } catch (cause) {
+        this._httpSmokeTrackingUnavailable = true;
+        this._httpSmokeOperation = {
+          ...dispatch.operation,
+          state: 'unknown',
+          updatedAt: Date.now(),
+        };
+        throw new Error(
+          `Unable to remove undispatched Nym HTTP Smoke operation marker: ${
+            cause instanceof Error ? cause.message : 'unknown storage error'
+          }`,
+        );
+      }
+      return result;
+    }
+
+    const callerTimedOut = result.state === 'timeout';
+    await this.reconcileHttpSmokeOperationRecord(
+      dispatch.operation,
+      callerTimedOut,
+    );
+    return result;
   }
 
   /**
@@ -436,6 +894,7 @@ export class NymRuntimeController {
       transport?: NymTransportMode;
     },
   ): Promise<PublicDataFetchResult> {
+    this.assertPreferenceSelected();
     // Diagnostic isolation: the requested transport for a public-data fetch must NOT
     // mutate the shared wallet router mode. Derive a one-off fetch without setMode().
     const transport: NymTransportMode = (request?.transport === 'direct' || request?.transport === 'nym')
@@ -465,6 +924,7 @@ export class NymRuntimeController {
     horizonUrl?: string;
     timeoutMs?: number;
   }): Promise<StellarHorizonProbeResult> {
+    this.assertPreferenceSelected();
     // Diagnostic isolation: probe transport must NOT mutate the shared router mode.
     const transport: NymTransportMode = (options?.transport === 'direct' || options?.transport === 'nym')
       ? options.transport
@@ -506,27 +966,43 @@ export class NymRuntimeController {
   }
 
   async disconnect(): Promise<NymRuntimeUiSnapshot> {
-    if (this._connectInFlight) {
-      try {
-        await this._connectInFlight;
-      } catch {
-        /* still disconnect */
-      }
-    }
-    await this._transport.close();
-    this._documentReady = false;
-    this._diagnosticCode = 'OK';
-    this._diagnosticStage = null;
-    return this.getSnapshot();
+    this._connectInFlight = null;
+    this._readinessConfirmed = false;
+    this.advanceReadinessRevision();
+    return this.enqueueLifecycleOperation(async () => {
+      await this._transport.close();
+      this._documentReady = false;
+      this._diagnosticCode = 'OK';
+      this._diagnosticStage = null;
+      return this.getSnapshot();
+    });
+  }
+
+  async disconnectForLiveSmoke(): Promise<NymRuntimeUiSnapshot> {
+    this._connectInFlight = null;
+    this._readinessConfirmed = false;
+    this.advanceReadinessRevision();
+    return this.enqueueLifecycleOperation(async () => {
+      await this._transport.close({ strict: true });
+      this._documentReady = false;
+      this._diagnosticCode = 'OK';
+      this._diagnosticStage = null;
+      return this.getSnapshot();
+    });
   }
 
   async refreshStatus(): Promise<NymRuntimeUiSnapshot> {
     await this.syncGatewayConfigUi();
-    // Avoid opening offscreen solely for idle status when MixFetch is down —
-    // queryStatus ensures the document; that is OK but must not mark Ready.
     const remote = await this._bridge.queryStatus();
+    const localConnected =
+      this._transport.getSnapshot().connected === true &&
+      this._bridge.setupComplete;
     if (!remote) {
       this._documentReady = false;
+      if (this._readinessConfirmed) {
+        this._readinessConfirmed = false;
+        this.advanceReadinessRevision();
+      }
       if (this._diagnosticCode === 'OK' && !this._transport.getSnapshot().connected) {
         // Idle / no offscreen: not an error; document simply not open.
         this._diagnosticCode = 'OK';
@@ -538,18 +1014,9 @@ export class NymRuntimeController {
       return this.getSnapshot();
     }
     this.applyRemoteFields(remote);
-    // Soft teardown if SW thought connected but offscreen MixFetch is gone.
-    if (
-      !remote.connected &&
-      this._transport.getSnapshot().connected &&
-      !this._connectInFlight
-    ) {
-      try {
-        await this._transport.close();
-      } catch {
-        /* ignore */
-      }
-      this._documentReady = false;
+    if (!localConnected || remote.connected !== true) {
+      if (this._readinessConfirmed) this.advanceReadinessRevision();
+      this._readinessConfirmed = false;
     }
     return this.getSnapshot();
   }
@@ -557,8 +1024,15 @@ export class NymRuntimeController {
 
 let singleton: NymRuntimeController | null = null;
 
-export function getNymRuntimeController(): NymRuntimeController {
-  if (!singleton) singleton = new NymRuntimeController();
+export function getNymRuntimeController(
+  preferenceService?: NymTransportPreferenceService,
+): NymRuntimeController {
+  if (!singleton) {
+    if (!preferenceService) {
+      throw new Error('NymRuntimeController has not been initialized with persistent preferences');
+    }
+    singleton = new NymRuntimeController({ preferenceService });
+  }
   return singleton;
 }
 

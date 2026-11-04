@@ -17,17 +17,16 @@ Verified outside Mixnet with a clearnet curl for **format only** — that check 
 documentation evidence, not a Mixnet result. Live Mixnet success is only the
 in-extension **HTTP smoke (MixFetch)** path.
 
-## Provide your own echo URL
+## Destination policy
 
-1. HTTPS endpoint accepting `POST` + `application/json`.
-2. Response JSON must include the same `solanymProbeId` at:
-   - `json.solanymProbeId` (Postman Echo / httpbin style), or
-   - `data.solanymProbeId`, or
-   - top-level `solanymProbeId`.
-3. Set URL in the Nym panel override field, or build with
-   `VITE_NYM_HTTP_SMOKE_URL=https://…`, or pass `NYM_HTTP_SMOKE` IPC `{ url }`.
+Only `https://postman-echo.com/post` is approved. A per-call URL or
+`VITE_NYM_HTTP_SMOKE_URL` override is accepted only if it resolves to that exact
+HTTPS URL; other hosts, paths, query strings, and embedded credentials are
+rejected before MixFetch is invoked.
 
-Do not use Stellar Horizon/Friendbot or Solana RPC hosts (validation rejects them).
+The installed MixFetch bridge does not expose a documented redirect policy.
+The allowlist validates the initial URL only; redirects are not guaranteed to
+be blocked or revalidated.
 
 ## States
 

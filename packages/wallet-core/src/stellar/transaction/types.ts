@@ -66,8 +66,8 @@ export interface TrustedStellarTransferReview {
 }
 
 /**
- * Minimal non-sensitive session flag written to chrome.storage.session
- * prior to Horizon network dispatch to survive MV3 worker termination.
+ * Minimal non-sensitive write-ahead record persisted before Horizon dispatch.
+ * The storage key is retained for migration from earlier session-only storage.
  */
 export interface UncertainTxSessionFlag {
   schemaVersion: 1;
@@ -84,7 +84,19 @@ export interface UncertainTxSessionFlag {
   status: 'SUBMITTING' | 'SUBMISSION_UNKNOWN' | 'SUBMITTED_INGESTED' | 'INDETERMINATE';
 }
 
+/** Durable key; the same key is read from chrome.storage.session during migration. */
 export const SESSION_UNCERTAIN_KEY = 'solanym_uncertain_tx_v1';
+
+export interface IUncertainSubmissionStorage {
+  load(): Promise<UncertainTxSessionFlag | null>;
+  save(record: UncertainTxSessionFlag): Promise<void>;
+  clear(): Promise<void>;
+}
+
+export interface StellarSubmissionLifecycle {
+  beforeDispatch(record: UncertainTxSessionFlag): Promise<void>;
+  resolve(record: UncertainTxSessionFlag): Promise<void>;
+}
 
 /**
  * Non-sensitive transaction record schema for Module 2 persistent recovery.
@@ -174,20 +186,9 @@ export class StellarAccountNotFundedError extends StellarTransactionError {
 }
 
 /**
- * Thrown when Horizon definitively rejects or reports a failed transaction.
- *
- * **Stage 1 scope note — pre-inclusion vs. on-chain failure:**
- * ARCH-03 §4.6 distinguishes two `FAILED` sub-cases:
- *   - **Pre-inclusion rejection** (Horizon HTTP 400 with `extras.result_codes`): sequence number
- *     and fee are NOT consumed. The account lock can be safely released immediately.
- *   - **On-chain failure** (`tx.successful === false` in a closed ledger): sequence number and fee
- *     ARE consumed. Mandatory sequence/balance reconciliation must precede lock release.
- *
- * In Stage 1 both sub-cases surface as `StellarTransactionFailedError`. Stage 3 (Client
- * Hardening) will introduce `StellarHorizonDefinitiveRejectionError extends StellarTransactionError`
- * carrying a typed `resultCodes: string[]` field so the handler can apply the correct
- * reconciliation path without inspecting the raw error message. Until then, callers that
- * need to distinguish the two must inspect `cause` or catch from the specific HTTP context.
+ * Thrown only when Horizon returns a recognized HTTP 400 transaction-level code
+ * that proves the submission was rejected before inclusion. On-ledger failures
+ * are reported by confirmation and are not classified as submission rejections.
  */
 export class StellarTransactionFailedError extends StellarTransactionError {
   constructor(message: string, cause?: unknown) {
@@ -266,16 +267,13 @@ export class StellarClockSkewTooLargeError extends StellarTransactionError {
  * Thrown when signed transaction XDR fails local invariant verification before dispatch.
  */
 export class StellarXdrValidationError extends StellarTransactionError {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, cause?: unknown) {
+    super(message, cause);
     this.name = 'StellarXdrValidationError';
   }
 }
 
-/**
- * Thrown when the pre-dispatch write-ahead record cannot be persisted to storage.session.
- * Aborts transaction dispatch fail-closed.
- */
+/** Thrown when write-ahead persistence or uncertainty-state cleanup fails. */
 export class StellarWriteAheadFailedError extends StellarTransactionError {
   constructor(message: string, cause?: unknown) {
     super(message, cause);
