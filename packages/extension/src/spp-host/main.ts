@@ -22,6 +22,7 @@ import { SppHostController } from './hostController.js';
 import type { SppHostSnapshot } from './hostController.js';
 import { SPP_PACKAGE_PATHS } from './paths.js';
 import { installSppHostBridgeListener } from './sppHostBridgeListener.js';
+import { runSppHostAutoPrepareIfRequested } from './sppHostAutoPrepare.js';
 import { readHostLabSppIntegrationSnapshot } from './sppIntegrationProbe.js';
 import { STORAGE_LAB_EXECUTION_AUTHORIZED } from './storageLabPrep.js';
 
@@ -477,6 +478,19 @@ function main(): void {
         'free() attempt finished — worker termination / OPFS wipe are NOT asserted (see evidence nulls).';
     })();
   });
+
+  // Wallet-driven auto-prepare (no user navigation). Manual lab buttons remain available.
+  void runSppHostAutoPrepareIfRequested(controller)
+    .then(() => {
+      render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
+      statusBoot.textContent =
+        'Host listo (auto-prepare consumido o ausente). Lab manual sigue disponible.';
+    })
+    .catch((err: unknown) => {
+      statusBoot.textContent =
+        err instanceof Error ? err.message : 'Auto-prepare SPP falló';
+      render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
+    });
 }
 
 try {

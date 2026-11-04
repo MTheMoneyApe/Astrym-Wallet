@@ -32,8 +32,10 @@ describe('SppStatusPanel', () => {
     expect(markup).toContain('data-spp-availability="not_initialized"');
     expect(markup).toContain('SPP instalado, pero no inicializado');
     expect(markup).toContain('Pagos privados: no disponibles');
-    expect(markup).toContain('Sin acciones de pago');
+    expect(markup).toContain('data-testid="spp-prepare-phase"');
     expect(markup).toContain('data-spp-session="none"');
+    expect(markup).not.toContain('Preparar sesión SPP');
+    expect(markup).not.toContain('spp-host.html');
     expect(markup).not.toContain('Client.new');
     expect(markup).not.toContain('Deposit');
   });
@@ -101,7 +103,7 @@ describe('SppStatusPanel', () => {
       }),
     );
     expect(closed).toContain('data-spp-nym-gate="closed"');
-    expect(closed).toContain('requiere Nym conectado');
+    expect(closed).toContain('requieren conectar Nym');
     expect(closed).toContain('disabled');
 
     const open = renderToStaticMarkup(
@@ -124,7 +126,8 @@ describe('SppStatusPanel', () => {
     expect(open).toContain('data-spp-nym-gate="open"');
     expect(open).toContain('data-testid="spp-option-toggle"');
     expect(open).toContain('checked');
-    expect(open).toContain('Preparar sesión SPP');
+    expect(open).toContain('data-testid="spp-pool-contract"');
+    expect(open).not.toContain('Preparar sesión SPP');
     expect(open).toContain('Pagos privados: disponibles');
   });
 

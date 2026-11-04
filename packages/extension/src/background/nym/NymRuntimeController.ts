@@ -1,6 +1,7 @@
 /**
  * SW orchestration for Nym Mixnet: offscreen host + MixFetchNymTransport +
- * FailClosedTransportRouter. Nym-first mode fail-closed. Global Direct mode is disabled (Founder Decision F).
+ * FailClosedTransportRouter. Horizon/Direct is the default wallet transport;
+ * Nym is opt-in. While mode=nym, MixFetch stays fail-closed (no silent clearnet).
  */
 
 import type { NymMixFetchBridge } from '@solanym/wallet-core/src/nym/NymMixFetchBridge.js';
@@ -118,13 +119,12 @@ function defaultLocalStorage(): {
 
 export class NymRuntimeController {
   /**
-   * Nym-first: starts in Nym mode. Wallet operations fail closed if Nym is not
-   * connected. Global Direct mode is disabled; wallet operations fail closed
-   * without silent fallback.
+   * Default Direct so Horizon balances/sends work without Nym.
+   * User Connect switches to nym (fail-closed MixFetch). Disconnect returns to Direct.
    * Diagnostic requests (fetchPublicData, probeStellarHorizon) must not mutate this field.
    * Bridge is OffscreenMixFetchBridge by default; Android webapp injects NymSessionBridge.
    */
-  private _mode: NymTransportMode = 'nym';
+  private _mode: NymTransportMode = 'direct';
   private readonly _bridge: NymSessionBridge;
   private readonly _transport: MixFetchNymTransport;
   private readonly _router: FailClosedTransportRouter;
@@ -234,11 +234,6 @@ export class NymRuntimeController {
   }
 
   setMode(mode: NymTransportMode): void {
-    if (mode === 'direct') {
-      throw new Error(
-        'Global Direct mode is disabled. Astrym Wallet operates in Nym-first mode fail-closed. Operation-specific Direct authorization is required.',
-      );
-    }
     this._mode = mode;
     this._router.setMode(mode);
   }
@@ -541,8 +536,8 @@ export class NymRuntimeController {
     this._documentReady = false;
     this._diagnosticCode = 'OK';
     this._diagnosticStage = null;
-    // Stay in nym mode after disconnect (Founder Decision F): fetches fail closed
-    // until Connect; do not fall back to global Direct.
+    // Return to Direct so Horizon works again; private SPP remains gated on Nym.
+    this.setMode('direct');
     return this.getSnapshot();
   }
 

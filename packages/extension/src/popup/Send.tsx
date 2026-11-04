@@ -9,6 +9,7 @@ import type {
   ReviewStellarTransferResponse,
 } from '../shared/ipcTypes.js';
 import { parseSolToLamports } from '../shared/solToLamports.js';
+import { SppPrivateSend } from './SppPrivateSend.js';
 
 type SendStatus = 'idle' | 'preparing' | 'ready' | 'sending' | 'pending' | 'confirmed' | 'failed' | 'unknown';
 
@@ -93,14 +94,31 @@ export function resolveStellarSendFailure(error: unknown): {
   };
 }
 
-export function Send({ onBack, accountIndex, accountAddress, onComplete, onUsePrivatePayment }: {
+export function Send({
+  onBack,
+  accountIndex,
+  accountAddress,
+  onComplete,
+  privatePaymentsEnabled = false,
+  privatePreparePhase = 'idle',
+  privatePoolContract = '',
+  paymentMode = 'clear',
+  onPaymentModeChange,
+}: {
   onBack: () => void;
   accountIndex: number;
   accountAddress: string;
   onComplete: () => void;
+  /** @deprecated Prefer paymentMode + privatePaymentsEnabled */
   onUsePrivatePayment?: () => void;
+  privatePaymentsEnabled?: boolean;
+  privatePreparePhase?: string;
+  privatePoolContract?: string;
+  paymentMode?: 'clear' | 'private';
+  onPaymentModeChange?: (mode: 'clear' | 'private') => void;
 }) {
   const isStellar = accountAddress.startsWith('G') && accountAddress.length === 56;
+  const privateMode = paymentMode === 'private' && privatePaymentsEnabled && isStellar;
 
   const [destination, setDestination] = useState('');
   const [amountSol, setAmountSol] = useState('');
@@ -200,7 +218,7 @@ export function Send({ onBack, accountIndex, accountAddress, onComplete, onUsePr
     setStellarReview(null);
     setStatus((current) => current === 'sending' || current === 'pending' ? current : 'idle');
 
-    if (currentInputError || balanceLoading || balanceError) return;
+    if (privateMode || currentInputError || balanceLoading || balanceError) return;
 
     const timeout = window.setTimeout(() => {
       setEstimating(true);
@@ -248,7 +266,7 @@ export function Send({ onBack, accountIndex, accountAddress, onComplete, onUsePr
       window.clearTimeout(timeout);
       estimateRequestId.current += 1;
     };
-  }, [accountIndex, accountAddress, destination, amountSol, memo, currentInputError, balanceLoading, balanceError, isStellar]);
+  }, [accountIndex, accountAddress, destination, amountSol, memo, currentInputError, balanceLoading, balanceError, isStellar, privateMode]);
 
   const handleReview = async () => {
     if (!operationGate.current!.acquire()) return;
@@ -422,7 +440,7 @@ export function Send({ onBack, accountIndex, accountAddress, onComplete, onUsePr
           {signature && (
             <div style={{ marginTop: 10 }}>
               <span className="text-secondary" style={{ fontSize: '0.72rem' }}>{isStellar ? 'Hash de transacción' : 'Firma de transacción'}:</span>
-              <p style={{ fontFamily: 'monospace', fontSize: '0.74rem', overflowWrap: 'anywhere', margin: '4px 0 8px' }}>{signature}</p>
+              <p className="tx-hash" style={{ fontSize: '0.74rem', margin: '4px 0 8px' }}>{signature}</p>
               {isStellar && (
                 <a
                   href={`https://stellar.expert/explorer/testnet/tx/${signature}`}
@@ -458,8 +476,8 @@ export function Send({ onBack, accountIndex, accountAddress, onComplete, onUsePr
         <section className="card" style={{ display: 'grid', gap: 12 }}>
           <div><span className="text-secondary">Red</span><div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--accent-color)' }}>Stellar Testnet</div></div>
           <div><span className="text-secondary">Operación</span><div style={{ fontSize: '0.82rem' }}>{stellarReview.operationType === 'createAccount' ? 'Crear y fondear cuenta (destino nuevo)' : 'Pago nativo XLM'}</div></div>
-          <div><span className="text-secondary">Desde</span><div style={{ fontFamily: 'monospace', fontSize: '0.76rem', overflowWrap: 'anywhere' }}>{stellarReview.sourceAddress}</div></div>
-          <div><span className="text-secondary">Destinatario</span><div style={{ fontFamily: 'monospace', fontSize: '0.76rem', overflowWrap: 'anywhere' }}>{stellarReview.destinationAddress}</div></div>
+          <div><span className="text-secondary">Desde</span><div className="address-wrap" style={{ fontSize: '0.76rem' }}>{stellarReview.sourceAddress}</div></div>
+          <div><span className="text-secondary">Destinatario</span><div className="address-wrap" style={{ fontSize: '0.76rem' }}>{stellarReview.destinationAddress}</div></div>
           {stellarReview.memo && (
             <div><span className="text-secondary">Memo</span><div style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{stellarReview.memo}</div></div>
           )}
@@ -489,8 +507,8 @@ export function Send({ onBack, accountIndex, accountAddress, onComplete, onUsePr
         </div>
         {error && <p role="alert" className="error-text">{error}</p>}
         <section className="card" style={{ display: 'grid', gap: 12 }}>
-          <div><span className="text-secondary">Desde</span><div style={{ fontFamily: 'monospace', fontSize: '0.78rem', overflowWrap: 'anywhere' }}>{review.sourceAddress}</div></div>
-          <div><span className="text-secondary">Destinatario</span><div style={{ fontFamily: 'monospace', fontSize: '0.78rem', overflowWrap: 'anywhere' }}>{review.destinationAddress}</div></div>
+          <div><span className="text-secondary">Desde</span><div className="address-wrap" style={{ fontSize: '0.78rem' }}>{review.sourceAddress}</div></div>
+          <div><span className="text-secondary">Destinatario</span><div className="address-wrap" style={{ fontSize: '0.78rem' }}>{review.destinationAddress}</div></div>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Importe</span><strong>{formatLamportsAsSol(BigInt(review.lamports))} SOL</strong></div>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Comisión estimada (SOL)</span><strong>{formatLamportsAsSol(BigInt(review.feeLamports))} SOL</strong></div>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, paddingTop: 10, borderTop: '1px solid var(--border-dark)' }}><strong>Total estimado</strong><strong>{formatLamportsAsSol(reviewTotals.total)} SOL</strong></div>
@@ -531,11 +549,45 @@ export function Send({ onBack, accountIndex, accountAddress, onComplete, onUsePr
               )}
             </div>
           </label>
-          {onUsePrivatePayment ? (
-            <button type="button" className="btn-secondary" data-testid="use-spp-private-payment" onClick={onUsePrivatePayment}>
-              Pago privado SPP (Nym)
-            </button>
+          {privatePaymentsEnabled && isStellar ? (
+            <div
+              style={{ display: 'flex', gap: 8 }}
+              role="group"
+              aria-label="Tipo de transferencia"
+              data-testid="send-payment-mode"
+            >
+              <button
+                type="button"
+                className={paymentMode === 'clear' ? 'btn-primary' : 'btn-secondary'}
+                style={{ flex: 1 }}
+                data-testid="send-mode-standard"
+                onClick={() => onPaymentModeChange?.('clear')}
+              >
+                Estándar (Horizon)
+              </button>
+              <button
+                type="button"
+                className={paymentMode === 'private' ? 'btn-primary' : 'btn-secondary'}
+                style={{ flex: 1 }}
+                data-testid="send-mode-private"
+                onClick={() => onPaymentModeChange?.('private')}
+              >
+                Privada (SPP)
+              </button>
+            </div>
           ) : null}
+          {privateMode ? (
+            <SppPrivateSend
+              poolContract={privatePoolContract}
+              preparePhase={privatePreparePhase}
+              nymConnected={privatePaymentsEnabled}
+              destination={destination}
+              amount={amountSol}
+              onDestinationChange={(value) => { setDestination(value); setError(null); }}
+              onAmountChange={(value) => { setAmountSol(value); setError(null); }}
+            />
+          ) : null}
+          {!privateMode ? (
           <label style={{ display: 'grid', gap: 6, fontSize: '0.85rem' }}>
             Destinatario
             <input
@@ -548,10 +600,12 @@ export function Send({ onBack, accountIndex, accountAddress, onComplete, onUsePr
               aria-invalid={Boolean(destination) && Boolean(currentInputError)}
               onChange={(event) => { setDestination(event.target.value); setError(null); }}
               disabled={status === 'preparing'}
-              className="input-field"
-              style={{ width: '100%', minWidth: 0, fontFamily: 'monospace', fontSize: '0.78rem' }}
+              className="input-field address-wrap"
+              style={{ width: '100%', minWidth: 0 }}
             />
           </label>
+          ) : null}
+          {!privateMode ? (
           <label style={{ display: 'grid', gap: 6, fontSize: '0.85rem' }}>
             Importe ({isStellar ? 'XLM' : 'SOL'})
             <div style={{ display: 'flex', gap: 8 }}>
@@ -578,7 +632,8 @@ export function Send({ onBack, accountIndex, accountAddress, onComplete, onUsePr
               </button>
             </div>
           </label>
-          {isStellar && (
+          ) : null}
+          {!privateMode && isStellar ? (
             <label style={{ display: 'grid', gap: 6, fontSize: '0.85rem' }}>
               Memo (opcional, máx 28 car.)
               <input
@@ -594,7 +649,7 @@ export function Send({ onBack, accountIndex, accountAddress, onComplete, onUsePr
                 style={{ width: '100%', minWidth: 0 }}
               />
             </label>
-          )}
+          ) : null}
           <div style={{ minHeight: 18, display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: '0.76rem' }}>
             <span className="text-secondary">Saldo disponible</span>
             <span>
@@ -608,9 +663,12 @@ export function Send({ onBack, accountIndex, accountAddress, onComplete, onUsePr
           {balanceError && <p role="alert" className="error-text" style={{ margin: 0, fontSize: '0.8rem' }}>No se pudo verificar el saldo: {balanceError}</p>}
         </section>
 
-        {error && <p role="alert" className="error-text" style={{ margin: 0 }}>{error}</p>}
-        {currentInputError && (destination || amountSol) && <p role="alert" className="error-text" style={{ margin: 0, fontSize: '0.8rem' }}>{currentInputError}</p>}
+        {!privateMode && error ? <p role="alert" className="error-text" style={{ margin: 0 }}>{error}</p> : null}
+        {!privateMode && currentInputError && (destination || amountSol) ? (
+          <p role="alert" className="error-text" style={{ margin: 0, fontSize: '0.8rem' }}>{currentInputError}</p>
+        ) : null}
 
+        {!privateMode ? (
         <section className="card" aria-live="polite" style={{ padding: 14, display: 'grid', gap: 8 }}>
           <h3 style={{ margin: 0, fontSize: '0.94rem' }}>Resumen estimado</h3>
           {estimating ? (
@@ -642,18 +700,23 @@ export function Send({ onBack, accountIndex, accountAddress, onComplete, onUsePr
             <p className="text-secondary" style={{ margin: 0 }}>{estimateError || (currentInputError ? 'Introduce un destinatario y un importe válidos.' : 'Comisión no disponible hasta completar los datos.')}</p>
           )}
         </section>
+        ) : null}
 
-        <div aria-live="polite" className="text-secondary" style={{ minHeight: 18, fontSize: '0.76rem' }}>{status !== 'idle' ? statusText[status] : ''}</div>
-        <button
-          type="button"
-          onClick={handleReview}
-          disabled={!isFormReady}
-          className="btn-primary"
-          style={{ width: '100%' }}
-        >
-          {status === 'preparing' ? 'Preparando…' : 'Revisar envío'}
-        </button>
-        {estimateError && <p role="alert" className="error-text" style={{ margin: 0, fontSize: '0.76rem' }}>No se puede enviar sin una comisión fiable: {estimateError}</p>}
+        {!privateMode ? (
+          <>
+            <div aria-live="polite" className="text-secondary" style={{ minHeight: 18, fontSize: '0.76rem' }}>{status !== 'idle' ? statusText[status] : ''}</div>
+            <button
+              type="button"
+              onClick={handleReview}
+              disabled={!isFormReady}
+              className="btn-primary"
+              style={{ width: '100%' }}
+            >
+              {status === 'preparing' ? 'Preparando…' : 'Revisar envío'}
+            </button>
+            {estimateError && <p role="alert" className="error-text" style={{ margin: 0, fontSize: '0.76rem' }}>No se puede enviar sin una comisión fiable: {estimateError}</p>}
+          </>
+        ) : null}
       </div>
     </div>
   );

@@ -5,6 +5,10 @@ import {
   getNymRuntimeController,
   type NymRuntimeUiSnapshot,
 } from '../nym/NymRuntimeController.js';
+import {
+  clearSppAutoPrepareOnNymDisconnect,
+  startSppAutoPrepareAfterNymConnect,
+} from '../spp/sppAutoPrepare.js';
 import { clearSppPrivatePool } from '../spp/sppPrivatePoolRegistry.js';
 
 function toSnapshot(snap: NymRuntimeUiSnapshot): ValidatedResponsePayload<'NYM_STATUS'> {
@@ -43,6 +47,10 @@ export function createNymConnectHandler() {
       connectOpts.preferredGateway = payload.preferredGateway;
     }
     const snap = await ctrl.connect(connectOpts);
+    // Background SPP prepare (host internal). Failures stay in prepare status — never fake ready.
+    void startSppAutoPrepareAfterNymConnect().catch(() => {
+      /* status publisher records failure */
+    });
     return toSnapshot(snap);
   };
 }
@@ -53,6 +61,7 @@ export function createNymDisconnectHandler() {
   ): Promise<ValidatedResponsePayload<'NYM_DISCONNECT'>> => {
     // Fail-closed SPP: drop SW registry and tell spp-host to drop write pools.
     clearSppPrivatePool();
+    void clearSppAutoPrepareOnNymDisconnect();
     try {
       if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
         void chrome.runtime.sendMessage({
@@ -84,12 +93,8 @@ export function createNymSetModeHandler() {
   return async (
     payload: ValidatedRequestPayload<'NYM_SET_MODE'>,
   ): Promise<ValidatedResponsePayload<'NYM_SET_MODE'>> => {
-    if (payload.mode === 'direct') {
-      throw new Error(
-        'Global Direct mode is disabled. Astrym Wallet operates in Nym-first mode fail-closed. Operation-specific Direct authorization is required.',
-      );
-    }
     const ctrl = getNymRuntimeController();
+    // Direct is the default Horizon path. Nym mode stays fail-closed (no silent clearnet).
     ctrl.setMode(payload.mode);
     await ctrl.syncGatewayConfigUi();
     return toSnapshot(ctrl.getSnapshot());

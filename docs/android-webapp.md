@@ -12,7 +12,7 @@ La billetera se abre como **webapp independiente** en el navegador del teléfono
 | Permiso de host | `chrome.permissions.request` en el clic de Connect | No hace falta: el socket WSS es del navegador |
 | Gateway | Si no hay uno guardado, Connect fija el gateway verificado | Igual |
 
-Mientras el modo es `nym`, un error de MixFetch **no** reintenta por clearnet. **Disconnect** cierra MixFetch y **deja el modo en `nym`** (fail-closed; el Direct global está deshabilitado). Los datos del ledger de Stellar siguen siendo públicos: Nym oculta la metadata de red (tu IP frente al destino), no el libro.
+Por defecto la wallet usa Horizon en modo `direct`. **Connect** activa Nym; mientras el modo es `nym`, un error de MixFetch **no** reintenta por clearnet. **Disconnect** cierra MixFetch y **vuelve a `direct`**. Los datos del ledger de Stellar siguen siendo públicos: Nym oculta la metadata de red (tu IP frente al destino), no el libro.
 
 ## Abrirla en el teléfono
 

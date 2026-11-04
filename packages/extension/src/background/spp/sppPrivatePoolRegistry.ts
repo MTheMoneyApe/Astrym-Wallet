@@ -1,5 +1,6 @@
 import type { SppPrivatePool } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import type { SppHostPoolLifecycleState } from '../../shared/sppHostBridge.js';
+import { publishSppPrepareStatus, readStoredPoolContract } from './sppAutoPrepare.js';
 
 /**
  * In-memory registry for the background realm.
@@ -48,6 +49,35 @@ export function noteSppHostLifecycle(input: {
   if (input.state === 'cleared' || input.state === 'error') {
     pool = null;
   }
+  // Mirror verified host lifecycle into wallet prepare status (no invented ready).
+  void readStoredPoolContract()
+    .then((poolContract) => {
+      if (input.state === 'write_pool_ready') {
+        return publishSppPrepareStatus({
+          phase: 'ready',
+          message: input.message ?? 'PrivatePool verificado en el host.',
+          poolContract,
+        });
+      }
+      if (input.state === 'cleared') {
+        return publishSppPrepareStatus({
+          phase: 'idle',
+          message: input.message ?? 'Host SPP limpiado.',
+          poolContract,
+        });
+      }
+      if (input.state === 'error') {
+        return publishSppPrepareStatus({
+          phase: 'failed',
+          message: input.message ?? 'Error en el host SPP.',
+          poolContract,
+        });
+      }
+      return undefined;
+    })
+    .catch(() => {
+      /* prepare status is best-effort */
+    });
 }
 
 export function getSppHostLifecycle(): {

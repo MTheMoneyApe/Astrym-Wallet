@@ -102,9 +102,9 @@ describe('NymRuntimeController lifecycle', () => {
     expect(afterDisc.connected).toBe(false);
     expect(afterDisc.documentReady).toBe(false);
     expect(afterDisc.state).toBe('disconnected');
-    // Founder Decision F: disconnect stays nym fail-closed (no global Direct).
-    expect(afterDisc.mode).toBe('nym');
-    expect(ctrl.mode).toBe('nym');
+    // Disconnect returns to Direct so Horizon works without Nym.
+    expect(afterDisc.mode).toBe('direct');
+    expect(ctrl.mode).toBe('direct');
 
     const again = await ctrl.connect();
     expect(again.connected).toBe(true);
@@ -209,7 +209,7 @@ describe('NymRuntimeController lifecycle', () => {
 
     await expect(ctrl.connect()).rejects.toMatchObject({ code: 'CONNECT_FAILED' });
     expect(bridge.setup).not.toHaveBeenCalled();
-    // Failed connect must not flip away from Nym-first mode.
-    expect(ctrl.mode).toBe('nym');
+    // Failed connect must not leave the wallet stuck in Nym without MixFetch.
+    expect(ctrl.mode).toBe('direct');
   });
 });

@@ -100,9 +100,9 @@ function initBackgroundSynchronous() {
   (globalThis as any).nymRuntime = nymRuntime;
 
   // Stellar Horizon/Friendbot → FailClosedTransportRouter via MixFetch-aware adapter.
-  // Logical Horizon base = SDF testnet. In mode=nym, getStellarFetch() remaps to the
-  // validated effective base (default Ankr) — see stellarHorizonNymConfig.ts. No silent
-  // clearnet fallback. Default router mode starts as 'nym' (Nym-first). Direct requires explicit user action.
+  // Logical Horizon base = SDF testnet. Default mode=direct (Horizon without Nym).
+  // In mode=nym, getStellarFetch() remaps to the validated MixFetch-effective base
+  // (see stellarHorizonNymConfig.ts) with fail-closed routing (no silent clearnet).
   const stellarFetch = nymRuntime.getStellarFetch();
   const stellarReadClient = new StellarReadClient(
     STELLAR_TESTNET_HORIZON_URL,

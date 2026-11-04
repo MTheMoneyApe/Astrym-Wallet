@@ -1,10 +1,14 @@
 /**
- * SPP status for settings. Private payments can be selected only while Nym is connected.
+ * SPP status for settings. Private payments require Nym; host opens internally.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import type { SppIntegrationSnapshot } from '@solanym/wallet-core/src/stellar/spp/SppIntegrationStatus.js';
 import { describeSppIntegrationAvailability } from '@solanym/wallet-core/src/stellar/spp/SppIntegrationStatus.js';
+import {
+  describeSppPreparePhase,
+  type SppPrepareStatus,
+} from '../shared/sppPrepareStatus.js';
 
 export type SppStatusPanelProps = {
   snapshot: SppIntegrationSnapshot;
@@ -13,8 +17,10 @@ export type SppStatusPanelProps = {
   nymMode?: 'direct' | 'nym';
   nymConnected?: boolean;
   sppSelected?: boolean;
+  prepareStatus?: SppPrepareStatus | null;
+  poolContract?: string;
   onToggleSpp?: (next: boolean) => void;
-  onOpenHost?: () => void;
+  onPoolContractChange?: (contract: string) => void;
 };
 
 export function SppStatusPanel({
@@ -24,8 +30,10 @@ export function SppStatusPanel({
   nymMode = 'direct',
   nymConnected = false,
   sppSelected = false,
+  prepareStatus = null,
+  poolContract = '',
   onToggleSpp,
-  onOpenHost,
+  onPoolContractChange,
 }: SppStatusPanelProps) {
   const title = probing
     ? 'Comprobando assets SPP…'
@@ -33,6 +41,7 @@ export function SppStatusPanel({
   const showPaymentsOff = !snapshot.capabilities.private_payments;
   const showRoOff = !snapshot.capabilities.read_only_session;
   const nymReady = nymMode === 'nym' && nymConnected;
+  const [localPool, setLocalPool] = useState(poolContract);
 
   return (
     <div
@@ -66,14 +75,18 @@ export function SppStatusPanel({
         <li data-spp-cap="private_payments">
           Pagos privados: {showPaymentsOff ? 'no disponibles' : 'disponibles'}
         </li>
+        <li data-testid="spp-prepare-phase" data-spp-prepare={prepareStatus?.phase ?? 'idle'}>
+          Preparación: {describeSppPreparePhase(prepareStatus?.phase ?? 'idle')}
+          {prepareStatus?.message ? ` — ${prepareStatus.message}` : ''}
+        </li>
       </ul>
       <p
         style={{ margin: '10px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}
         data-spp-nym-gate={nymReady ? 'open' : 'closed'}
       >
         {nymReady
-          ? 'Nym está conectado. Puedes activar Stellar Private Payments. El RPC de Soroban sale por MixFetch y no cae a clearnet.'
-          : 'Stellar Private Payments requiere Nym conectado. En modo direct la opción queda cerrada.'}
+          ? 'Nym conectado. SPP se prepara en segundo plano (host interno). El RPC Soroban no cae a clearnet.'
+          : 'Horizon funciona sin Nym. Los pagos privados SPP requieren conectar Nym.'}
       </p>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, fontSize: '0.85rem' }}>
         <input
@@ -85,15 +98,25 @@ export function SppStatusPanel({
         />
         Usar pagos privados con Nym
       </label>
-      {nymReady && sppSelected ? (
-        <button type="button" className="btn-secondary" style={{ marginTop: 8 }} onClick={onOpenHost} data-testid="spp-open-host">
-          Preparar sesión SPP
-        </button>
-      ) : (
-        <p style={{ margin: '8px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
-          Sin acciones de pago. La sesión solo aparece si el host la publica; no se inventa un estado listo.
-        </p>
-      )}
+      {nymReady ? (
+        <label style={{ display: 'grid', gap: 4, marginTop: 10, fontSize: '0.8rem' }}>
+          Contrato del pool (C…)
+          <input
+            className="input-field"
+            data-testid="spp-pool-contract"
+            style={{ width: '100%' }}
+            value={localPool}
+            placeholder="C…"
+            onChange={(event) => {
+              setLocalPool(event.target.value);
+              onPoolContractChange?.(event.target.value.trim());
+            }}
+          />
+          <span className="text-secondary" style={{ fontSize: '0.7rem' }}>
+            Se guarda en la wallet. Sin C… válido la preparación se detiene en «awaiting_pool_config».
+          </span>
+        </label>
+      ) : null}
     </div>
   );
 }

@@ -2,9 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { sendIpcMessage } from './ipc.js';
 import { Send } from './Send.js';
 import { SppStatusPanel } from './SppStatusPanel.js';
-import { SppPrivateSend } from './SppPrivateSend.js';
-import { openSppHost } from '../spp-host/openSppHost.js';
 import { NymTransportPanel } from './NymTransportPanel.js';
+import {
+  SPP_POOL_CONTRACT_KEY,
+  SPP_PREPARE_STATUS_KEY,
+  type SppPrepareStatus,
+} from '../shared/sppPrepareStatus.js';
 import { isThemePalette, THEME_PRESETS, type ThemePalette } from './App.js';
 import { LOCK_TIMEOUT_OPTIONS_MINUTES, type LockTimeoutMinutes } from '@solanym/wallet-core/src/vault/IAlarmService.js';
 import {
@@ -282,7 +285,7 @@ export function AccountMenu({
   };
 
   return (
-    <div ref={wrapperRef} style={{ minWidth: 0, flex: 1 }}>
+    <div ref={wrapperRef} className="account-menu-wrap">
       <button
         ref={triggerRef}
         type="button"
@@ -297,7 +300,7 @@ export function AccountMenu({
           gap: 7,
           width: '100%',
           minWidth: 0,
-          minHeight: 38,
+          minHeight: 44,
           padding: '5px 9px',
           border: '1px solid var(--border-dark)',
           borderRadius: 10,
@@ -318,10 +321,10 @@ export function AccountMenu({
       {open && (
         <div
           id="solanym-account-menu"
+          className="account-menu-panel"
           role="menu"
           aria-label="Wallet accounts"
           aria-busy={loading || busy}
-          style={{ position: 'absolute', zIndex: 20, top: 'calc(100% + 8px)', right: 0, width: 'min(320px, calc(100vw - 40px))', maxHeight: 'min(440px, calc(100vh - 84px))', overflowY: 'auto', padding: 8, border: '1px solid var(--border-dark)', borderRadius: 12, background: 'var(--surface-color)', boxShadow: '0 12px 32px rgba(0,0,0,0.36)' }}
         >
           {loading ? (
             <p className="text-secondary" style={{ margin: 0, padding: '10px 8px', fontSize: '0.82rem' }}>Loading accounts...</p>
@@ -449,6 +452,7 @@ function ReceiveAddressView({ account, onBack }: { account: { address: string; l
           <img
             src={qrUrl}
             alt={`Receive address QR for ${account.address}`}
+            className="receive-qr"
             style={{ width: 200, height: 200, display: 'block', background: '#fff', borderRadius: 12, border: '1px solid var(--border-dark)' }}
             onError={() => setQrError('Unable to load QR. Please copy the address below.')}
           />
@@ -458,7 +462,7 @@ function ReceiveAddressView({ account, onBack }: { account: { address: string; l
 
         <div style={{ width: '100%' }}>
           <p className="text-secondary" style={{ margin: '0 0 8px', fontSize: '0.72rem' }}>Public address</p>
-          <div style={{ background: 'var(--bg-color)', border: '1px solid var(--border-dark)', borderRadius: 10, padding: '10px 12px', wordBreak: 'break-all', fontFamily: 'monospace', fontSize: '0.76rem', lineHeight: 1.5 }}>
+          <div className="address-wrap" style={{ background: 'var(--bg-color)', border: '1px solid var(--border-dark)', borderRadius: 10, padding: '10px 12px', fontSize: '0.76rem', lineHeight: 1.5 }}>
             {account.address}
           </div>
         </div>
@@ -875,6 +879,8 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   const [sppProbeDone, setSppProbeDone] = useState(false);
   const [sppSelected, setSppSelected] = useState(false);
   const [sendKind, setSendKind] = useState<'clear' | 'private'>('clear');
+  const [sppPrepareStatus, setSppPrepareStatus] = useState<SppPrepareStatus | null>(null);
+  const [sppPoolContract, setSppPoolContract] = useState('');
   const sppGenerationRef = useRef(0);
   const sppHandleRef = useRef<SppSessionStatusHandle | null>(null);
 
@@ -955,6 +961,35 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
       setSendKind('clear');
     }
   }, [nymReadyForSpp, sppSelected, sendKind]);
+
+  // Auto-enable SPP option when Nym connects (user can still turn it off).
+  useEffect(() => {
+    if (nymReadyForSpp) setSppSelected(true);
+  }, [nymReadyForSpp]);
+
+  useEffect(() => {
+    if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) return;
+    chrome.storage.local.get([SPP_PREPARE_STATUS_KEY, SPP_POOL_CONTRACT_KEY], (res) => {
+      const prep = res[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+      if (prep?.phase) setSppPrepareStatus(prep);
+      const pool = res[SPP_POOL_CONTRACT_KEY];
+      if (typeof pool === 'string') setSppPoolContract(pool);
+    });
+    const onChanged = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ) => {
+      if (area !== 'local') return;
+      if (changes[SPP_PREPARE_STATUS_KEY]?.newValue) {
+        setSppPrepareStatus(changes[SPP_PREPARE_STATUS_KEY].newValue as SppPrepareStatus);
+      }
+      if (typeof changes[SPP_POOL_CONTRACT_KEY]?.newValue === 'string') {
+        setSppPoolContract(changes[SPP_POOL_CONTRACT_KEY].newValue as string);
+      }
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, []);
   const [nymBusy, setNymBusy] = useState(false);
   const [nymHttpSmokeResult, setNymHttpSmokeResult] = useState<NymHttpSmokeUiResult | null>(
     null,
@@ -1447,16 +1482,17 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   }
 
   if (view === 'send' && account) {
-    if (sendKind === 'private' && sppSelected && nymReadyForSpp) {
-      return <SppPrivateSend onBack={() => { setSendKind('clear'); setView('dashboard'); }} />;
-    }
     return (
       <Send
         onBack={() => setView('dashboard')}
         accountIndex={account.index}
         accountAddress={account.address}
         onComplete={() => setView('dashboard')}
-        {...(sppSelected && nymReadyForSpp ? { onUsePrivatePayment: () => setSendKind('private') } : {})}
+        privatePaymentsEnabled={sppSelected && nymReadyForSpp}
+        privatePreparePhase={sppPrepareStatus?.phase ?? 'idle'}
+        privatePoolContract={sppPoolContract}
+        paymentMode={sendKind}
+        onPaymentModeChange={setSendKind}
       />
     );
   }
@@ -1477,12 +1513,19 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           nymMode={nymSnapshot.mode}
           nymConnected={nymSnapshot.connected}
           sppSelected={sppSelected}
+          prepareStatus={sppPrepareStatus}
+          poolContract={sppPoolContract}
           onToggleSpp={(next) => {
             if (!nymReadyForSpp) return;
             setSppSelected(next);
             if (!next) setSendKind('clear');
           }}
-          onOpenHost={openSppHost}
+          onPoolContractChange={(contract) => {
+            setSppPoolContract(contract);
+            if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+              void chrome.storage.local.set({ [SPP_POOL_CONTRACT_KEY]: contract });
+            }
+          }}
         />
         <NymTransportPanel
           snapshot={nymSnapshot}
