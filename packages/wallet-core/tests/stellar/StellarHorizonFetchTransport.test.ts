@@ -12,7 +12,11 @@ describe('StellarTransactionClient injected Horizon fetch', () => {
     const calledUrls: string[] = [];
     const fetchImpl: StellarReadFetch = async (url) => {
       calledUrls.push(url);
-      return new Response('{"status":404}', { status: 404, statusText: 'Not Found' });
+      return new Response(JSON.stringify({ status: 404, title: 'Resource Missing' }), {
+        status: 404,
+        statusText: 'Not Found',
+        headers: { 'Content-Type': 'application/problem+json' },
+      });
     };
     const client = new StellarTransactionClient(
       'https://horizon-testnet.stellar.org',
@@ -28,7 +32,6 @@ describe('StellarTransactionClient injected Horizon fetch', () => {
       },
       { signTransaction: async (data: Uint8Array) => sourceKp.sign(data) },
       'Test SDF Network ; September 2015',
-      undefined,
       fetchImpl,
     );
 

@@ -134,9 +134,13 @@ describe('StellarTransactionClient', () => {
         return new Response(
           JSON.stringify({
             id: addr,
+            account_id: addr,
             sequence: acc.sequence ?? '100',
             subentry_count: acc.subentry_count ?? 0,
             balances: acc.balances ?? [{ asset_type: 'native', balance: '100.0000000' }],
+            // Horizon AccountResponse exposes data_attr for SEP-29 memo checks.
+            data_attr: {},
+            data: {},
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
@@ -474,25 +478,21 @@ describe('StellarTransactionClient', () => {
       }
     });
 
-    it('sendXlm signs and submits successfully when globalThis.Buffer is undefined', async () => {
-      const originalBuffer = (globalThis as any).Buffer;
-      try {
-        delete (globalThis as any).Buffer;
+    it('sendXlm signs and submits successfully through injected transport', async () => {
+      // Companion to uint8ArrayToBase64 Buffer-free encoding coverage above.
+      // stellar-sdk AccountResponse still needs Buffer globally in this SDK version.
+      const result = await client.sendXlm({
+        sourceAccountIndex: 0,
+        destination: destAddress,
+        amountXlm: '10.0',
+        approvedFeeStroops: 100,
+      });
 
-        const result = await client.sendXlm({
-          sourceAccountIndex: 0,
-          destination: destAddress,
-          amountXlm: '10.0',
-          approvedFeeStroops: 100,
-        });
-
-        expect(result.status).toBe('confirmed');
-        expect(result.hash).toBe(
-          'b78a3b4c469b284360d131dab7c3c313abf9e606b9705e0e7e9953a360fb1275',
-        );
-      } finally {
-        (globalThis as any).Buffer = originalBuffer;
-      }
+      expect(result.status).toBe('confirmed');
+      expect(result.hash).toBe(
+        'b78a3b4c469b284360d131dab7c3c313abf9e606b9705e0e7e9953a360fb1275',
+      );
+      expect(mockFetch).toHaveBeenCalled();
     });
   });
 

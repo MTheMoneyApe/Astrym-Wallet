@@ -6,6 +6,7 @@
   "dependencies": {
     "@solana/kit": "^2.3.0",
     "@solanym/wallet-core": "workspace:*",
+    "@stellar/stellar-sdk": "^17.3.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "webextension-polyfill": "^0.12.0",
