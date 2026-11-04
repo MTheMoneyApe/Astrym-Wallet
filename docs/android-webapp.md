@@ -12,7 +12,7 @@ La billetera se abre como **webapp independiente** en el navegador del teléfono
 | Permiso de host | `chrome.permissions.request` en el clic de Connect | No hace falta: el socket WSS es del navegador |
 | Gateway | Si no hay uno guardado, Connect fija el gateway verificado | Igual |
 
-Mientras el modo es `nym`, un error de MixFetch **no** reintenta por clearnet. **Disconnect** vuelve el transporte a `direct`. Los datos del ledger de Stellar siguen siendo públicos: Nym oculta la metadata de red (tu IP frente al destino), no el libro.
+Mientras el modo es `nym`, un error de MixFetch **no** reintenta por clearnet. **Disconnect** cierra MixFetch y **deja el modo en `nym`** (fail-closed; el Direct global está deshabilitado). Los datos del ledger de Stellar siguen siendo públicos: Nym oculta la metadata de red (tu IP frente al destino), no el libro.
 
 ## Abrirla en el teléfono
 
@@ -49,6 +49,6 @@ El botón **Modo Android** abre `webapp.html` en una pestaña con `chrome.tabs.c
 3. En la extensión, el permiso de host del gateway se pide en ese mismo clic. En Android ese paso no existe.
 4. **Ready** solo cuando `createMixFetch` termina. El documento abierto no basta.
 5. Las lecturas Horizon, Friendbot y el envío Stellar (`StellarTransactionClient`) usan el mismo fetch. En modo `nym` salen por MixFetch.
-6. **Disconnect** cierra MixFetch y deja el modo en `direct`.
+6. **Disconnect** cierra MixFetch y deja el modo en `nym` (fail-closed hasta el próximo Connect).
 
 Los assets WASM (`nym-mixfetch/`) se copian al arrancar `dev:webapp` / `build:webapp` y también al build de la extensión. Deben quedar como hermanos de `index.js` para que `import.meta.url` resuelva el worker.

@@ -574,8 +574,8 @@ export function NymTransportPanel({
       <p style={{ margin: '10px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
         Connect usa el gateway verificado si no hay uno guardado. En la extensión, el permiso de
         host se pide en el mismo clic. En el webapp de Android no hay API de permisos MV3: MixFetch
-        corre en esta página. Disconnect vuelve a modo direct. Mientras el modo sigue en nym, un
-        fallo no cae a clearnet.
+        corre en esta página. Disconnect cierra MixFetch y deja el modo en nym (fail-closed; sin
+        Direct global). Mientras el modo sigue en nym, un fallo no cae a clearnet.
       </p>
       {mode === 'nym' && !ready ? (
         <p style={{ margin: '6px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
