@@ -152,10 +152,10 @@ export function App() {
   );
 
   return (
-    <>
+    <div className="wallet-shell">
       <OpenAndroidWebappBar />
       {screen}
-    </>
+    </div>
   );
 }
 

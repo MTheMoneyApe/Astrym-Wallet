@@ -33,3 +33,6 @@ Thumbs.db
 coverage/
 packages/extension/.vitest/
 **/.vitest/
+packages/extension/test-results/
+**/playwright-report/
+.vercel/

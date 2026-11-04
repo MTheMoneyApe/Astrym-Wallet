@@ -24,83 +24,38 @@ export function Unlock({ onUnlock }: { onUnlock: () => void }) {
   };
 
   return (
-    <div style={{ padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-      
-<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 24 }}>
-  <img
-    src="/icons/sym-logo.png"
-    alt="Astrym"
-    style={{
-      width: 112,
-      height: 112,
-      objectFit: 'contain',
-      borderRadius: 20
-    }}
-  />
-  <h2
-    style={{
-      color: '#F4F7F8',
-      margin: 0,
-      fontSize: 22,
-      fontWeight: 600,
-      letterSpacing: '0.5px'
-    }}
-  >
-    Astrym
-  </h2>
-  <span style={{ color: '#8FE8D0', fontSize: 11, letterSpacing: '2px' }}>
-    PRIVATE BY DESIGN
-  </span>
-</div>
+    <div className="unlock-screen">
+      <div className="unlock-brand">
+        <img className="unlock-logo" src="/icons/sym-logo.png" alt="Astrym" />
+        <h2 className="unlock-title">Astrym</h2>
+        <span className="unlock-tagline">PRIVATE BY DESIGN</span>
+      </div>
 
-      <form onSubmit={handleUnlock} style={{ width: '100%', maxWidth: 300, display: 'flex', flexDirection: 'column', gap: 15 }}>
-        <div style={{ position: 'relative' }}>
-          <input 
-            type={showPassword ? "text" : "password"} 
+      <form className="unlock-form" onSubmit={handleUnlock}>
+        <div className="unlock-field">
+          <input
+            className="input-field"
+            type={showPassword ? 'text' : 'password'}
             placeholder="Enter your password"
-            value={password} 
-            onChange={(e) => setPassword(e.target.value)} 
-            style={{ 
-              width: '100%', 
-              padding: '12px', 
-              boxSizing: 'border-box',
-              background: '#1B222B',
-              border: '1px solid #333',
-              color: 'white',
-              borderRadius: 6,
-              outline: 'none'
-            }}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
           />
-          <button 
+          <button
             type="button"
+            className="unlock-toggle"
             onClick={() => setShowPassword(!showPassword)}
-            style={{ 
-              position: 'absolute', 
-              right: 10, 
-              top: '50%', 
-              transform: 'translateY(-50%)',
-              background: 'none',
-              border: 'none',
-              color: '#888',
-              cursor: 'pointer'
-            }}
+            aria-label={showPassword ? 'Hide password' : 'Show password'}
           >
             {showPassword ? 'Hide' : 'Show'}
           </button>
         </div>
-        {error && <p style={{ color: '#ff6b6b', fontSize: '0.9em', margin: 0 }}>{error}</p>}
-        <button 
-          type="submit" 
+        {error ? <p className="error-text" role="alert" style={{ margin: 0 }}>{error}</p> : null}
+        <button
+          type="submit"
+          className="btn-primary"
           disabled={loading || !password}
-          style={{ 
-            padding: '12px', 
-            background: loading || !password ? '#555' : '#8FE8D0', 
-            color: loading || !password ? '#888' : '#11151B',
-            border: 'none',
-            borderRadius: 6,
-            fontWeight: 'bold',
-            cursor: loading || !password ? 'not-allowed' : 'pointer'
-          }}
+          style={{ width: '100%' }}
         >
           {loading ? 'Unlocking...' : 'Unlock'}
         </button>
