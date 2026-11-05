@@ -1,4 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('webextension-polyfill', () => ({
+  default: {
+    runtime: {
+      id: 'test-extension-id',
+      getURL: (path: string) => `chrome-extension://test-extension-id${path.startsWith('/') ? path : `/${path}`}`,
+    },
+  },
+}));
+
 import { SPP_HOST_BRIDGE_CHANNEL } from '../../../src/shared/sppHostBridge.js';
 
 vi.mock('../../../src/background/accounts/ActiveAccountManager.js', () => ({

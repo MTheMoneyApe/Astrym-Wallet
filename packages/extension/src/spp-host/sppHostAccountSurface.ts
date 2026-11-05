@@ -7,10 +7,10 @@
 
 import type { Client } from 'stellar-private-payments';
 import { assertSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
-import {
-  assertFeeWithinCeiling,
-  maxFeeStroopsForOperation,
-} from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import { Networks } from '@stellar/stellar-sdk';
+import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import { NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
+import { runWithSppHostFeeScope } from './sppHostFeeScope.js';
 import { withSppHostNymFetchProxy } from './sppHostNymFetchProxy.js';
 
 type SdkAccount = {
@@ -178,7 +178,6 @@ export async function lookupSppRecipient(address: string): Promise<SppRecipientL
 export async function registerSppHostPublicKeys(): Promise<{ txHash: string }> {
   const { account, userAddress, poolContract, rpcUrl } = await requireBound();
   const maxFeeStroops = maxFeeStroopsForOperation('register_public_keys');
-  assertFeeWithinCeiling('register_public_keys', maxFeeStroops);
   assertSppTestnetBroadcastAuthorized({
     network: 'testnet',
     operation: 'register_public_keys',
@@ -193,11 +192,20 @@ export async function registerSppHostPublicKeys(): Promise<{ txHash: string }> {
     transport: 'nym',
     preparedAt: new Date().toISOString(),
   });
-  return withSppHostNymFetchProxy(rpcUrl, async () => {
-    const txHash = await account.registerPublicKeys();
-    if (!txHash || typeof txHash !== 'string') {
-      throw new Error('registerPublicKeys returned no hash (fail-closed).');
-    }
-    return { txHash };
-  });
+  return runWithSppHostFeeScope(
+    {
+      operation: 'register_public_keys',
+      approvedMaxFeeStroops: maxFeeStroops,
+      minResourceFeeStroops: null,
+      allowedContractId: NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS.public_key_registry,
+      networkPassphrase: Networks.TESTNET,
+    },
+    () => withSppHostNymFetchProxy(rpcUrl, async () => {
+      const txHash = await account.registerPublicKeys();
+      if (!txHash || typeof txHash !== 'string') {
+        throw new Error('registerPublicKeys returned no hash (fail-closed).');
+      }
+      return { txHash };
+    }),
+  );
 }

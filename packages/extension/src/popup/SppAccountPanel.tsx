@@ -5,6 +5,8 @@
 
 import React, { useState } from 'react';
 import { StrKey } from '@solanym/wallet-core';
+import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import { NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import { sendIpcMessage } from './ipc.js';
 
 export type SppAccountPanelProps = {
@@ -54,6 +56,7 @@ export function SppAccountPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [registerNote, setRegisterNote] = useState<string | null>(null);
+  const [confirmRegister, setConfirmRegister] = useState(false);
 
   const gateClosed = !nymConnected || !writeReady;
 
@@ -103,6 +106,10 @@ export function SppAccountPanel({
   const registerKeys = () => {
     setError(null);
     setRegisterNote(null);
+    if (!confirmRegister) {
+      setConfirmRegister(true);
+      return;
+    }
     setBusy('register');
     void sendIpcMessage('SPP_REGISTER_PUBLIC_KEYS', { acknowledgeBroadcast: true })
       .then((result) => {
@@ -122,7 +129,10 @@ export function SppAccountPanel({
           );
         }
       })
-      .finally(() => setBusy(null));
+      .finally(() => {
+        setBusy(null);
+        setConfirmRegister(false);
+      });
   };
 
   return (
@@ -165,12 +175,33 @@ export function SppAccountPanel({
           type="button"
           className="btn-secondary"
           data-testid="spp-account-register"
+          data-confirm={confirmRegister ? 'yes' : 'no'}
           disabled={gateClosed || busy !== null}
           onClick={registerKeys}
         >
-          {busy === 'register' ? 'Registrando…' : 'Registrar claves (gated)'}
+          {busy === 'register'
+            ? 'Registrando…'
+            : confirmRegister
+              ? 'Confirmar registro (Testnet)'
+              : 'Registrar claves (gated)'}
         </button>
       </div>
+      {confirmRegister ? (
+        <div data-testid="spp-register-review" style={{ fontSize: '0.78rem', display: 'grid', gap: 4 }}>
+          <strong>Confirmar registro de claves (Testnet)</strong>
+          <span>Operación: register_public_keys</span>
+          <span>Red: Stellar Testnet</span>
+          <span className="address-wrap">
+            Registry: {NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS.public_key_registry}
+          </span>
+          <span>
+            maxFee techo: {maxFeeStroopsForOperation('register_public_keys')} stroops
+          </span>
+          <span className="text-secondary">
+            El segundo clic envía el acuse. Sin ese acuse el servicio no registra.
+          </span>
+        </div>
+      ) : null}
 
       {snapshot ? (
         <div

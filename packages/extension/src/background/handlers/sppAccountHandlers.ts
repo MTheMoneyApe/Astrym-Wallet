@@ -3,10 +3,18 @@
  * Proxies to spp-host over the bridge; never invents success.
  */
 
+import { Networks } from '@stellar/stellar-sdk';
+import browser from 'webextension-polyfill';
+import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import { mintSppSignApproval } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
+import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import type { ValidatedRequestPayload, ValidatedResponsePayload } from '../../shared/ipcTypes.js';
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
 import { getSppHostLifecycle } from '../spp/sppPrivatePoolRegistry.js';
 import { querySppHostAccount } from '../spp/sppHostAccountProxy.js';
+import { isTrustedWalletPageUrl } from '../trustedWalletOrigin.js';
+import { resolveActiveStellarAddress } from '../spp/sppBoundAccount.js';
 
 function requireNymAndWritePool(): { nymMode: 'direct' | 'nym'; nymConnected: boolean } {
   const snap = getNymRuntimeController().getSnapshot();
@@ -25,6 +33,13 @@ function requireNymAndWritePool(): { nymMode: 'direct' | 'nym'; nymConnected: bo
     );
   }
   return { nymMode: snap.mode, nymConnected: snap.connected };
+}
+
+function requiredKeyManager(keyManager: KeyManager | undefined): KeyManager {
+  if (!keyManager) {
+    throw Object.assign(new Error('Registration signer is not configured'), { name: 'UNAUTHORIZED' });
+  }
+  return keyManager;
 }
 
 function mapHostFailure(result: { ok: false; code: string; message: string }): never {
@@ -73,10 +88,42 @@ export function createSppRecipientLookupHandler() {
   };
 }
 
-export function createSppRegisterPublicKeysHandler() {
+export function createSppRegisterPublicKeysHandler(deps: {
+  keyManager?: KeyManager;
+  resolveAccount?: () => Promise<string>;
+}) {
   return async (
-    _payload: ValidatedRequestPayload<'SPP_REGISTER_PUBLIC_KEYS'>,
+    payload: ValidatedRequestPayload<'SPP_REGISTER_PUBLIC_KEYS'>,
+    sender?: browser.Runtime.MessageSender,
   ): Promise<ValidatedResponsePayload<'SPP_REGISTER_PUBLIC_KEYS'>> => {
+    if (payload.acknowledgeBroadcast !== true) {
+      throw Object.assign(
+        new Error('Registration requires an explicit broadcast acknowledgement'),
+        { name: 'UNAUTHORIZED' },
+      );
+    }
+    if (!sender || sender.id !== browser.runtime.id || !isTrustedWalletPageUrl(sender.url)) {
+      throw Object.assign(
+        new Error('Registration must originate from trusted wallet UI'),
+        { name: 'UNAUTHORIZED' },
+      );
+    }
+    const address = deps.resolveAccount
+      ? await deps.resolveAccount()
+      : (await resolveActiveStellarAddress(requiredKeyManager(deps.keyManager))).address;
+    mintSppSignApproval({
+      operation: 'register_public_keys',
+      amountStroops: null,
+      recipient: null,
+      networkPassphrase: Networks.TESTNET,
+      poolContractId: null,
+      registryContractId: NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS.public_key_registry,
+      tokenContractId: null,
+      maxFeeStroops: maxFeeStroopsForOperation('register_public_keys'),
+      minResourceFeeStroops: null,
+      account: address,
+      exactMessage: null,
+    });
     const nym = requireNymAndWritePool();
     const result = await querySppHostAccount({ ...nym, action: 'register_public_keys' });
     if (!result.ok) mapHostFailure(result);

@@ -12,16 +12,15 @@
  * until that registration completes. WalletSigner IPC is remote via SW.
  */
 
+import { Networks } from '@stellar/stellar-sdk';
 import type {
   SppPrivateOperation,
   SppPrivatePool,
   SppPrivatePoolResult,
 } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import { assertSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
-import {
-  assertFeeWithinCeiling,
-  maxFeeStroopsForOperation,
-} from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import { runWithSppHostFeeScope } from './sppHostFeeScope.js';
 import {
   SppMultiAccountSequenceTracker,
   abortSppAccountOperation,
@@ -244,17 +243,7 @@ export async function executeSppHostWritePool(
   const activePool = writePool;
   const amount = BigInt(payload.amountStroops);
   const operation: SppPrivateOperation = payload.operation;
-
   const maxFeeStroops = maxFeeStroopsForOperation(operation);
-  try {
-    assertFeeWithinCeiling(operation, maxFeeStroops);
-  } catch (cause) {
-    return failureResult(
-      id,
-      'INVALID_REQUEST',
-      cause instanceof Error ? cause.message : 'Fee ceiling violated',
-    );
-  }
 
   let sequenceBegun: SequenceInFlight | null = null;
 
@@ -325,7 +314,19 @@ export async function executeSppHostWritePool(
     };
 
     // SDK RPC from this page must go through SW Nym fetch — no silent clearnet.
-    const result = await withSppHostNymFetchProxy(payload.rpcUrl, run);
+    // The fee scope makes the remote signer enforce tx.fee / minResourceFee
+    // with the same helper the service worker uses. There is no self-check
+    // of the ceiling against itself.
+    const result = await runWithSppHostFeeScope(
+      {
+        operation,
+        approvedMaxFeeStroops: maxFeeStroops,
+        minResourceFeeStroops: null,
+        allowedContractId: payload.poolContract,
+        networkPassphrase: Networks.TESTNET,
+      },
+      () => withSppHostNymFetchProxy(payload.rpcUrl, run),
+    );
     const mapped = mapPoolResult(result);
 
     if (sequenceBegun) {

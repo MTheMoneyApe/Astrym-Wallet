@@ -49,6 +49,7 @@ import {
   createSppRegisterPublicKeysHandler,
 } from './handlers/sppAccountHandlers.js';
 import { noteSppHostLifecycle } from './spp/sppPrivatePoolRegistry.js';
+import { isSppHostDocumentSender } from './trustedWalletOrigin.js';
 import {
   handleSppHostNymFetchRequest,
   handleSppHostSignRequest,
@@ -186,10 +187,10 @@ function initBackgroundSynchronous() {
   router.registerHandler('SEND_STELLAR_TRANSFER', createSendStellarTransferHandler(stellarTxClient, stellarTransferConfirmationTracker) as any);
   router.registerHandler('CONFIRM_STELLAR_TRANSFER', createConfirmStellarTransferHandler(stellarTransferConfirmationTracker) as any);
 
-  router.registerHandler('SPP_PRIVATE_PAYMENT', createSppPrivatePaymentHandler());
+  router.registerHandler('SPP_PRIVATE_PAYMENT', createSppPrivatePaymentHandler({ keyManager }));
   router.registerHandler('SPP_ACCOUNT_SNAPSHOT', createSppAccountSnapshotHandler());
   router.registerHandler('SPP_RECIPIENT_LOOKUP', createSppRecipientLookupHandler());
-  router.registerHandler('SPP_REGISTER_PUBLIC_KEYS', createSppRegisterPublicKeysHandler());
+  router.registerHandler('SPP_REGISTER_PUBLIC_KEYS', createSppRegisterPublicKeysHandler({ keyManager }));
   router.registerHandler('SPP_ACCOUNT_SYNC', createSppAccountSyncHandler());
   router.registerHandler('NYM_CONNECT', createNymConnectHandler());
   router.registerHandler('NYM_DISCONNECT', createNymDisconnectHandler());
@@ -264,6 +265,16 @@ function initBackgroundSynchronous() {
       }
       const signRequest = parseSppHostSignRequest(message);
       if (signRequest) {
+        if (!isSppHostDocumentSender(sender)) {
+          return Promise.resolve({
+            channel: signRequest.channel,
+            type: 'SPP_HOST_SIGN_RESULT',
+            id: signRequest.id,
+            ok: false,
+            code: 'UNAUTHORIZED',
+            message: 'SPP signatures are accepted only from the extension spp-host document.',
+          });
+        }
         return (async () => {
           try {
             await initPromise;
@@ -281,7 +292,7 @@ function initBackgroundSynchronous() {
             signer,
             keyManager,
             networkPassphrase: Networks.TESTNET,
-          });
+          }, sender);
         })();
       }
       const nymFetchRequest = parseSppHostNymFetchRequest(message);

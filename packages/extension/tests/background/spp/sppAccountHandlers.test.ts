@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('webextension-polyfill', () => ({
+  default: {
+    runtime: {
+      id: 'test-extension-id',
+      getURL: (path: string) => `chrome-extension://test-extension-id${path.startsWith('/') ? path : `/${path}`}`,
+    },
+  },
+}));
+
 vi.mock('../../../src/background/nym/NymRuntimeController.js', () => ({
   getNymRuntimeController: () => ({
     getSnapshot: () => ({ mode: 'nym', connected: true }),
@@ -81,11 +90,33 @@ describe('sppAccountHandlers IPC', () => {
       channel: 'astrym-spp-host-bridge',
       type: 'SPP_HOST_ACCOUNT_QUERY_RESULT',
     });
+    const trusted = {
+      id: 'test-extension-id',
+      url: 'chrome-extension://test-extension-id/popup.html',
+    };
     await expect(
-      createSppRegisterPublicKeysHandler()({ acknowledgeBroadcast: true }),
+      createSppRegisterPublicKeysHandler({
+        resolveAccount: async () => 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6',
+      })({ acknowledgeBroadcast: true }, trusted as never),
     ).rejects.toMatchObject({
       name: 'UNAUTHORIZED',
       message: expect.stringContaining('SPP_BROADCAST_AWAITING_APPROVAL'),
     });
+  });
+
+  it('does not register without an explicit acknowledgement or a trusted sender', async () => {
+    const handler = createSppRegisterPublicKeysHandler({
+      resolveAccount: async () => 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6',
+    });
+    await expect(
+      handler({ acknowledgeBroadcast: false } as never, {
+        id: 'test-extension-id',
+        url: 'chrome-extension://test-extension-id/popup.html',
+      } as never),
+    ).rejects.toMatchObject({ name: 'UNAUTHORIZED' });
+    await expect(
+      handler({ acknowledgeBroadcast: true }, undefined),
+    ).rejects.toMatchObject({ name: 'UNAUTHORIZED' });
+    expect(queryMock).not.toHaveBeenCalled();
   });
 });
