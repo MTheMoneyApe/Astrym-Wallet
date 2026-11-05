@@ -1,33 +1,21 @@
 /**
  * Adapter: SOLANYM SoftwareSigner (vault HD) → stellar-private-payments WalletSigner.
  *
- * Message format: SEP-0053 (prefix + SHA-256), matching Freighter / SPP expectations.
- * Transaction: parse XDR, enforce bound network + source, sign tx.hash(), return signed XDR.
- * Auth entry: allowlisted HashIdPreimage variants only; sign sha256(preimage.toXDR()).
- *
- * Cryptographic layer limits (not enforced here — UI/extension must review before approve):
- *   - Transaction ops, amounts, memo, destinations are NOT semantically inspected.
- *   - Soroban invocation trees (contract, function, args, sub-invocations) are NOT inspected.
- *   - Payload binding via SignatureAuthorizationGate proves the digest was authorized, not that
- *     a human reviewed the meaning of that digest.
- *
- * StateCoordinator.authorizeSignature() is lifecycle-only (no payload binding). Extension
- * integration must approve the exact SignatureAuthContext before authorize() under
- * require-prior-approval mode.
+ * Every signature goes through {@link authorizeSppSignature} first. That gate
+ * allowlists Testnet, requires a single-use user intent, and checks the
+ * envelope (operation, amount, recipient, contract, function, tx.fee).
+ * A disposable Testnet key plugs in as {@link SppDigestSigner}; it receives
+ * only the authorized digest.
  *
  * Does not call Horizon/RPC. Secrets never logged.
  */
 
 import { ed25519 } from '@noble/curves/ed25519.js';
 import {
-  Address,
   FeeBumpTransaction,
-  hash,
   Networks,
   StrKey,
-  Transaction,
   TransactionBuilder,
-  xdr,
 } from '@stellar/stellar-sdk';
 import type {
   SignAuthEntryResult,
@@ -41,17 +29,18 @@ import { uint8ArrayToBase64 } from '../transaction/StellarTransactionClient.js';
 import { hashSep53Message } from './sep53.js';
 import {
   digestToHex,
+  type ContextualSignatureGate,
   type SignatureAuthContext,
   type SignatureAuthorizationGate,
   type SignatureKind,
   type SignatureLease,
 } from './signatureGate.js';
-
-/** HashIdPreimage variants accepted for signAuthEntry (stellar-sdk / Freighter Soroban auth). */
-const ALLOWED_AUTH_PREIMAGE_TYPES = new Set([
-  'envelopeTypeSorobanAuthorization',
-  'envelopeTypeSorobanAuthorizationWithAddress',
-]);
+import {
+  SppSignerError,
+  assertStellarTestnetPassphrase,
+  authorizeSppSignature,
+  type SppDigestSigner,
+} from './sppSignGate.js';
 
 export type SppWalletSignerAdapterOptions = {
   signer: SoftwareSigner;
@@ -64,14 +53,14 @@ export type SppWalletSignerAdapterOptions = {
    */
   networkPassphrase?: string;
   authorizationGate: SignatureAuthorizationGate;
+  /**
+   * Raw digest signer. When omitted, the vault SoftwareSigner is used.
+   * A disposable Testnet key sets this and still cannot bypass the gate.
+   */
+  digestSigner?: SppDigestSigner;
 };
 
-export class SppSignerError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'SppSignerError';
-  }
-}
+export { SppSignerError } from './sppSignGate.js';
 
 export class SppWalletSignerAdapter implements WalletSigner {
   private readonly _signer: SoftwareSigner;
@@ -79,26 +68,26 @@ export class SppWalletSignerAdapter implements WalletSigner {
   private readonly _stellarAddress: string;
   private readonly _networkPassphrase: string;
   private readonly _gate: SignatureAuthorizationGate;
+  private readonly _digestSigner: SppDigestSigner | null;
 
   constructor(options: SppWalletSignerAdapterOptions) {
     if (options.signer.chain !== 'stellar') {
       throw new SppSignerError('SppWalletSignerAdapter requires SoftwareSigner with chain "stellar"');
     }
     if (!StrKey.isValidEd25519PublicKey(options.stellarAddress)) {
-      throw new SppSignerError('stellarAddress must be a valid Ed25519 G… StrKey');
+      throw new SppSignerError('stellarAddress must be a valid Ed25519 G… StrKey', 'INVALID_REQUEST');
     }
     if (!Number.isInteger(options.accountIndex) || options.accountIndex < 0) {
-      throw new SppSignerError('accountIndex must be a non-negative integer');
+      throw new SppSignerError('accountIndex must be a non-negative integer', 'INVALID_REQUEST');
     }
     const network = options.networkPassphrase ?? Networks.TESTNET;
-    if (network !== Networks.TESTNET && network !== Networks.PUBLIC) {
-      throw new SppSignerError('Unsupported network passphrase');
-    }
+    assertStellarTestnetPassphrase(network);
     this._signer = options.signer;
     this._accountIndex = options.accountIndex;
     this._stellarAddress = options.stellarAddress;
     this._networkPassphrase = network;
     this._gate = options.authorizationGate;
+    this._digestSigner = options.digestSigner ?? null;
   }
 
   async getPublicKey(): Promise<string> {
@@ -109,13 +98,18 @@ export class SppWalletSignerAdapter implements WalletSigner {
     this._assertOptionalAddress(opts?.address);
     this._assertNetworkOption(opts?.networkPassphrase);
     if (typeof message !== 'string') {
-      throw new SppSignerError('signMessage requires a string message');
+      throw new SppSignerError('signMessage requires a string message', 'INVALID_REQUEST');
     }
 
-    const digest = hashSep53Message(message);
-    return this._withAuthorization('message', digest, async (assertBeforeSign) => {
+    const authorization = authorizeSppSignature({
+      kind: 'message',
+      input: message,
+      boundAccount: this._stellarAddress,
+      networkPassphrase: this._networkPassphrase,
+    });
+    return this._withAuthorization('message', authorization.digest, async (assertBeforeSign) => {
       assertBeforeSign();
-      const signature = await this._signer.signMessage(digest, this._accountIndex);
+      const signature = await this._signDigest(authorization.digest, 'message');
       return {
         signedMessage: uint8ArrayToBase64(signature),
         signerAddress: this._stellarAddress,
@@ -127,82 +121,53 @@ export class SppWalletSignerAdapter implements WalletSigner {
     this._assertOptionalAddress(opts?.address);
     this._assertNetworkOption(opts?.networkPassphrase);
     if (typeof xdrInput !== 'string' || xdrInput.length === 0) {
-      throw new SppSignerError('signTransaction requires a non-empty XDR string');
+      throw new SppSignerError('signTransaction requires a non-empty XDR string', 'INVALID_REQUEST');
     }
 
-    const networkPassphrase = this._networkPassphrase;
-
-    let parsed: Transaction | FeeBumpTransaction;
-    try {
-      parsed = TransactionBuilder.fromXDR(xdrInput, networkPassphrase);
-    } catch {
-      throw new SppSignerError('Invalid transaction XDR or network passphrase mismatch');
-    }
-
-    if (parsed instanceof FeeBumpTransaction) {
-      throw new SppSignerError('Fee-bump transactions are not supported by this adapter');
-    }
-
-    const tx = parsed as Transaction;
-    if (tx.source !== this._stellarAddress) {
-      throw new SppSignerError('Transaction source does not match the bound Stellar account');
-    }
-
-    // Explicit policy: unsigned envelopes only. Multi-sig / co-signing is out of scope.
-    if (tx.signatures.length > 0) {
-      throw new SppSignerError('Transaction envelope already contains signatures');
-    }
-
-    const txHash = tx.hash();
-    const digest =
-      txHash instanceof Uint8Array ? txHash : new Uint8Array(txHash as ArrayLike<number>);
-
-    return this._withAuthorization('transaction', digest, async (assertBeforeSign) => {
+    const authorization = authorizeSppSignature({
+      kind: 'transaction',
+      input: xdrInput,
+      boundAccount: this._stellarAddress,
+      networkPassphrase: this._networkPassphrase,
+    });
+    return this._withAuthorization('transaction', authorization.digest, async (assertBeforeSign) => {
       assertBeforeSign();
-      const signature = await this._signer.signTransaction(digest, this._accountIndex);
-      // SDK verifies the signature against the public key before attaching.
-      tx.addSignature(this._stellarAddress, uint8ArrayToBase64(signature));
+      const signature = await this._signDigest(authorization.digest, 'transaction');
+      const parsed = TransactionBuilder.fromXDR(
+        authorization.unsignedTransactionXdr ?? xdrInput,
+        this._networkPassphrase,
+      );
+      if (parsed instanceof FeeBumpTransaction) {
+        throw new SppSignerError('Fee-bump transactions are not supported by this adapter');
+      }
+      parsed.addSignature(this._stellarAddress, uint8ArrayToBase64(signature));
       return {
-        signedTxXdr: tx.toXDR(),
+        signedTxXdr: parsed.toXDR(),
         signerAddress: this._stellarAddress,
       };
     });
   }
 
   /**
-   * Signs a Soroban authorization preimage (HashIdPreimage XDR).
-   * Allowlist: envelopeTypeSorobanAuthorization | envelopeTypeSorobanAuthorizationWithAddress.
-   * WithAddress: preimage address must equal the bound account.
-   *
-   * Layer limit: invocation contents are not semantically validated here.
+   * Signs a Soroban authorization preimage only after the gate accepts its
+   * networkId, address, contract, function, and intent.
    */
   async signAuthEntry(xdrInput: string, opts?: SignOptions): Promise<SignAuthEntryResult> {
     this._assertOptionalAddress(opts?.address);
     this._assertNetworkOption(opts?.networkPassphrase);
     if (typeof xdrInput !== 'string' || xdrInput.length === 0) {
-      throw new SppSignerError('signAuthEntry requires a non-empty XDR string');
+      throw new SppSignerError('signAuthEntry requires a non-empty XDR string', 'INVALID_REQUEST');
     }
 
-    const networkPassphrase = this._networkPassphrase;
-
-    let preimage: xdr.HashIdPreimage;
-    try {
-      preimage = xdr.HashIdPreimage.fromXDR(xdrInput, 'base64');
-    } catch {
-      throw new SppSignerError(
-        'Invalid auth-entry preimage XDR (expected HashIdPreimage, not a raw transaction)',
-      );
-    }
-
-    this._assertAllowedAuthPreimage(preimage);
-    this._assertPreimageNetwork(preimage, networkPassphrase);
-
-    const payload = hash(preimage.toXDR());
-    const digest = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
-
-    return this._withAuthorization('auth_entry', digest, async (assertBeforeSign) => {
+    const authorization = authorizeSppSignature({
+      kind: 'auth_entry',
+      input: xdrInput,
+      boundAccount: this._stellarAddress,
+      networkPassphrase: this._networkPassphrase,
+    });
+    return this._withAuthorization('auth_entry', authorization.digest, async (assertBeforeSign) => {
       assertBeforeSign();
-      const signature = await this._signer.signTransaction(digest, this._accountIndex);
+      const signature = await this._signDigest(authorization.digest, 'auth_entry');
       return {
         signedAuthEntry: uint8ArrayToBase64(signature),
         signerAddress: this._stellarAddress,
@@ -220,6 +185,10 @@ export class SppWalletSignerAdapter implements WalletSigner {
     fn: (assertBeforeSign: () => void) => Promise<T>,
   ): Promise<T> {
     const context = this._buildContext(kind, digest);
+    const approvable = this._gate as Partial<ContextualSignatureGate>;
+    if (typeof approvable.approve === 'function') {
+      approvable.approve(context);
+    }
     let lease: SignatureLease;
     try {
       lease = this._gate.authorize(context);
@@ -258,6 +227,16 @@ export class SppWalletSignerAdapter implements WalletSigner {
     return encoded;
   }
 
+  private async _signDigest(digest: Uint8Array, kind: SignatureKind): Promise<Uint8Array> {
+    if (this._digestSigner) {
+      return this._digestSigner.signDigest(digest);
+    }
+    if (kind === 'message') {
+      return this._signer.signMessage(digest, this._accountIndex);
+    }
+    return this._signer.signTransaction(digest, this._accountIndex);
+  }
+
   private _assertOptionalAddress(address: string | undefined): void {
     if (address === undefined) return;
     if (address !== this._stellarAddress) {
@@ -272,72 +251,6 @@ export class SppWalletSignerAdapter implements WalletSigner {
       throw new SppSignerError('Network passphrase does not match the adapter binding');
     }
   }
-
-  private _assertAllowedAuthPreimage(preimage: xdr.HashIdPreimage): void {
-    const typeName = String((preimage as { type?: unknown }).type ?? '');
-    if (!ALLOWED_AUTH_PREIMAGE_TYPES.has(typeName)) {
-      throw new SppSignerError(
-        `Auth preimage variant is not allowed (${typeName || 'unknown'}); expected Soroban authorization`,
-      );
-    }
-
-    if (typeName === 'envelopeTypeSorobanAuthorizationWithAddress') {
-      const value = preimage.value as { address?: xdr.ScAddress };
-      const scAddress = value?.address;
-      if (!scAddress) {
-        throw new SppSignerError('Auth preimage WithAddress is missing address');
-      }
-      let encoded: string;
-      try {
-        encoded = Address.fromScAddress(scAddress).toString();
-      } catch {
-        throw new SppSignerError('Auth preimage address is not a recognizable ScAddress');
-      }
-      if (!StrKey.isValidEd25519PublicKey(encoded)) {
-        // Contract (C…) or other identities: not supported for this classic G… adapter.
-        throw new SppSignerError('Auth preimage address is not a classic G… account');
-      }
-      if (encoded !== this._stellarAddress) {
-        throw new SppSignerError('Auth preimage address does not match the bound Stellar account');
-      }
-    }
-  }
-
-  private _assertPreimageNetwork(preimage: xdr.HashIdPreimage, networkPassphrase: string): void {
-    const expectedNetworkId = hash(new TextEncoder().encode(networkPassphrase));
-    const value = preimage.value as {
-      networkId?: Uint8Array | { toXDR: (format: string) => Uint8Array };
-    };
-    const raw = value.networkId;
-    if (!raw) {
-      throw new SppSignerError('Auth preimage does not carry a networkId');
-    }
-    const got = extractHashBytes(raw);
-    if (!bytesEqual(got, expectedNetworkId)) {
-      throw new SppSignerError('Auth preimage networkId does not match network passphrase');
-    }
-  }
-}
-
-function extractHashBytes(
-  value: Uint8Array | { toXDR: (format: string) => Uint8Array },
-): Uint8Array {
-  if (value instanceof Uint8Array) {
-    return value;
-  }
-  if (value && typeof (value as { toXDR?: unknown }).toXDR === 'function') {
-    const raw = (value as { toXDR: (format: string) => Uint8Array }).toXDR('raw');
-    return raw instanceof Uint8Array ? raw : new Uint8Array(raw);
-  }
-  throw new SppSignerError('Auth preimage networkId is not a recognizable hash encoding');
-}
-
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.byteLength !== b.byteLength) return false;
-  for (let i = 0; i < a.byteLength; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
 }
 
 /** Verify a SEP-53 signature against a public key (uses production hasher — for convenience). */

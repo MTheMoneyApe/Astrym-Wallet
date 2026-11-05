@@ -5,6 +5,9 @@
 
 import React, { useState } from 'react';
 import { StrKey } from '@solanym/wallet-core';
+import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import { sppKeyDerivationMessage } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import { sendIpcMessage } from './ipc.js';
 
 export type SppAccountPanelProps = {
@@ -54,6 +57,12 @@ export function SppAccountPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [registerNote, setRegisterNote] = useState<string | null>(null);
+  const [confirmRegister, setConfirmRegister] = useState(false);
+  const [noteKeyHex, setNoteKeyHex] = useState('');
+  const [encryptionKeyHex, setEncryptionKeyHex] = useState('');
+  const [noteKeyProofHex, setNoteKeyProofHex] = useState('');
+  const contractConfig = getNethermindPublicTestnetContractConfig();
+  const derivationMessage = sppKeyDerivationMessage(contractConfig.kdf_domain);
 
   const gateClosed = !nymConnected || !writeReady;
 
@@ -103,8 +112,26 @@ export function SppAccountPanel({
   const registerKeys = () => {
     setError(null);
     setRegisterNote(null);
+    if (!confirmRegister) {
+      setConfirmRegister(true);
+      return;
+    }
+    if (!/^[0-9a-fA-F]{64}$/.test(noteKeyHex) || !/^[0-9a-fA-F]{64}$/.test(encryptionKeyHex)) {
+      setError('note_key y encryption_key deben ser 32 bytes en hex.');
+      return;
+    }
+    if (noteKeyProofHex.trim().length > 0 && !/^[0-9a-fA-F]+$/.test(noteKeyProofHex.trim())) {
+      setError('note_key_proof debe ser hex.');
+      return;
+    }
     setBusy('register');
-    void sendIpcMessage('SPP_REGISTER_PUBLIC_KEYS', { acknowledgeBroadcast: true })
+    const proof = noteKeyProofHex.trim();
+    void sendIpcMessage('SPP_REGISTER_PUBLIC_KEYS', {
+      acknowledgeBroadcast: true,
+      noteKeyHex,
+      encryptionKeyHex,
+      ...(proof.length > 0 ? { noteKeyProofHex: proof } : {}),
+    })
       .then((result) => {
         setRegisterNote(
           result.txHash
@@ -122,7 +149,10 @@ export function SppAccountPanel({
           );
         }
       })
-      .finally(() => setBusy(null));
+      .finally(() => {
+        setBusy(null);
+        setConfirmRegister(false);
+      });
   };
 
   return (
@@ -165,12 +195,64 @@ export function SppAccountPanel({
           type="button"
           className="btn-secondary"
           data-testid="spp-account-register"
+          data-confirm={confirmRegister ? 'yes' : 'no'}
           disabled={gateClosed || busy !== null}
           onClick={registerKeys}
         >
-          {busy === 'register' ? 'Registrando…' : 'Registrar claves (gated)'}
+          {busy === 'register'
+            ? 'Registrando…'
+            : confirmRegister
+              ? 'Confirmar registro (Testnet)'
+              : 'Registrar claves (gated)'}
         </button>
       </div>
+      {confirmRegister ? (
+        <div data-testid="spp-register-review" style={{ fontSize: '0.78rem', display: 'grid', gap: 4 }}>
+          <strong>Confirmar registro de claves (Testnet)</strong>
+          <span>Operación: register_public_keys</span>
+          <span>Red: Stellar Testnet</span>
+          <span className="address-wrap">
+            Registry: {contractConfig.public_key_registry}
+          </span>
+          <span>Propietario: la cuenta activa</span>
+          <span className="address-wrap" data-testid="spp-register-message">
+            Mensaje SEP-53: {derivationMessage}
+          </span>
+          <span>
+            maxFee techo: {maxFeeStroopsForOperation('register_public_keys')} stroops
+          </span>
+          <label>
+            note_key (hex)
+            <input
+              className="input-field"
+              data-testid="spp-register-note-key"
+              value={noteKeyHex}
+              onChange={(event) => setNoteKeyHex(event.target.value.trim())}
+            />
+          </label>
+          <label>
+            encryption_key (hex)
+            <input
+              className="input-field"
+              data-testid="spp-register-encryption-key"
+              value={encryptionKeyHex}
+              onChange={(event) => setEncryptionKeyHex(event.target.value.trim())}
+            />
+          </label>
+          <label>
+            note_key_proof (hex, vacío si el SDK no lo envía)
+            <input
+              className="input-field"
+              data-testid="spp-register-note-key-proof"
+              value={noteKeyProofHex}
+              onChange={(event) => setNoteKeyProofHex(event.target.value.trim())}
+            />
+          </label>
+          <span className="text-secondary">
+            El segundo clic envía el acuse y esas claves. Otra clave o otro mensaje no se firma.
+          </span>
+        </div>
+      ) : null}
 
       {snapshot ? (
         <div

@@ -152,6 +152,17 @@ export function installAndroidChromeShim(): void {
     else store.put(value, key);
   }
 
+  function currentDocumentPath(): string {
+    if (
+      typeof location === 'undefined' ||
+      typeof location.pathname !== 'string' ||
+      location.pathname.length === 0
+    ) {
+      return '/webapp.html';
+    }
+    return location.pathname.startsWith('/') ? location.pathname : `/${location.pathname}`;
+  }
+
   const runtime = {
     id: 'astrym-android-webapp',
     lastError: undefined as { message: string } | undefined,
@@ -171,7 +182,7 @@ export function installAndroidChromeShim(): void {
     sendMessage(...args: unknown[]) {
       const callback = typeof args[args.length - 1] === 'function' ? (args.pop() as Callback) : undefined;
       const message = args.find((arg) => arg !== null && typeof arg === 'object');
-      const sender = { id: runtime.id, url: runtime.getURL('/webapp.html') };
+      const sender = { id: runtime.id, url: runtime.getURL(currentDocumentPath()) };
 
       const run = (): Promise<unknown> =>
         new Promise((resolve, reject) => {

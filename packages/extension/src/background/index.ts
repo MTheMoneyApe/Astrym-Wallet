@@ -49,6 +49,7 @@ import {
   createSppRegisterPublicKeysHandler,
 } from './handlers/sppAccountHandlers.js';
 import { noteSppHostLifecycle } from './spp/sppPrivatePoolRegistry.js';
+import { isSppHostDocumentSender } from './trustedWalletOrigin.js';
 import {
   handleSppHostNymFetchRequest,
   handleSppHostSignRequest,
@@ -186,10 +187,10 @@ function initBackgroundSynchronous() {
   router.registerHandler('SEND_STELLAR_TRANSFER', createSendStellarTransferHandler(stellarTxClient, stellarTransferConfirmationTracker) as any);
   router.registerHandler('CONFIRM_STELLAR_TRANSFER', createConfirmStellarTransferHandler(stellarTransferConfirmationTracker) as any);
 
-  router.registerHandler('SPP_PRIVATE_PAYMENT', createSppPrivatePaymentHandler());
+  router.registerHandler('SPP_PRIVATE_PAYMENT', createSppPrivatePaymentHandler({ keyManager }));
   router.registerHandler('SPP_ACCOUNT_SNAPSHOT', createSppAccountSnapshotHandler());
   router.registerHandler('SPP_RECIPIENT_LOOKUP', createSppRecipientLookupHandler());
-  router.registerHandler('SPP_REGISTER_PUBLIC_KEYS', createSppRegisterPublicKeysHandler());
+  router.registerHandler('SPP_REGISTER_PUBLIC_KEYS', createSppRegisterPublicKeysHandler({ keyManager }));
   router.registerHandler('SPP_ACCOUNT_SYNC', createSppAccountSyncHandler());
   router.registerHandler('NYM_CONNECT', createNymConnectHandler());
   router.registerHandler('NYM_DISCONNECT', createNymDisconnectHandler());
@@ -254,6 +255,30 @@ function initBackgroundSynchronous() {
     // spp-host ↔ SW bridge: lifecycle events update the registry; sign + Nym
     // fetch are answered here; execute requests are answered by the host page.
     if (isSppHostBridgeMessage(message)) {
+      if (!isSppHostDocumentSender(sender)) {
+        const requestId = message && typeof message === 'object' && 'id' in message
+          && typeof (message as { id?: unknown }).id === 'string'
+          ? (message as { id: string }).id
+          : 'UNKNOWN';
+        const requestType = message && typeof message === 'object' && 'type' in message
+          ? (message as { type?: unknown }).type
+          : undefined;
+        if (requestType === 'SPP_HOST_NYM_FETCH') {
+          return Promise.resolve({
+            channel: 'astrym-spp-host-bridge',
+            type: 'SPP_HOST_NYM_FETCH_RESULT',
+            id: requestId,
+            ok: false,
+            code: 'UNAUTHORIZED',
+            message: 'SPP host bridge messages are accepted only from the extension spp-host document.',
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          code: 'UNAUTHORIZED',
+          message: 'SPP host bridge messages are accepted only from the extension spp-host document.',
+        });
+      }
       const lifecycle = parseSppHostLifecycleEvent(message);
       if (lifecycle) {
         noteSppHostLifecycle({
@@ -264,6 +289,16 @@ function initBackgroundSynchronous() {
       }
       const signRequest = parseSppHostSignRequest(message);
       if (signRequest) {
+        if (!isSppHostDocumentSender(sender)) {
+          return Promise.resolve({
+            channel: signRequest.channel,
+            type: 'SPP_HOST_SIGN_RESULT',
+            id: signRequest.id,
+            ok: false,
+            code: 'UNAUTHORIZED',
+            message: 'SPP signatures are accepted only from the extension spp-host document.',
+          });
+        }
         return (async () => {
           try {
             await initPromise;
@@ -281,12 +316,12 @@ function initBackgroundSynchronous() {
             signer,
             keyManager,
             networkPassphrase: Networks.TESTNET,
-          });
+          }, sender);
         })();
       }
       const nymFetchRequest = parseSppHostNymFetchRequest(message);
       if (nymFetchRequest) {
-        return handleSppHostNymFetchRequest(nymFetchRequest);
+        return handleSppHostNymFetchRequest(nymFetchRequest, sender);
       }
       // Execute requests: do not claim; host page owns replies.
       return;

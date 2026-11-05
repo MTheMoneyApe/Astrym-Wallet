@@ -3,11 +3,14 @@
  * Signatures and HTTP bodies only — never seeds or private keys on the wire.
  */
 
-import { StrKey } from '@solanym/wallet-core';
 import type { SoftwareSigner } from '@solanym/wallet-core/src/signer/SoftwareSigner.js';
 import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import { SppWalletSignerAdapter } from '@solanym/wallet-core/src/stellar/spp/SppWalletSignerAdapter.js';
 import { createContextualSignatureGate } from '@solanym/wallet-core/src/stellar/spp/signatureGate.js';
+import {
+  SppSignerError,
+  assertStellarTestnetPassphrase,
+} from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 import {
   SPP_HOST_BRIDGE_CHANNEL,
   type SppHostNymFetchRequest,
@@ -16,7 +19,8 @@ import {
   type SppHostSignResult,
 } from '../../shared/sppHostBridge.js';
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
-import { activeAccountManager } from '../accounts/ActiveAccountManager.js';
+import { isSppHostDocumentSender } from '../trustedWalletOrigin.js';
+import { resolveActiveStellarAddress } from './sppBoundAccount.js';
 
 /** Testnet passphrase (keep in sync with Networks.TESTNET). */
 const STELLAR_TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
@@ -31,33 +35,29 @@ function sameOrigin(url: string, rpcUrl: string): boolean {
   return new URL(url).origin === new URL(rpcUrl).origin;
 }
 
-async function resolveBoundStellarAddress(
-  keyManager: KeyManager,
-): Promise<{ index: number; address: string }> {
-  const index = activeAccountManager.getActiveAccountIndex();
-  if (!Number.isInteger(index) || index < 0) {
-    throw new Error('No active Stellar account');
-  }
-  const accounts = await keyManager.getAccounts();
-  const account = accounts.find((a) => a.index === index);
-  if (!account) {
-    throw new Error(`Active account index ${index} not found`);
-  }
-  const address = StrKey.encodeEd25519PublicKey(account.publicKey);
-  if (!StrKey.isValidEd25519PublicKey(address)) {
-    throw new Error('Active account is not a Stellar G… address');
-  }
-  return { index, address };
-}
-
 /**
- * Handle host → SW signing. Uses bind-on-authorize: the caller already passed
- * Nym + SPP selection gates; digests are still one-shot lease-bound.
+ * Handle host → SW signing.
+ * Sender must be the extension spp-host document. The adapter uses
+ * require-prior-approval plus a single-use intent. A future disposable
+ * Testnet signer must be passed as `SppWalletSignerAdapter`'s digestSigner
+ * (or call `signDigestWithSppGate`); do not sign the raw payload here.
  */
 export async function handleSppHostSignRequest(
   request: SppHostSignRequest,
   deps: SppHostBridgeHandlerDeps,
+  sender?: { id?: string | undefined; url?: string | undefined },
 ): Promise<SppHostSignResult> {
+  if (!isSppHostDocumentSender(sender)) {
+    return {
+      channel: SPP_HOST_BRIDGE_CHANNEL,
+      type: 'SPP_HOST_SIGN_RESULT',
+      id: request.id,
+      ok: false,
+      code: 'UNAUTHORIZED',
+      message: 'SPP signatures are accepted only from the extension spp-host document.',
+    };
+  }
+
   const ctrl = getNymRuntimeController();
   const snap = ctrl.getSnapshot();
   if (snap.mode !== 'nym' || !snap.connected) {
@@ -83,7 +83,31 @@ export async function handleSppHostSignRequest(
       };
     }
 
-    const { index, address } = await resolveBoundStellarAddress(deps.keyManager);
+    const networkPassphrase = deps.networkPassphrase ?? STELLAR_TESTNET_PASSPHRASE;
+    try {
+      assertStellarTestnetPassphrase(networkPassphrase);
+    } catch (cause) {
+      return {
+        channel: SPP_HOST_BRIDGE_CHANNEL,
+        type: 'SPP_HOST_SIGN_RESULT',
+        id: request.id,
+        ok: false,
+        code: 'UNAUTHORIZED',
+        message: cause instanceof Error ? cause.message : 'Only the Stellar Testnet passphrase is allowed',
+      };
+    }
+    if (request.payload.networkPassphrase !== networkPassphrase) {
+      return {
+        channel: SPP_HOST_BRIDGE_CHANNEL,
+        type: 'SPP_HOST_SIGN_RESULT',
+        id: request.id,
+        ok: false,
+        code: 'UNAUTHORIZED',
+        message: 'Only the Stellar Testnet passphrase is allowed.',
+      };
+    }
+
+    const { index, address } = await resolveActiveStellarAddress(deps.keyManager);
     if (request.payload.address && request.payload.address !== address) {
       return {
         channel: SPP_HOST_BRIDGE_CHANNEL,
@@ -95,22 +119,7 @@ export async function handleSppHostSignRequest(
       };
     }
 
-    const networkPassphrase = deps.networkPassphrase ?? STELLAR_TESTNET_PASSPHRASE;
-    if (
-      request.payload.networkPassphrase &&
-      request.payload.networkPassphrase !== networkPassphrase
-    ) {
-      return {
-        channel: SPP_HOST_BRIDGE_CHANNEL,
-        type: 'SPP_HOST_SIGN_RESULT',
-        id: request.id,
-        ok: false,
-        code: 'UNAUTHORIZED',
-        message: 'Network passphrase does not match the wallet binding.',
-      };
-    }
-
-    const gate = createContextualSignatureGate('bind-on-authorize');
+    const gate = createContextualSignatureGate('require-prior-approval');
     const adapter = new SppWalletSignerAdapter({
       signer: deps.signer,
       accountIndex: index,
@@ -164,8 +173,11 @@ export async function handleSppHostSignRequest(
     };
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : 'SPP sign failed';
-    const code =
-      /lock|unlock|vault/i.test(message) ? 'VAULT_LOCKED' as const : 'SIGN_FAILED' as const;
+    const code = cause instanceof SppSignerError
+      ? cause.code
+      : /lock|unlock|vault/i.test(message)
+        ? 'VAULT_LOCKED' as const
+        : 'SIGN_FAILED' as const;
     return {
       channel: SPP_HOST_BRIDGE_CHANNEL,
       type: 'SPP_HOST_SIGN_RESULT',
@@ -180,7 +192,18 @@ export async function handleSppHostSignRequest(
 /** Host → SW: route Soroban-origin HTTP through Nym fail-closed fetch. */
 export async function handleSppHostNymFetchRequest(
   request: SppHostNymFetchRequest,
+  sender?: { id?: string | undefined; url?: string | undefined },
 ): Promise<SppHostNymFetchResult> {
+  if (!isSppHostDocumentSender(sender)) {
+    return {
+      channel: SPP_HOST_BRIDGE_CHANNEL,
+      type: 'SPP_HOST_NYM_FETCH_RESULT',
+      id: request.id,
+      ok: false,
+      code: 'UNAUTHORIZED',
+      message: 'SPP Nym fetch is accepted only from the extension spp-host document.',
+    };
+  }
   const ctrl = getNymRuntimeController();
   const snap = ctrl.getSnapshot();
   if (snap.mode !== 'nym' || !snap.connected) {
