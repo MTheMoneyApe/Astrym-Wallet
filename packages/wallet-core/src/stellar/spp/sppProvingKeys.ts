@@ -1,6 +1,6 @@
 /**
  * Load packaged circuitLock and probe proving-key artifacts.
- * Never invents hashes — uses circuits.json fingerprints and HTTP presence checks.
+ * Never invents hashes — uses circuits.json fingerprints and HTTP / on-disk presence checks.
  */
 
 export type SppCircuitLock = {
@@ -20,6 +20,15 @@ export type SppProvingKeyProbeResult =
       lock: SppCircuitLock | null;
     };
 
+/** Artifact kinds required beside each circuit fingerprint in circuits.json. */
+export const SPP_CIRCUIT_ARTIFACT_SUFFIXES = ['.r1cs', '.graph.bin', '_proving_key.bin'] as const;
+
+/**
+ * stellar-private-payments@0.2.1 ships 16 Groth16 circuit bundles
+ * (12 policy_tx_* + 4 selectiveDisclosure_*). Used as a readiness floor — never invent IDs.
+ */
+export const SPP_PACKAGED_CIRCUIT_COUNT_0_2_1 = 16;
+
 function isCircuitEntry(value: unknown): value is {
   r1cs?: string;
   'graph.bin'?: string;
@@ -30,6 +39,11 @@ function isCircuitEntry(value: unknown): value is {
 
 export function listCircuitIds(lock: SppCircuitLock): string[] {
   return Object.keys(lock).filter((key) => key !== 'version' && key !== 'meta' && isCircuitEntry(lock[key]));
+}
+
+/** Relative artifact file names for one circuit id (`id.r1cs`, `id.graph.bin`, `id_proving_key.bin`). */
+export function listCircuitArtifactNames(circuitId: string): string[] {
+  return SPP_CIRCUIT_ARTIFACT_SUFFIXES.map((suffix) => `${circuitId}${suffix}`);
 }
 
 export function parseCircuitLock(raw: unknown): SppCircuitLock {
@@ -83,6 +97,21 @@ export async function loadCircuitLockFromBaseUrl(
   return parseCircuitLock(await response.json());
 }
 
+function missingProvingKeysResult(
+  missing: string[],
+  circuitIds: string[],
+  lock: SppCircuitLock,
+): SppProvingKeyProbeResult {
+  return {
+    ok: false,
+    reason: 'missing_proving_keys',
+    message: `Faltan ${missing.length} artefactos de circuito (proving keys / r1cs / graph).`,
+    missing: missing.slice(0, 24),
+    circuitIds,
+    lock,
+  };
+}
+
 /**
  * Verify proving-key / graph / r1cs artifacts exist under circuitsBaseUrl.
  * Uses HEAD when available, falls back to ranged GET.
@@ -97,7 +126,7 @@ export async function probeSppProvingKeys(input: {
   const missing: string[] = [];
 
   for (const id of circuitIds) {
-    for (const artifact of [`${id}.r1cs`, `${id}.graph.bin`, `${id}_proving_key.bin`]) {
+    for (const artifact of listCircuitArtifactNames(id)) {
       const url = resolveCircuitArtifactUrl(input.circuitsBaseUrl, artifact);
       let present = false;
       try {
@@ -119,14 +148,39 @@ export async function probeSppProvingKeys(input: {
   }
 
   if (missing.length > 0) {
-    return {
-      ok: false,
-      reason: 'missing_proving_keys',
-      message: `Faltan ${missing.length} artefactos de circuito (proving keys / r1cs / graph).`,
-      missing: missing.slice(0, 24),
-      circuitIds,
-      lock: input.lock,
-    };
+    return missingProvingKeysResult(missing, circuitIds, input.lock);
+  }
+
+  return { ok: true, circuitIds, lock: input.lock };
+}
+
+/**
+ * Node/fs probe for packaged circuit artifacts (no HTTP).
+ * `existsSync` must be supplied by the caller (keeps this module DOM-safe).
+ */
+export function probeSppProvingKeysOnDisk(input: {
+  circuitsDir: string;
+  lock: SppCircuitLock;
+  existsSync: (path: string) => boolean;
+  joinPath?: (...parts: string[]) => string;
+}): SppProvingKeyProbeResult {
+  const joinPath =
+    input.joinPath ??
+    ((...parts: string[]) => parts.join('/').replace(/\/{2,}/g, '/'));
+  const circuitIds = listCircuitIds(input.lock);
+  const missing: string[] = [];
+  const base = input.circuitsDir.replace(/\/+$/, '');
+
+  for (const id of circuitIds) {
+    for (const artifact of listCircuitArtifactNames(id)) {
+      if (!input.existsSync(joinPath(base, artifact))) {
+        missing.push(artifact);
+      }
+    }
+  }
+
+  if (missing.length > 0) {
+    return missingProvingKeysResult(missing, circuitIds, input.lock);
   }
 
   return { ok: true, circuitIds, lock: input.lock };

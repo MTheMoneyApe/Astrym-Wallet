@@ -194,6 +194,12 @@ export const SppHostAccountQueryRequestSchema = z.object({
   payload: z.object({
     action: z.enum(['snapshot', 'recipient_lookup', 'sync', 'register_public_keys']),
     recipientAddress: z.string().min(56).max(56).optional(),
+    /** Required for register_public_keys — fresh Horizon sequence at submit. */
+    freshSequence: z.string().regex(/^[0-9]+$/).optional(),
+    /** Required for register_public_keys — fingerprint of approved prepared tx. */
+    transactionFingerprint: z.string().min(8).max(128).optional(),
+    /** Required for register_public_keys — public_key_registry C… */
+    registryContract: z.string().min(56).max(56).optional(),
     nymMode: z.enum(['direct', 'nym']),
     nymConnected: z.boolean(),
   }),

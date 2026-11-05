@@ -6,11 +6,11 @@
  */
 
 import type { Client } from 'stellar-private-payments';
-import { assertSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
 import {
   assertFeeWithinCeiling,
   maxFeeStroopsForOperation,
 } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import { assertSppRegistrationAuthorizedForAddress } from '@solanym/wallet-core/src/stellar/spp/sppRegistrationAuthorization.js';
 import { withSppHostNymFetchProxy } from './sppHostNymFetchProxy.js';
 
 type SdkAccount = {
@@ -173,25 +173,25 @@ export async function lookupSppRecipient(address: string): Promise<SppRecipientL
 }
 
 /**
- * On-chain public-key registration. Broadcasts — blocked until broadcast gate opens.
+ * On-chain public-key registration.
+ * Uses registration-scoped authorization only (never the global mutator gate).
+ * Callers must supply fresh Horizon sequence + approved transaction fingerprint.
  */
-export async function registerSppHostPublicKeys(): Promise<{ txHash: string }> {
-  const { account, userAddress, poolContract, rpcUrl } = await requireBound();
+export async function registerSppHostPublicKeys(input: {
+  freshSequence: string;
+  transactionFingerprint: string;
+  registryContract: string;
+}): Promise<{ txHash: string }> {
+  const { account, userAddress, rpcUrl, networkPassphrase } = await requireBound();
   const maxFeeStroops = maxFeeStroopsForOperation('register_public_keys');
   assertFeeWithinCeiling('register_public_keys', maxFeeStroops);
-  assertSppTestnetBroadcastAuthorized({
-    network: 'testnet',
-    operation: 'register_public_keys',
-    poolContract,
-    amountXlm: null,
-    amountStroops: null,
-    senderAddress: userAddress,
-    recipientAddress: null,
-    feeNote: 'Registry registration fee set by SDK/Soroban at submit; capped by maxFeeStroops.',
+  assertSppRegistrationAuthorizedForAddress({
+    sourceAddress: userAddress,
+    freshSequence: input.freshSequence,
+    registryContract: input.registryContract,
+    networkPassphrase,
     maxFeeStroops,
-    rpcUrl,
-    transport: 'nym',
-    preparedAt: new Date().toISOString(),
+    transactionFingerprint: input.transactionFingerprint,
   });
   return withSppHostNymFetchProxy(rpcUrl, async () => {
     const txHash = await account.registerPublicKeys();

@@ -750,8 +750,14 @@ export const MessageSchemas = {
   },
   SPP_REGISTER_PUBLIC_KEYS: {
     request: z.object({
-      /** Operator acknowledgment that this may broadcast once the gate opens. */
+      /** Operator acknowledgment that this may broadcast once registration-scoped gate opens. */
       acknowledgeBroadcast: z.literal(true),
+      /** Fresh Horizon sequence for the signing account. */
+      freshSequence: z.string().regex(/^[0-9]+$/),
+      /** Fingerprint of the approved prepared registration transaction. */
+      transactionFingerprint: z.string().min(8).max(128),
+      /** Nethermind public_key_registry C… */
+      registryContract: z.string().min(56).max(56),
     }),
     response: z.object({
       txHash: z.string().nullable(),

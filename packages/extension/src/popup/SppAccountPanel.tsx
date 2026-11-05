@@ -103,26 +103,16 @@ export function SppAccountPanel({
   const registerKeys = () => {
     setError(null);
     setRegisterNote(null);
+    // Registration requires an approved packet (sequence + tx fingerprint + registry).
+    // Without those fields the IPC schema refuses — do not invent placeholders.
     setBusy('register');
-    void sendIpcMessage('SPP_REGISTER_PUBLIC_KEYS', { acknowledgeBroadcast: true })
-      .then((result) => {
-        setRegisterNote(
-          result.txHash
-            ? `Registro on-chain ok — tx ${result.txHash}`
-            : 'Registro devolvió confirmación ambigua (sin hash).',
-        );
-        refresh();
-      })
-      .catch((cause: unknown) => {
-        const message = cause instanceof Error ? cause.message : 'Registro de claves falló';
-        setError(message);
-        if (message.includes('SPP_BROADCAST_AWAITING_APPROVAL')) {
-          setRegisterNote(
-            'Registro preparado y retenido: broadcast bloqueado hasta aprobación explícita.',
-          );
-        }
-      })
-      .finally(() => setBusy(null));
+    setError(
+      'Registro retenido: falta paquete de aprobación (freshSequence + transactionFingerprint + registryContract). El gate global de mutators permanece OFF.',
+    );
+    setRegisterNote(
+      'register_public_keys usa autorización scoped (solo registro). Deposit/transfer/withdraw no quedan autorizados.',
+    );
+    setBusy(null);
   };
 
   return (

@@ -53,6 +53,42 @@ From `js/types/api-types.d.ts` + `crates/stellar_private_payments_web.d.ts` + RE
 3. Call `derivePrivacyKeys()` then `account.pool({ poolContract })` and `registerSppHostWritePool`.
 4. Ensure Soroban RPC from the SDK uses Nym (scoped fetch / no silent clearnet). Proving keys (~272MB) required for real proofs in extension builds; web profile omits them.
 5. Live Testnet evidence with disposable keys — **not claimed** in this phase.
+6. **Deposit Soroban resource-fee policy (2026-11-05):** see section below.
+
+## Deposit fee policy & persistent rent (2026-11-05)
+
+Evidence: `/opt/cursor/artifacts/deposit/` (prepare packet + `fee-opt/FEE-OPTIMIZATION-REPORT.md`).
+
+| Item | Value |
+| --- | --- |
+| Policy ceiling `deposit` | **8_000_000** stroops (unchanged; not raised) |
+| Observed successful sim `minResourceFee` | **≈ 8_718_236** stroops |
+| Fingerprint (unsigned 2.0 XLM XDR) | `8983d1dfee435b4a056915e61cc5a20cc75df6f43bda359a89df78e6432c3044` |
+| Dominant cost | ~99.6% residual **persistent rent** / events / historical |
+
+### Storage writes (Nethermind pool `transact`)
+
+Protocol-required persistent/instance writes on deposit (from sim footprint + upstream sources):
+
+1. **2×** `DataKey::Nullifier(n)` — `pool.rs` `mark_spent` → `persistent().set` (double-spend prevention).
+2. **1×** `MerkleDataKey::State` rewrite + `extend_persistent` — `merkle_with_history.rs` `insert_two_leaves` (commitment tree + 90-root history).
+3. Pool **instance** totals — `totals::record` (notes/fees).
+4. Sender account + native SAC balance — token `transfer` of `ext_amount` (note + 0.1 XLM pool fee).
+
+Commitments are **not** separate ledger rows; encrypted outputs are **events** only.
+
+### Optimization conclusion
+
+- Client-side assemble/footprint/fee-declaration tricks: **0** safe savings (fee-opt experiments A–F).
+- Reducing rent requires **upstream** pool/Merkle/TTL redesign + migration + new sims — not Astrym wallet changes.
+- Do **not** move nullifiers to temporary storage (double-spend after expiry).
+- Do **not** split `TreeState` (explicitly rejected upstream for sim/race stability).
+
+### Wallet enforcement
+
+- Global mutator / registration / deposit-scoped gates remain **OFF** by default.
+- `SPP_PROPOSED_MAX_FEE_STROOPS.deposit` stays **8_000_000**.
+- Deposits are blocked with `FEE_POLICY_EXCEEDED` / UI copy that this is a **network resource-fee policy** block, **not** a Nym or wallet connection failure (`sppFeePolicy.ts`, `sppNymOption.ts`, `privatePaymentRouter.ts`, `SppPrivateSend.tsx`).
 
 ## Privacy / failure handling
 

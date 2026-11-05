@@ -46,6 +46,14 @@ Resultado on-chain del SDK: `PoolExecuteResult.hashes: string[]`.
 
 No hay tests de integración Testnet reales (sin claves/fondos).
 
+## Deposit fee policy (addendum 2026-11-05 Europe/Paris)
+
+- Successful Groth16 deposit **simulate** for 2.0 XLM: `minResourceFee ≈ 8_718_236` stroops.
+- Policy ceiling remains **8_000_000** (not raised). Deposits blocked under `FEE_POLICY_EXCEEDED`.
+- Rent audit: two persistent nullifier creates + Merkle `TreeState` rewrite dominate; no safe client-side rent cut without upstream contract changes.
+- Gates (global / registration / deposit) remain **OFF**. No broadcast.
+- See `docs/spp-host-background-integration.md` § Deposit fee policy & persistent rent.
+
 ## ¿Deposit / transfer / withdraw son operativos?
 
 **Parcialmente cableados (código), no verificados en Testnet vivo.**

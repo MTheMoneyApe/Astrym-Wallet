@@ -11,7 +11,11 @@ import {
 } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import { privatePaymentFingerprint } from '@solanym/wallet-core/src/stellar/spp/sppExecutionGuard.js';
 import { routePrivatePayment } from './privatePaymentRouter.js';
-import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import {
+  depositFeePolicyUserMessage,
+  depositResourceFeeExceedsPolicy,
+  maxFeeStroopsForOperation,
+} from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
 
 const OPERATIONS: readonly SppPrivateOperation[] = ['deposit', 'transfer', 'withdraw'];
 
@@ -205,6 +209,22 @@ export function SppPrivateSend({
       (error && error.includes('SPP_BROADCAST_AWAITING_APPROVAL')) ? (
         <p className="text-secondary" data-testid="spp-broadcast-awaiting" style={{ fontSize: '0.75rem' }}>
           Pago preparado y retenido. No se ha difundido ninguna transacción Testnet.
+        </p>
+      ) : null}
+      {operation === 'deposit' && depositResourceFeeExceedsPolicy() ? (
+        <p
+          className="error-text"
+          role="status"
+          data-testid="spp-deposit-fee-policy-block"
+          style={{ fontSize: '0.78rem', margin: 0 }}
+        >
+          {depositFeePolicyUserMessage()}
+        </p>
+      ) : null}
+      {errorCode === 'FEE_POLICY_EXCEEDED' ? (
+        <p className="text-secondary" data-testid="spp-fee-policy-exceeded" style={{ fontSize: '0.75rem' }}>
+          Bloqueo de política de fees de red (Soroban resource fee). La wallet y Nym pueden estar
+          conectados correctamente; el depósito no se autoriza ni se difunde bajo el techo actual.
         </p>
       ) : null}
       <label>

@@ -72,4 +72,25 @@ describe('routePrivatePayment', () => {
       routePrivatePayment({ ...base, preparePhase: 'missing_configuration' }).canSubmit,
     ).toBe(false);
   });
+
+  it('blocks deposit for Soroban resource-fee policy after Nym is ready (not a connection failure)', () => {
+    const route = routePrivatePayment({ ...base, operation: 'deposit', hasDestination: false });
+    expect(route.status).toBe('failed');
+    expect(route.canAuthorize).toBe(false);
+    expect(route.canSubmit).toBe(false);
+    expect(route.message).toMatch(/resource fee/i);
+    expect(route.message).toMatch(/No es un fallo de conexión Nym/);
+  });
+
+  it('still reports Nym connection when MixFetch is down (distinct from fee policy)', () => {
+    const route = routePrivatePayment({
+      ...base,
+      operation: 'deposit',
+      nymConnected: false,
+      nymMode: 'direct',
+    });
+    expect(route.status).toBe('idle');
+    expect(route.message).toMatch(/Nym/);
+    expect(route.message).not.toMatch(/resource fee/i);
+  });
 });

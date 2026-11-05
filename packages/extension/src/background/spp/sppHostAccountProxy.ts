@@ -26,6 +26,9 @@ export async function querySppHostAccount(
   options: SppHostAccountProxyOptions & {
     action: SppHostAccountQueryRequest['payload']['action'];
     recipientAddress?: string;
+    freshSequence?: string;
+    transactionFingerprint?: string;
+    registryContract?: string;
   },
 ): Promise<SppHostAccountQueryResult> {
   const id = crypto.randomUUID();
@@ -35,6 +38,11 @@ export async function querySppHostAccount(
     nymConnected: options.nymConnected,
   };
   if (options.recipientAddress) payload.recipientAddress = options.recipientAddress;
+  if (options.freshSequence) payload.freshSequence = options.freshSequence;
+  if (options.transactionFingerprint) {
+    payload.transactionFingerprint = options.transactionFingerprint;
+  }
+  if (options.registryContract) payload.registryContract = options.registryContract;
 
   const request: SppHostAccountQueryRequest = {
     channel: SPP_HOST_BRIDGE_CHANNEL,

@@ -17,6 +17,7 @@ import {
 } from '../../shared/sppHostBridge.js';
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
 import { activeAccountManager } from '../accounts/ActiveAccountManager.js';
+import { getDisposableTestnetSigner } from './disposableTestnetSignerRegistry.js';
 
 /** Testnet passphrase (keep in sync with Networks.TESTNET). */
 const STELLAR_TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
@@ -72,29 +73,6 @@ export async function handleSppHostSignRequest(
   }
 
   try {
-    if (deps.signer.chain !== 'stellar') {
-      return {
-        channel: SPP_HOST_BRIDGE_CHANNEL,
-        type: 'SPP_HOST_SIGN_RESULT',
-        id: request.id,
-        ok: false,
-        code: 'UNAUTHORIZED',
-        message: 'Vault signer is not bound to Stellar.',
-      };
-    }
-
-    const { index, address } = await resolveBoundStellarAddress(deps.keyManager);
-    if (request.payload.address && request.payload.address !== address) {
-      return {
-        channel: SPP_HOST_BRIDGE_CHANNEL,
-        type: 'SPP_HOST_SIGN_RESULT',
-        id: request.id,
-        ok: false,
-        code: 'UNAUTHORIZED',
-        message: 'Requested signer address does not match the active account.',
-      };
-    }
-
     const networkPassphrase = deps.networkPassphrase ?? STELLAR_TESTNET_PASSPHRASE;
     if (
       request.payload.networkPassphrase &&
@@ -110,36 +88,89 @@ export async function handleSppHostSignRequest(
       };
     }
 
-    const gate = createContextualSignatureGate('bind-on-authorize');
-    const adapter = new SppWalletSignerAdapter({
-      signer: deps.signer,
-      accountIndex: index,
-      stellarAddress: address,
-      networkPassphrase,
-      authorizationGate: gate,
-    });
+    const requestedAddress = request.payload.address;
+    const disposable =
+      requestedAddress !== undefined ? getDisposableTestnetSigner(requestedAddress) : null;
+
+    let address: string;
+    let signMessage: (input: string) => Promise<string>;
+    let signTransaction: (input: string) => Promise<string>;
+    let signAuthEntry: (input: string) => Promise<string>;
+
+    if (disposable) {
+      // Disposable S… Testnet identities (not HD vault accounts).
+      address = requestedAddress!;
+      signMessage = async (input) => {
+        const result = await disposable.signMessage(input, { address, networkPassphrase });
+        return typeof result === 'string' ? result : result.signedMessage;
+      };
+      signTransaction = async (input) => {
+        const result = await disposable.signTransaction(input, { address, networkPassphrase });
+        return typeof result === 'string' ? result : result.signedTxXdr;
+      };
+      signAuthEntry = async (input) => {
+        const result = await disposable.signAuthEntry(input, { address, networkPassphrase });
+        return typeof result === 'string' ? result : result.signedAuthEntry;
+      };
+    } else {
+      if (deps.signer.chain !== 'stellar') {
+        return {
+          channel: SPP_HOST_BRIDGE_CHANNEL,
+          type: 'SPP_HOST_SIGN_RESULT',
+          id: request.id,
+          ok: false,
+          code: 'UNAUTHORIZED',
+          message: 'Vault signer is not bound to Stellar.',
+        };
+      }
+
+      const bound = await resolveBoundStellarAddress(deps.keyManager);
+      address = bound.address;
+      if (requestedAddress && requestedAddress !== address) {
+        return {
+          channel: SPP_HOST_BRIDGE_CHANNEL,
+          type: 'SPP_HOST_SIGN_RESULT',
+          id: request.id,
+          ok: false,
+          code: 'UNAUTHORIZED',
+          message: 'Requested signer address does not match the active account.',
+        };
+      }
+
+      const gate = createContextualSignatureGate('bind-on-authorize');
+      const adapter = new SppWalletSignerAdapter({
+        signer: deps.signer,
+        accountIndex: bound.index,
+        stellarAddress: address,
+        networkPassphrase,
+        authorizationGate: gate,
+      });
+      signMessage = async (input) => {
+        const result = await adapter.signMessage(input, { address, networkPassphrase });
+        return typeof result === 'string' ? result : result.signedMessage;
+      };
+      signTransaction = async (input) => {
+        const result = await adapter.signTransaction(input, { address, networkPassphrase });
+        return typeof result === 'string' ? result : result.signedTxXdr;
+      };
+      signAuthEntry = async (input) => {
+        const result = await adapter.signAuthEntry(input, { address, networkPassphrase });
+        return typeof result === 'string' ? result : result.signedAuthEntry;
+      };
+    }
 
     const { kind, input } = request.payload;
     let signatureBase64: string;
     switch (kind) {
-      case 'message': {
-        const result = await adapter.signMessage(input, { address, networkPassphrase });
-        signatureBase64 =
-          typeof result === 'string' ? result : result.signedMessage;
+      case 'message':
+        signatureBase64 = await signMessage(input);
         break;
-      }
-      case 'transaction': {
-        const result = await adapter.signTransaction(input, { address, networkPassphrase });
-        signatureBase64 =
-          typeof result === 'string' ? result : result.signedTxXdr;
+      case 'transaction':
+        signatureBase64 = await signTransaction(input);
         break;
-      }
-      case 'auth_entry': {
-        const result = await adapter.signAuthEntry(input, { address, networkPassphrase });
-        signatureBase64 =
-          typeof result === 'string' ? result : result.signedAuthEntry;
+      case 'auth_entry':
+        signatureBase64 = await signAuthEntry(input);
         break;
-      }
       default: {
         const unexpected: never = kind;
         return {

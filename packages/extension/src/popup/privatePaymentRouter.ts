@@ -4,6 +4,10 @@
  */
 
 import type { SppPrivateOperation } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
+import {
+  depositFeePolicyUserMessage,
+  depositResourceFeeExceedsPolicy,
+} from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
 
 export type PrivatePaymentUiStatus =
   | 'idle'
@@ -100,6 +104,21 @@ export function routePrivatePayment(input: PrivatePaymentRouteInput): PrivatePay
       canSubmit: false,
       blockPublicFallback,
       message: 'Preparando Stellar Private Payments en segundo plano…',
+    };
+  }
+
+  // Deposit resource-fee policy (measured minResourceFee > 8M ceiling). Shown
+  // after Nym/session readiness so it is not mistaken for a connection failure.
+  if (input.operation === 'deposit' && depositResourceFeeExceedsPolicy()) {
+    return {
+      status: 'failed',
+      canAuthorize: false,
+      canSubmit: false,
+      blockPublicFallback,
+      message:
+        input.lastErrorCode === 'FEE_POLICY_EXCEEDED' && input.lastErrorMessage
+          ? input.lastErrorMessage
+          : depositFeePolicyUserMessage(),
     };
   }
 

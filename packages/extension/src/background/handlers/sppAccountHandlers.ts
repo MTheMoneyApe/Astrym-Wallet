@@ -75,10 +75,16 @@ export function createSppRecipientLookupHandler() {
 
 export function createSppRegisterPublicKeysHandler() {
   return async (
-    _payload: ValidatedRequestPayload<'SPP_REGISTER_PUBLIC_KEYS'>,
+    payload: ValidatedRequestPayload<'SPP_REGISTER_PUBLIC_KEYS'>,
   ): Promise<ValidatedResponsePayload<'SPP_REGISTER_PUBLIC_KEYS'>> => {
     const nym = requireNymAndWritePool();
-    const result = await querySppHostAccount({ ...nym, action: 'register_public_keys' });
+    const result = await querySppHostAccount({
+      ...nym,
+      action: 'register_public_keys',
+      freshSequence: payload.freshSequence,
+      transactionFingerprint: payload.transactionFingerprint,
+      registryContract: payload.registryContract,
+    });
     if (!result.ok) mapHostFailure(result);
     return {
       txHash: result.registerTxHash ?? null,

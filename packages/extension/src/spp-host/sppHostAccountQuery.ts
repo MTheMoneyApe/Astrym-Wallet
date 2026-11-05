@@ -95,7 +95,25 @@ export async function executeSppHostAccountQuery(
         };
       }
       case 'register_public_keys': {
-        const { txHash } = await registerSppHostPublicKeys();
+        const freshSequence = payload.freshSequence?.trim();
+        const transactionFingerprint = payload.transactionFingerprint?.trim();
+        const registryContract = payload.registryContract?.trim();
+        if (!freshSequence || !transactionFingerprint || !registryContract) {
+          return {
+            channel: SPP_HOST_BRIDGE_CHANNEL,
+            type: 'SPP_HOST_ACCOUNT_QUERY_RESULT',
+            id,
+            ok: false,
+            code: 'INVALID_REQUEST',
+            message:
+              'register_public_keys requiere freshSequence, transactionFingerprint y registryContract',
+          };
+        }
+        const { txHash } = await registerSppHostPublicKeys({
+          freshSequence,
+          transactionFingerprint,
+          registryContract,
+        });
         return {
           channel: SPP_HOST_BRIDGE_CHANNEL,
           type: 'SPP_HOST_ACCOUNT_QUERY_RESULT',
@@ -120,9 +138,11 @@ export async function executeSppHostAccountQuery(
     }
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : 'Account query failed';
-    const code = message.includes('SPP_BROADCAST_AWAITING_APPROVAL')
-      ? 'UNAUTHORIZED'
-      : 'EXECUTION_FAILED';
+    const code =
+      message.includes('SPP_REGISTRATION_AWAITING_APPROVAL') ||
+      message.includes('SPP_BROADCAST_AWAITING_APPROVAL')
+        ? 'UNAUTHORIZED'
+        : 'EXECUTION_FAILED';
     return {
       channel: SPP_HOST_BRIDGE_CHANNEL,
       type: 'SPP_HOST_ACCOUNT_QUERY_RESULT',

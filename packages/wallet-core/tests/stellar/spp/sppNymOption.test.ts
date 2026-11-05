@@ -62,7 +62,13 @@ describe('SPP option while Nym is on', () => {
     setSppTestnetBroadcastAuthorized(false);
     const pool = readyPool();
     const nymFetch = vi.fn();
-    const request = { operation: 'deposit' as const, poolContract: poolContract(), amountStroops: '10' };
+    // Use transfer so the global gate is exercised independently of deposit fee policy.
+    const request = {
+      operation: 'transfer' as const,
+      poolContract: poolContract(),
+      amountStroops: '10',
+      recipient: Keypair.random().publicKey(),
+    };
     await expect(
       executeSppPrivatePayment({
         gate: { mode: 'nym', connected: true, selected: true },
@@ -74,6 +80,26 @@ describe('SPP option while Nym is on', () => {
         senderAddress: Keypair.random().publicKey(),
       }),
     ).rejects.toMatchObject({ code: 'BROADCAST_AWAITING_APPROVAL' });
+    expect(pool.transfer).not.toHaveBeenCalled();
+    expect(nymFetch).not.toHaveBeenCalled();
+  });
+
+  it('blocks deposit for resource-fee policy before broadcast authorization', async () => {
+    setSppTestnetBroadcastAuthorized(true);
+    const pool = readyPool();
+    const nymFetch = vi.fn();
+    const request = { operation: 'deposit' as const, poolContract: poolContract(), amountStroops: '20000000' };
+    await expect(
+      executeSppPrivatePayment({
+        gate: { mode: 'nym', connected: true, selected: true },
+        request,
+        rpcUrl: RPC,
+        nymFetch,
+        pool,
+        authorizationFingerprint: auth(request),
+        senderAddress: Keypair.random().publicKey(),
+      }),
+    ).rejects.toMatchObject({ code: 'FEE_POLICY_EXCEEDED' });
     expect(pool.deposit).not.toHaveBeenCalled();
     expect(nymFetch).not.toHaveBeenCalled();
   });
@@ -138,13 +164,18 @@ describe('SPP option while Nym is on', () => {
     expect(pool.deposit).not.toHaveBeenCalled();
   });
 
-  it('probes Soroban via Nym then deposits without mutating globalThis.fetch', async () => {
+  it('probes Soroban via Nym then transfers without mutating globalThis.fetch', async () => {
     const previous = globalThis.fetch;
     const direct = vi.fn(async () => new Response('clearnet', { status: 200 }));
     globalThis.fetch = direct as typeof fetch;
     const nymFetch = vi.fn(async () => new Response('{"result":"ok"}', { status: 200 }));
     const pool = readyPool();
-    const request = { operation: 'deposit' as const, poolContract: poolContract(), amountStroops: '10' };
+    const request = {
+      operation: 'transfer' as const,
+      poolContract: poolContract(),
+      amountStroops: '10',
+      recipient: Keypair.random().publicKey(),
+    };
     try {
       const result = await executeSppPrivatePayment({
         gate: { mode: 'nym', connected: true, selected: true },
@@ -157,11 +188,12 @@ describe('SPP option while Nym is on', () => {
       });
       expect(result.rpcRoutedViaNym).toBe(true);
       expect(result.confirmation).toBe('confirmed');
-      expect(result.txHash).toBe('deposit-tx');
+      expect(result.txHash).toBe('transfer-tx');
       expect(direct).not.toHaveBeenCalled();
       expect(globalThis.fetch).toBe(direct);
       expect(nymFetch).toHaveBeenCalled();
-      expect(pool.deposit).toHaveBeenCalled();
+      expect(pool.transfer).toHaveBeenCalled();
+      expect(pool.deposit).not.toHaveBeenCalled();
     } finally {
       globalThis.fetch = previous;
     }
@@ -169,18 +201,23 @@ describe('SPP option while Nym is on', () => {
 
   it('rejects duplicate in-flight executions', async () => {
     const nymFetch = vi.fn(async () => new Response('{"result":"ok"}', { status: 200 }));
-    let resolveDeposit: (value: { txHash: string }) => void = () => undefined;
+    let resolveTransfer: (value: { txHash: string }) => void = () => undefined;
     const pool: SppPrivatePool = {
-      deposit: vi.fn(
+      deposit: vi.fn(async () => ({ txHash: 'd' })),
+      transfer: vi.fn(
         () =>
           new Promise<{ txHash: string }>((resolve) => {
-            resolveDeposit = resolve;
+            resolveTransfer = resolve;
           }),
       ),
-      transfer: vi.fn(async () => ({ txHash: 't' })),
       withdraw: vi.fn(async () => ({ txHash: 'w' })),
     };
-    const request = { operation: 'deposit' as const, poolContract: poolContract(), amountStroops: '10' };
+    const request = {
+      operation: 'transfer' as const,
+      poolContract: poolContract(),
+      amountStroops: '10',
+      recipient: Keypair.random().publicKey(),
+    };
     const fingerprint = auth(request);
     const first = executeSppPrivatePayment({
       gate: { mode: 'nym', connected: true, selected: true },
@@ -200,8 +237,8 @@ describe('SPP option while Nym is on', () => {
         authorizationFingerprint: fingerprint,
       }),
     ).rejects.toMatchObject({ code: 'DUPLICATE_EXECUTION' });
-    resolveDeposit({ txHash: 'deposit-tx' });
-    await expect(first).resolves.toMatchObject({ txHash: 'deposit-tx', confirmation: 'confirmed' });
+    resolveTransfer({ txHash: 'transfer-tx' });
+    await expect(first).resolves.toMatchObject({ txHash: 'transfer-tx', confirmation: 'confirmed' });
   });
 
   it('marks missing tx hash as SUBMISSION_UNKNOWN (no invented confirmation)', async () => {
@@ -211,7 +248,12 @@ describe('SPP option while Nym is on', () => {
       transfer: vi.fn(async () => ({ txHash: null })),
       withdraw: vi.fn(async () => ({ txHash: null })),
     };
-    const request = { operation: 'deposit' as const, poolContract: poolContract(), amountStroops: '10' };
+    const request = {
+      operation: 'transfer' as const,
+      poolContract: poolContract(),
+      amountStroops: '10',
+      recipient: Keypair.random().publicKey(),
+    };
     await expect(
       executeSppPrivatePayment({
         gate: { mode: 'nym', connected: true, selected: true },

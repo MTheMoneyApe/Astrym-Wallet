@@ -11,7 +11,12 @@ import {
   privatePaymentFingerprint,
 } from './sppExecutionGuard.js';
 import { assertSppTestnetBroadcastAuthorized } from './sppBroadcastGate.js';
-import { assertFeeWithinCeiling, maxFeeStroopsForOperation } from './sppFeePolicy.js';
+import {
+  assertFeeWithinCeiling,
+  depositFeePolicyUserMessage,
+  depositResourceFeeExceedsPolicy,
+  maxFeeStroopsForOperation,
+} from './sppFeePolicy.js';
 
 export const STELLAR_SOROBAN_TESTNET_RPC = 'https://soroban-testnet.stellar.org';
 
@@ -53,7 +58,8 @@ export type SppPrivatePaymentCode =
   | 'SUBMISSION_UNKNOWN'
   | 'DUPLICATE_EXECUTION'
   | 'UNAUTHORIZED'
-  | 'BROADCAST_AWAITING_APPROVAL';
+  | 'BROADCAST_AWAITING_APPROVAL'
+  | 'FEE_POLICY_EXCEEDED';
 
 export class SppPrivatePaymentError extends Error {
   readonly code: SppPrivatePaymentCode;
@@ -306,10 +312,16 @@ export async function executeSppPrivatePayment(input: {
   } catch (cause) {
     release();
     throw new SppPrivatePaymentError(
-      'INVALID_REQUEST',
+      'FEE_POLICY_EXCEEDED',
       cause instanceof Error ? cause.message : 'Fee ceiling violated',
       { cause },
     );
+  }
+  // Fail closed before broadcast authorization: measured deposit resource fee
+  // exceeds the unchanged 8M policy (rent-dominated). Not a Nym/wallet outage.
+  if (request.operation === 'deposit' && depositResourceFeeExceedsPolicy()) {
+    release();
+    throw new SppPrivatePaymentError('FEE_POLICY_EXCEEDED', depositFeePolicyUserMessage());
   }
   try {
     assertSppTestnetBroadcastAuthorized({

@@ -72,20 +72,25 @@ describe('sppAccountHandlers IPC', () => {
     expect(result.rpcRoutedViaNym).toBe(true);
   });
 
-  it('propagates broadcast-gate refusal from register_public_keys', async () => {
+  it('propagates registration-scoped gate refusal from register_public_keys', async () => {
     queryMock.mockResolvedValue({
       ok: false,
       code: 'UNAUTHORIZED',
-      message: 'SPP_BROADCAST_AWAITING_APPROVAL: blocked',
+      message: 'SPP_REGISTRATION_AWAITING_APPROVAL: REGISTRATION_AWAITING_APPROVAL — blocked',
       id: '3',
       channel: 'astrym-spp-host-bridge',
       type: 'SPP_HOST_ACCOUNT_QUERY_RESULT',
     });
     await expect(
-      createSppRegisterPublicKeysHandler()({ acknowledgeBroadcast: true }),
+      createSppRegisterPublicKeysHandler()({
+        acknowledgeBroadcast: true,
+        freshSequence: '100',
+        transactionFingerprint: 'deadbeefdeadbeef',
+        registryContract: 'C'.padEnd(56, 'R'),
+      }),
     ).rejects.toMatchObject({
       name: 'UNAUTHORIZED',
-      message: expect.stringContaining('SPP_BROADCAST_AWAITING_APPROVAL'),
+      message: expect.stringContaining('SPP_REGISTRATION_AWAITING_APPROVAL'),
     });
   });
 });

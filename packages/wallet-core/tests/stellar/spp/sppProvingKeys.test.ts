@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  listCircuitArtifactNames,
   listCircuitIds,
   parseCircuitLock,
   probeSppProvingKeys,
+  probeSppProvingKeysOnDisk,
   resolveCircuitArtifactUrl,
+  SPP_PACKAGED_CIRCUIT_COUNT_0_2_1,
 } from '../../../src/stellar/spp/sppProvingKeys.js';
 
 const lock = {
@@ -21,6 +24,12 @@ describe('sppProvingKeys', () => {
     expect(() => parseCircuitLock({ labPlaceholder: true })).toThrow(/labPlaceholder/);
     const parsed = parseCircuitLock(lock);
     expect(listCircuitIds(parsed)).toEqual(['policy_tx_2_2']);
+    expect(listCircuitArtifactNames('policy_tx_2_2')).toEqual([
+      'policy_tx_2_2.r1cs',
+      'policy_tx_2_2.graph.bin',
+      'policy_tx_2_2_proving_key.bin',
+    ]);
+    expect(SPP_PACKAGED_CIRCUIT_COUNT_0_2_1).toBe(16);
   });
 
   it('reports missing proving keys without inventing readiness', async () => {
@@ -67,5 +76,32 @@ describe('sppProvingKeys', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     expect(result.ok).toBe(true);
+  });
+
+  it('probes proving keys on disk without inventing readiness', () => {
+    const present = new Set([
+      '/circuits/policy_tx_2_2.r1cs',
+      '/circuits/policy_tx_2_2.graph.bin',
+      '/circuits/policy_tx_2_2_proving_key.bin',
+    ]);
+    const ok = probeSppProvingKeysOnDisk({
+      circuitsDir: '/circuits',
+      lock: parseCircuitLock(lock),
+      existsSync: (p) => present.has(p),
+      joinPath: (...parts) => parts.join('/').replace(/\/{2,}/g, '/'),
+    });
+    expect(ok.ok).toBe(true);
+
+    const missing = probeSppProvingKeysOnDisk({
+      circuitsDir: '/circuits',
+      lock: parseCircuitLock(lock),
+      existsSync: () => false,
+      joinPath: (...parts) => parts.join('/').replace(/\/{2,}/g, '/'),
+    });
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) {
+      expect(missing.reason).toBe('missing_proving_keys');
+      expect(missing.missing).toContain('policy_tx_2_2_proving_key.bin');
+    }
   });
 });
