@@ -9,6 +9,7 @@ import type { NymTransportMode } from '@solanym/wallet-core/src/nym/NymTransport
 import { NYM_VERIFIED_GATEWAY } from '../nym-offscreen/verifiedGateway.js';
 import { NYM_HTTP_SMOKE_DEFAULT_URL } from '../nym-offscreen/httpSmokeConfig.js';
 import { NYM_PUBLIC_DATA_DEFAULT_URL } from '../nym-offscreen/publicDataConfig.js';
+import { PrivacyModeIndicator } from './privacyIndicator.js';
 
 export type NymHttpSmokeUiResult = {
   state: 'idle' | 'running' | 'success' | 'error' | 'timeout';
@@ -62,6 +63,9 @@ export type NymStellarHorizonUiResult = {
 
 export type NymUiSnapshot = NymTransportSnapshot & {
   mode?: NymTransportMode;
+  preferenceHydrated?: boolean;
+  egressBlocked?: boolean;
+  privacyPreference?: 'direct' | 'nym' | null;
   documentReady?: boolean;
   diagnosticCode?: string;
   diagnosticStage?: string | null;
@@ -140,6 +144,7 @@ export function NymTransportPanel({
   return (
     <div className="card" style={{ marginBottom: 20 }} data-testid="nym-transport-panel">
       <h3 style={{ marginTop: 0, fontSize: '0.95rem' }}>Nym Mixnet</h3>
+      <PrivacyModeIndicator snapshot={snapshot} />
       <p
         style={{ margin: '0 0 8px', fontSize: '0.85rem' }}
         data-nym-state={snapshot.state}
@@ -307,7 +312,7 @@ export function NymTransportPanel({
               disabled={busy || mode === 'direct'}
               onClick={() => onSetMode('direct')}
               data-testid="nym-mode-direct"
-              title="Horizon / clearnet for ordinary wallet ops. Private SPP stays Nym-only."
+              title="Explicit switch to clearnet. Disconnect does not select Direct."
             >
               Direct (Horizon)
             </button>
@@ -572,14 +577,15 @@ export function NymTransportPanel({
       ) : null}
 
       <p style={{ margin: '10px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
-        Por defecto la wallet usa Horizon en Direct. Connect activa Nym (MixFetch fail-closed).
-        Disconnect vuelve a Direct. En modo Nym no hay fallback silencioso a clearnet. En la
-        extensión, el permiso de host se pide en el mismo clic; en Android MixFetch corre en la página.
+        La elección se guarda y se restaura al reiniciar. Sin elección guardada, Horizon usa
+        Direct después de leer el almacenamiento. Connect o «Nym mode» eligen Nym. Disconnect
+        cierra MixFetch y no vuelve a Direct: el tráfico de la wallet sigue bloqueado hasta
+        Connect o hasta el botón Direct. En modo Nym no hay fallback silencioso a clearnet.
       </p>
       {mode === 'nym' && !ready ? (
         <p style={{ margin: '6px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
-          Mientras Nym está seleccionado y no Ready, las peticiones Stellar por MixFetch fallan
-          cerradas (sin clearnet). Usa Direct para Horizon ordinario.
+          Mientras Nym está seleccionado y no Ready, las peticiones de la wallet fallan
+          cerradas (sin clearnet). Direct es un cambio explícito.
         </p>
       ) : null}
     </div>

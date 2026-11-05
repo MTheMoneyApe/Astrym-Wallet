@@ -106,9 +106,10 @@ function initBackgroundSynchronous() {
   (globalThis as any).nymRuntime = nymRuntime;
 
   // Stellar Horizon/Friendbot → FailClosedTransportRouter via MixFetch-aware adapter.
-  // Logical Horizon base = SDF testnet. Default mode=direct (Horizon without Nym).
-  // In mode=nym, getStellarFetch() remaps to the validated MixFetch-effective base
-  // (see stellarHorizonNymConfig.ts) with fail-closed routing (no silent clearnet).
+  // Logical Horizon base = SDF testnet. Wallet fetch waits for the persisted privacy
+  // choice and does not use clearnet while that read is in flight, or while the
+  // choice is Nym and MixFetch is down. In mode=nym, getStellarFetch() remaps to
+  // the validated MixFetch-effective base (see stellarHorizonNymConfig.ts).
   const stellarFetch = nymRuntime.getStellarFetch();
   const stellarReadClient = new StellarReadClient(
     STELLAR_TESTNET_HORIZON_URL,

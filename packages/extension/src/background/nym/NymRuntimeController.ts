@@ -1,7 +1,12 @@
 /**
  * SW orchestration for Nym Mixnet: offscreen host + MixFetchNymTransport +
- * FailClosedTransportRouter. Horizon/Direct is the default wallet transport;
- * Nym is opt-in. While mode=nym, MixFetch stays fail-closed (no silent clearnet).
+ * FailClosedTransportRouter.
+ *
+ * The privacy choice lives in chrome.storage.local (webapp shim: localStorage).
+ * Until that read finishes, and whenever the choice is Nym but MixFetch is down,
+ * wallet HTTP does not use clearnet. Direct is reached only when nothing was
+ * stored, or when the user explicitly selects Direct. Disconnect does not
+ * select Direct. The SPP broadcast gate is not persisted.
  */
 
 import type { NymMixFetchBridge } from '@solanym/wallet-core/src/nym/NymMixFetchBridge.js';
@@ -47,6 +52,12 @@ import {
 import type { StellarReadFetch } from '@solanym/wallet-core/src/stellar/read/StellarReadClient.js';
 import type { NymOffscreenStatusPayload } from '../../nym-offscreen/protocol.js';
 import { NYM_VERIFIED_GATEWAY } from '../../nym-offscreen/verifiedGateway.js';
+import {
+  readNymPrivacyPreference,
+  writeNymPrivacyPreference,
+  type NymPrivacyChoice,
+  type NymPrivacyPreferenceStore,
+} from '../../shared/nymPrivacyPreference.js';
 
 /** Offscreen IPC bridge or the in-page MixFetch bridge used by the Android webapp. */
 export type NymSessionBridge = NymMixFetchBridge & {
@@ -55,6 +66,15 @@ export type NymSessionBridge = NymMixFetchBridge & {
 
 export type NymRuntimeUiSnapshot = NymTransportSnapshot & {
   mode: NymTransportMode;
+  /**
+   * False only while the persisted choice is still being read.
+   * Callers must not treat mode as a user choice until this is true.
+   */
+  preferenceHydrated: boolean;
+  /** True when wallet HTTP must not touch clearnet. */
+  egressBlocked: boolean;
+  /** Null when unset, corrupt, or not yet read. `'direct'` only after an explicit save. */
+  privacyPreference: NymPrivacyChoice | null;
   documentReady: boolean;
   diagnosticCode?: NymDiagnosticCode | string;
   diagnosticStage?: string | null;
@@ -120,12 +140,19 @@ function defaultLocalStorage(): {
 
 export class NymRuntimeController {
   /**
-   * Default Direct so Horizon balances/sends work without Nym.
-   * User Connect switches to nym (fail-closed MixFetch). Disconnect returns to Direct.
+   * Starts as Nym so a restart cannot emit clearnet before storage is read.
    * Diagnostic requests (fetchPublicData, probeStellarHorizon) must not mutate this field.
    * Bridge is OffscreenMixFetchBridge by default; Android webapp injects NymSessionBridge.
    */
-  private _mode: NymTransportMode = 'direct';
+  private _mode: NymTransportMode = 'nym';
+  private _preferenceHydrated = false;
+  private _privacyPreference: NymPrivacyChoice | null = null;
+  /** Bumped by an explicit setMode so a late storage read cannot overwrite it. */
+  private _explicitEpoch = 0;
+  /** Serializes explicit choices so a late Direct write cannot be overwritten by Nym. */
+  private _choiceQueue: Promise<void> = Promise.resolve();
+  private readonly _privacyStore: NymPrivacyPreferenceStore;
+  private readonly _hydratePromise: Promise<void>;
   private readonly _bridge: NymSessionBridge;
   private readonly _transport: MixFetchNymTransport;
   private readonly _router: FailClosedTransportRouter;
@@ -158,6 +185,8 @@ export class NymRuntimeController {
     gatewayConfig?: NymGatewayConfigService;
     hostPermissions?: NymHostPermissionService;
     allowConnectWithoutHostPermission?: boolean;
+    /** Privacy choice store. Defaults to chrome.storage.local (in-memory if absent). */
+    privacyPreferenceStore?: NymPrivacyPreferenceStore;
   }) {
     const docs = createOffscreenDocumentManager();
     this._allowConnectWithoutHostPermission = options?.allowConnectWithoutHostPermission === true;
@@ -172,6 +201,8 @@ export class NymRuntimeController {
       options?.gatewayConfig ?? new NymGatewayConfigService(defaultLocalStorage());
     this._hostPermissions =
       options?.hostPermissions ?? new NymHostPermissionService();
+    this._privacyStore = options?.privacyPreferenceStore ?? defaultLocalStorage();
+    this._hydratePromise = this.hydratePrivacyPreference();
   }
 
   get mode(): NymTransportMode {
@@ -191,7 +222,7 @@ export class NymRuntimeController {
   }
 
   get fetchImpl(): typeof fetch {
-    return this._router.fetch as typeof fetch;
+    return this.getStellarFetch() as typeof fetch;
   }
 
   getRouter(): FailClosedTransportRouter {
@@ -203,11 +234,40 @@ export class NymRuntimeController {
    * Shared by StellarReadClient and Horizon probe — one MixFetch instance via bridge.
    */
   getStellarFetch(): StellarReadFetch {
-    return createStellarTransportFetch({
+    const inner = createStellarTransportFetch({
       getMode: () => this._router.mode,
       fetchViaRouter: (url, init) => this._router.fetch(url, init),
       getNymHorizonConfig: () => this._stellarNymHorizon,
     });
+    return async (url, init) => {
+      await this.whenPrivacyReady();
+      if (this.isEgressBlocked()) {
+        throw new NymTransportError(
+          'NOT_CONNECTED',
+          'Nym mode enabled but mixnet is not connected; refusing clearnet fallback',
+        );
+      }
+      return inner(url, init);
+    };
+  }
+
+  /** Resolves when the persisted choice has been applied. Does not open clearnet by itself. */
+  whenPrivacyReady(): Promise<void> {
+    return this._hydratePromise;
+  }
+
+  private isEgressBlocked(): boolean {
+    if (!this._preferenceHydrated) return true;
+    switch (this._mode) {
+      case 'nym':
+        return this._transport.getSnapshot().connected !== true;
+      case 'direct':
+        return false;
+      default: {
+        const _never: never = this._mode;
+        return _never;
+      }
+    }
   }
 
   getStellarNymHorizonConfig(): StellarNymHorizonConfig {
@@ -234,9 +294,99 @@ export class NymRuntimeController {
     return this.getStellarNymHorizonConfig();
   }
 
-  setMode(mode: NymTransportMode): void {
+  /**
+   * Explicit user choice. `'direct'` is applied only after it is stored.
+   * `'nym'` is applied immediately so a failed write cannot leave clearnet on.
+   * Choices run one at a time.
+   */
+  async setMode(mode: NymTransportMode): Promise<void> {
+    const job = this._choiceQueue.then(() => this.commitMode(mode));
+    this._choiceQueue = job.then(
+      () => undefined,
+      () => undefined,
+    );
+    return job;
+  }
+
+  private async commitMode(mode: NymTransportMode): Promise<void> {
+    const epoch = ++this._explicitEpoch;
+    switch (mode) {
+      case 'nym':
+        this.applyResolved('nym', 'nym');
+        try {
+          await writeNymPrivacyPreference(this._privacyStore, 'nym');
+        } catch (err) {
+          if (this._explicitEpoch === epoch) {
+            this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
+          }
+          throw err;
+        }
+        return;
+      case 'direct':
+        try {
+          await writeNymPrivacyPreference(this._privacyStore, 'direct');
+        } catch (err) {
+          if (this._explicitEpoch === epoch) {
+            this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
+            if (!this._preferenceHydrated) {
+              this._mode = 'nym';
+              this._preferenceHydrated = true;
+              this._router.setMode('nym');
+            }
+          }
+          throw err;
+        }
+        if (this._explicitEpoch !== epoch) return;
+        this.applyResolved('direct', 'direct');
+        return;
+      default: {
+        const _never: never = mode;
+        throw new Error(`Invalid transport mode: ${String(_never)}`);
+      }
+    }
+  }
+
+  private applyResolved(mode: NymTransportMode, preference: NymPrivacyChoice | null): void {
     this._mode = mode;
+    this._privacyPreference = preference;
+    this._preferenceHydrated = true;
+    if (
+      this._diagnosticCode === 'PRIVACY_PREFERENCE_CORRUPT' ||
+      this._diagnosticCode === 'PRIVACY_PREFERENCE_UNREADABLE' ||
+      this._diagnosticCode === 'PRIVACY_PREFERENCE_PERSIST_FAILED'
+    ) {
+      this._diagnosticCode = 'OK';
+    }
     this._router.setMode(mode);
+  }
+
+  private async hydratePrivacyPreference(): Promise<void> {
+    const epoch = this._explicitEpoch;
+    try {
+      const record = await readNymPrivacyPreference(this._privacyStore);
+      if (this._explicitEpoch !== epoch) return;
+      switch (record.kind) {
+        case 'unset':
+          this.applyResolved('direct', null);
+          return;
+        case 'chosen':
+          this.applyResolved(record.choice, record.choice);
+          return;
+        case 'corrupt':
+          this.applyResolved('nym', null);
+          this._diagnosticCode = 'PRIVACY_PREFERENCE_CORRUPT';
+          return;
+        default: {
+          const _never: never = record;
+          throw new Error(`Unhandled privacy preference ${JSON.stringify(_never)}`);
+        }
+      }
+    } catch {
+      if (this._explicitEpoch !== epoch) return;
+      // Storage failures stay fail-closed. Do not select Direct.
+      this.applyResolved('nym', null);
+      this._diagnosticCode = 'PRIVACY_PREFERENCE_UNREADABLE';
+    }
   }
 
   getSnapshot(): NymRuntimeUiSnapshot {
@@ -248,6 +398,9 @@ export class NymRuntimeController {
           ? 'mix-fetch-offscreen'
           : snap.implementation,
       mode: this._mode,
+      preferenceHydrated: this._preferenceHydrated,
+      egressBlocked: this.isEgressBlocked(),
+      privacyPreference: this._privacyPreference,
       documentReady: this._documentReady,
       diagnosticCode: this._diagnosticCode,
       diagnosticStage: this._diagnosticStage,
@@ -324,6 +477,9 @@ export class NymRuntimeController {
     disableCoverTraffic?: boolean;
     preferredGateway?: string;
   }): Promise<NymRuntimeUiSnapshot> {
+    // Connect is an explicit Nym choice. Persist it before any gateway I/O so a
+    // failed connect or a worker restart cannot fall through to clearnet.
+    await this.setMode('nym');
     // Document open ≠ MixFetch ready — cleared until createMixFetch succeeds.
     this._documentReady = false;
     await this._gatewayConfig.ensureVerifiedDefault();
@@ -400,7 +556,6 @@ export class NymRuntimeController {
       this._diagnosticStage = null;
       this._selectedGateway = wssOrigin;
       this._gatewayIdentityKey = identityKey;
-      this.setMode('nym');
       const remote = await this._bridge.queryStatus();
       if (remote) this.applyRemoteFields(remote);
       // Only report MixFetch ready when transport + remote agree connected.
@@ -547,10 +702,16 @@ export class NymRuntimeController {
     }
     await this._transport.close();
     this._documentReady = false;
-    this._diagnosticCode = 'OK';
+    if (
+      this._diagnosticCode !== 'PRIVACY_PREFERENCE_CORRUPT' &&
+      this._diagnosticCode !== 'PRIVACY_PREFERENCE_UNREADABLE' &&
+      this._diagnosticCode !== 'PRIVACY_PREFERENCE_PERSIST_FAILED'
+    ) {
+      this._diagnosticCode = 'OK';
+    }
     this._diagnosticStage = null;
-    // Return to Direct so Horizon works again; private SPP remains gated on Nym.
-    this.setMode('direct');
+    // Disconnect closes MixFetch only. The persisted choice stays. Clearnet
+    // requires setMode('direct') from the user.
     return this.getSnapshot();
   }
 
