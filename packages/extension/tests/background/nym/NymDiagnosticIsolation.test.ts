@@ -147,18 +147,24 @@ async function createTestController(bridgeOverrides: any = {}) {
 }
 
 describe('Nym Diagnostic Isolation & Direct/Nym mode policy', () => {
-  it('controller starts in Direct mode by default (Horizon without Nym)', async () => {
+  it('resolves to Direct when no privacy choice is stored', async () => {
     const { controller } = await createTestController();
+    await controller.whenPrivacyReady();
     expect(controller.mode).toBe('direct');
     expect(controller.getSnapshot().mode).toBe('direct');
+    expect(controller.getSnapshot().privacyPreference).toBeNull();
+    expect(controller.getSnapshot().preferenceHydrated).toBe(true);
+    expect(controller.getSnapshot().egressBlocked).toBe(false);
   });
 
   it('allows switching to Direct and Nym via setMode()', async () => {
     const { controller } = await createTestController();
-    expect(() => controller.setMode('nym')).not.toThrow();
+    await controller.whenPrivacyReady();
+    await controller.setMode('nym');
     expect(controller.mode).toBe('nym');
-    expect(() => controller.setMode('direct')).not.toThrow();
+    await controller.setMode('direct');
     expect(controller.mode).toBe('direct');
+    expect(controller.getSnapshot().privacyPreference).toBe('direct');
   });
 
   it('allows Direct mode via createNymSetModeHandler() IPC handler', async () => {
@@ -169,13 +175,17 @@ describe('Nym Diagnostic Isolation & Direct/Nym mode policy', () => {
     await controller.setMode('nym');
     const snap = await handler({ mode: 'direct' });
     expect(snap.mode).toBe('direct');
+    expect(snap.privacyPreference).toBe('direct');
+    expect(snap.egressBlocked).toBe(false);
     expect(controller.mode).toBe('direct');
   });
 
   it('allows setting Nym mode via setMode("nym")', async () => {
     const { controller } = await createTestController();
-    expect(() => controller.setMode('nym')).not.toThrow();
+    await controller.whenPrivacyReady();
+    await controller.setMode('nym');
     expect(controller.mode).toBe('nym');
+    expect(controller.getSnapshot().egressBlocked).toBe(true);
   });
 
   it('Nym public-data diagnostics call the Nym transport directly (not router.fetch)', async () => {
