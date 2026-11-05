@@ -752,6 +752,12 @@ export const MessageSchemas = {
     request: z.object({
       /** Operator acknowledgment that this may broadcast once the gate opens. */
       acknowledgeBroadcast: z.literal(true),
+      /** 32-byte note public key the user is registering, hex. */
+      noteKeyHex: z.string().regex(/^[0-9a-fA-F]{64}$/),
+      /** 32-byte encryption public key the user is registering, hex. */
+      encryptionKeyHex: z.string().regex(/^[0-9a-fA-F]{64}$/),
+      /** Present only when the registry call includes note_key_proof. */
+      noteKeyProofHex: z.string().regex(/^[0-9a-fA-F]+$/).optional(),
     }),
     response: z.object({
       txHash: z.string().nullable(),

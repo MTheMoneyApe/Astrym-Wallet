@@ -6,8 +6,11 @@
 import { Networks } from '@stellar/stellar-sdk';
 import browser from 'webextension-polyfill';
 import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
-import { mintSppSignApproval } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
-import { NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
+import {
+  mintSppSignApproval,
+  sppKeyDerivationMessage,
+} from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import type { ValidatedRequestPayload, ValidatedResponsePayload } from '../../shared/ipcTypes.js';
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
@@ -111,18 +114,22 @@ export function createSppRegisterPublicKeysHandler(deps: {
     const address = deps.resolveAccount
       ? await deps.resolveAccount()
       : (await resolveActiveStellarAddress(requiredKeyManager(deps.keyManager))).address;
+    const config = getNethermindPublicTestnetContractConfig();
     mintSppSignApproval({
       operation: 'register_public_keys',
       amountStroops: null,
       recipient: null,
       networkPassphrase: Networks.TESTNET,
       poolContractId: null,
-      registryContractId: NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS.public_key_registry,
+      registryContractId: config.public_key_registry,
       tokenContractId: null,
+      registerNoteKeyHex: payload.noteKeyHex,
+      registerEncryptionKeyHex: payload.encryptionKeyHex,
+      registerNoteKeyProofHex: payload.noteKeyProofHex ?? null,
       maxFeeStroops: maxFeeStroopsForOperation('register_public_keys'),
       minResourceFeeStroops: null,
       account: address,
-      exactMessage: null,
+      exactMessage: sppKeyDerivationMessage(config.kdf_domain),
     });
     const nym = requireNymAndWritePool();
     const result = await querySppHostAccount({ ...nym, action: 'register_public_keys' });

@@ -97,7 +97,11 @@ describe('sppAccountHandlers IPC', () => {
     await expect(
       createSppRegisterPublicKeysHandler({
         resolveAccount: async () => 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6',
-      })({ acknowledgeBroadcast: true }, trusted as never),
+      })({
+        acknowledgeBroadcast: true,
+        noteKeyHex: 'ab'.repeat(32),
+        encryptionKeyHex: 'cd'.repeat(32),
+      }, trusted as never),
     ).rejects.toMatchObject({
       name: 'UNAUTHORIZED',
       message: expect.stringContaining('SPP_BROADCAST_AWAITING_APPROVAL'),
@@ -115,7 +119,11 @@ describe('sppAccountHandlers IPC', () => {
       } as never),
     ).rejects.toMatchObject({ name: 'UNAUTHORIZED' });
     await expect(
-      handler({ acknowledgeBroadcast: true }, undefined),
+      handler({
+        acknowledgeBroadcast: true,
+        noteKeyHex: 'ab'.repeat(32),
+        encryptionKeyHex: 'cd'.repeat(32),
+      }, undefined),
     ).rejects.toMatchObject({ name: 'UNAUTHORIZED' });
     expect(queryMock).not.toHaveBeenCalled();
   });

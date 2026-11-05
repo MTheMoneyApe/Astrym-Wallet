@@ -175,7 +175,7 @@ export const SppHostNymFetchFailureSchema = z.object({
   type: z.literal('SPP_HOST_NYM_FETCH_RESULT'),
   id: z.string().min(1),
   ok: z.literal(false),
-  code: z.enum(['NYM_REQUIRED', 'ORIGIN_BLOCKED', 'RPC_FAILED', 'INVALID_REQUEST']),
+  code: z.enum(['NYM_REQUIRED', 'ORIGIN_BLOCKED', 'RPC_FAILED', 'INVALID_REQUEST', 'UNAUTHORIZED']),
   message: z.string().min(1).max(500),
 });
 

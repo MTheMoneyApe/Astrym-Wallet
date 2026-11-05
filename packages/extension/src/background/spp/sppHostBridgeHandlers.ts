@@ -192,7 +192,18 @@ export async function handleSppHostSignRequest(
 /** Host → SW: route Soroban-origin HTTP through Nym fail-closed fetch. */
 export async function handleSppHostNymFetchRequest(
   request: SppHostNymFetchRequest,
+  sender?: { id?: string | undefined; url?: string | undefined },
 ): Promise<SppHostNymFetchResult> {
+  if (!isSppHostDocumentSender(sender)) {
+    return {
+      channel: SPP_HOST_BRIDGE_CHANNEL,
+      type: 'SPP_HOST_NYM_FETCH_RESULT',
+      id: request.id,
+      ok: false,
+      code: 'UNAUTHORIZED',
+      message: 'SPP Nym fetch is accepted only from the extension spp-host document.',
+    };
+  }
   const ctrl = getNymRuntimeController();
   const snap = ctrl.getSnapshot();
   if (snap.mode !== 'nym' || !snap.connected) {

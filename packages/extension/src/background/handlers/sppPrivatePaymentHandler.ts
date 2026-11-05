@@ -6,6 +6,8 @@ import {
 } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
 import { mintSppSignApproval } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { tokenContractIdForEnabledPool } from '@solanym/wallet-core/src/stellar/spp/sppContractConfig.js';
+import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import type { ValidatedRequestPayload, ValidatedResponsePayload } from '../../shared/ipcTypes.js';
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
@@ -30,6 +32,10 @@ export function createSppPrivatePaymentHandler(deps: { keyManager: KeyManager })
     }
     const { address } = await resolveActiveStellarAddress(deps.keyManager);
     const maxFeeStroops = payload.maxFeeStroops ?? maxFeeStroopsForOperation(payload.operation);
+    const tokenContractId = tokenContractIdForEnabledPool(
+      getNethermindPublicTestnetContractConfig(),
+      payload.poolContract,
+    );
     mintSppSignApproval({
       operation: payload.operation,
       amountStroops: payload.amountStroops,
@@ -37,7 +43,10 @@ export function createSppPrivatePaymentHandler(deps: { keyManager: KeyManager })
       networkPassphrase: Networks.TESTNET,
       poolContractId: payload.poolContract,
       registryContractId: null,
-      tokenContractId: null,
+      tokenContractId,
+      registerNoteKeyHex: null,
+      registerEncryptionKeyHex: null,
+      registerNoteKeyProofHex: null,
       maxFeeStroops,
       minResourceFeeStroops: null,
       account: address,

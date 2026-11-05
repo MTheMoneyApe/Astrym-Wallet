@@ -29,6 +29,11 @@ vi.mock('../../../src/background/nym/NymRuntimeController.js', () => {
   };
 });
 
+const HOST_SENDER = {
+  id: 'test-extension-id',
+  url: 'chrome-extension://test-extension-id/spp-host.html',
+};
+
 describe('handleSppHostNymFetchRequest', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -49,7 +54,7 @@ describe('handleSppHostNymFetchRequest', () => {
         headers: { 'content-type': 'application/json' },
         body: '{}',
       },
-    });
+    }, HOST_SENDER);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.bodyText).toBe('ok-body');
@@ -70,10 +75,32 @@ describe('handleSppHostNymFetchRequest', () => {
         url: 'https://evil.example/',
         method: 'GET',
       },
-    });
+    }, HOST_SENDER);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe('ORIGIN_BLOCKED');
     }
+  });
+
+  it('rejects Nym fetch from a sender other than spp-host', async () => {
+    const { handleSppHostNymFetchRequest } = await import(
+      '../../../src/background/spp/sppHostBridgeHandlers.js'
+    );
+    const result = await handleSppHostNymFetchRequest({
+      channel: SPP_HOST_BRIDGE_CHANNEL,
+      type: 'SPP_HOST_NYM_FETCH',
+      id: 'req-3',
+      payload: {
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+        url: 'https://soroban-testnet.stellar.org',
+        method: 'POST',
+        body: '{}',
+      },
+    }, {
+      id: 'test-extension-id',
+      url: 'chrome-extension://test-extension-id/popup.html',
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('UNAUTHORIZED');
   });
 });

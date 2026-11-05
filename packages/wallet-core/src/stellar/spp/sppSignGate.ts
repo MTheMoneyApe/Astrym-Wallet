@@ -68,8 +68,20 @@ export type SppSignIntent = {
   networkPassphrase: string;
   poolContractId: string | null;
   registryContractId: string | null;
-  /** Token contract a deposit auth entry may `transfer`. Null if unused. */
+  /**
+   * Token contract a deposit auth entry must `transfer`. Required for deposit.
+   * Taken from the enabled pool's configured token, not invented here.
+   */
   tokenContractId: string | null;
+  /** 32-byte note public key, hex. Required for register. */
+  registerNoteKeyHex: string | null;
+  /** 32-byte encryption public key, hex. Required for register. */
+  registerEncryptionKeyHex: string | null;
+  /**
+   * Optional `note_key_proof` bytes, hex. Null means the register map must
+   * not contain a proof (SDK 0.2.1). A non-null value must match exactly.
+   */
+  registerNoteKeyProofHex: string | null;
   maxFeeStroops: string;
   /**
    * Simulated Soroban minResourceFee, when the preparer measured one.
@@ -143,6 +155,18 @@ type ParsedInvocation = {
 };
 
 /** Testnet allowlist. Futurenet, Public, standalone, and whitespace variants all fail. */
+/**
+ * SEP-53 message the SDK 0.2.1 wallet signs to derive privacy keys.
+ * `kdfDomain` is the contract config domain, trimmed the same way as the SDK.
+ */
+export function sppKeyDerivationMessage(kdfDomain: string): string {
+  const domain = kdfDomain.trim();
+  if (domain.length === 0 || /[()\r\n]/.test(domain)) {
+    throw new SppSignerError('KDF domain is not safe to bind into the derivation message', 'INVALID_REQUEST');
+  }
+  return `Privacy Pool Key Derivation [v2] (${domain})`;
+}
+
 export function assertStellarTestnetPassphrase(passphrase: string): void {
   if (passphrase !== Networks.TESTNET) {
     throw new SppSignerError('Only the Stellar Testnet passphrase is allowed');
@@ -291,6 +315,10 @@ type SignatureFacts = {
   exactMessage: string | null;
   txFeeStroops: bigint | null;
   invocation: ParsedInvocation | null;
+  registerOwner: string | null;
+  registerNoteKeyHex: string | null;
+  registerEncryptionKeyHex: string | null;
+  registerNoteKeyProofHex: string | null;
 };
 
 type PreparedSignature = {
@@ -334,6 +362,10 @@ function prepareMessage(message: string): PreparedSignature {
       exactMessage: message,
       txFeeStroops: null,
       invocation: null,
+      registerOwner: null,
+      registerNoteKeyHex: null,
+      registerEncryptionKeyHex: null,
+      registerNoteKeyProofHex: null,
     },
     digest: hashSep53Message(message),
     unsignedTransactionXdr: null,
@@ -393,12 +425,22 @@ function prepareTransaction(
   let amountStroops: bigint | null = null;
   let recipient: string | null = null;
   let sender: string | null = null;
+  let registerOwner: string | null = null;
+  let registerNoteKeyHex: string | null = null;
+  let registerEncryptionKeyHex: string | null = null;
+  let registerNoteKeyProofHex: string | null = null;
   if (functionName === 'transact') {
     const ext = readTransactArgs(invoke.args, boundAccount);
     amountStroops = ext.amount;
     recipient = ext.recipient;
     sender = ext.sender;
-  } else if (functionName !== 'register') {
+  } else if (functionName === 'register') {
+    const registered = readRegisterAccount(invoke.args);
+    registerOwner = registered.owner;
+    registerNoteKeyHex = registered.noteKeyHex;
+    registerEncryptionKeyHex = registered.encryptionKeyHex;
+    registerNoteKeyProofHex = registered.noteKeyProofHex;
+  } else {
     throw new SppSignerError(`Unexpected contract function "${functionName}"`);
   }
   if (Array.isArray(op.auth)) {
@@ -425,6 +467,10 @@ function prepareTransaction(
       exactMessage: null,
       txFeeStroops: txFee,
       invocation: null,
+      registerOwner,
+      registerNoteKeyHex,
+      registerEncryptionKeyHex,
+      registerNoteKeyProofHex,
     },
     digest,
     unsignedTransactionXdr: xdrInput,
@@ -439,21 +485,24 @@ function prepareAuthEntry(xdrInput: string, boundAccount: string): PreparedSigna
   let amountStroops: bigint | null = null;
   let recipient: string | null = null;
   let sender: string | null = null;
+  let registerOwner: string | null = null;
+  let registerNoteKeyHex: string | null = null;
+  let registerEncryptionKeyHex: string | null = null;
+  let registerNoteKeyProofHex: string | null = null;
   if (inspected.functionName === 'transact') {
     const ext = readTransactArgs(inspected.args, boundAccount);
     amountStroops = ext.amount;
     recipient = ext.recipient;
     sender = ext.sender;
-    assertSubInvocations(inspected.subInvocations, {
-      amount: ext.amount,
-      account: boundAccount,
-      poolContractId: inspected.contractId,
-      tokenContractId: null,
-    });
   } else if (inspected.functionName === 'register') {
     if (inspected.subInvocations.length !== 0) {
       throw new SppSignerError('register auth entry must not carry sub-invocations');
     }
+    const registered = readRegisterAccount(inspected.args);
+    registerOwner = registered.owner;
+    registerNoteKeyHex = registered.noteKeyHex;
+    registerEncryptionKeyHex = registered.encryptionKeyHex;
+    registerNoteKeyProofHex = registered.noteKeyProofHex;
   } else {
     throw new SppSignerError(`Unexpected auth function "${inspected.functionName}"`);
   }
@@ -468,6 +517,10 @@ function prepareAuthEntry(xdrInput: string, boundAccount: string): PreparedSigna
       exactMessage: null,
       txFeeStroops: null,
       invocation: inspected,
+      registerOwner,
+      registerNoteKeyHex,
+      registerEncryptionKeyHex,
+      registerNoteKeyProofHex,
     },
     digest,
     unsignedTransactionXdr: null,
@@ -618,6 +671,119 @@ function readTransactArgs(
   return { amount: record.ext_amount, recipient: record.recipient, sender: senderNative };
 }
 
+type RegisterAccountBytes = {
+  owner: string;
+  noteKeyHex: string;
+  encryptionKeyHex: string;
+  noteKeyProofHex: string | null;
+};
+
+function readRegisterAccount(args: xdr.ScVal[]): RegisterAccountBytes {
+  if (args.length !== 1) {
+    throw new SppSignerError(
+      `register expects 1 Account argument, got ${args.length}`,
+    );
+  }
+  let native: unknown;
+  try {
+    native = scValToNative(args[0]!);
+  } catch {
+    throw new SppSignerError('register Account argument could not be decoded');
+  }
+  if (!native || typeof native !== 'object' || Array.isArray(native)) {
+    throw new SppSignerError('register Account argument is not a map');
+  }
+  const record = native as Record<string, unknown>;
+  const allowed = new Set(['encryption_key', 'note_key', 'owner', 'note_key_proof']);
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) {
+      throw new SppSignerError(`register Account has unexpected field "${key}"`);
+    }
+  }
+  for (const key of ['encryption_key', 'note_key', 'owner']) {
+    if (!(key in record)) {
+      throw new SppSignerError(`register Account is missing ${key}`);
+    }
+  }
+  if (typeof record['owner'] !== 'string' || !StrKey.isValidEd25519PublicKey(record['owner'])) {
+    throw new SppSignerError('register owner is not a G… address');
+  }
+  const noteKey = bytesOf(record['note_key']);
+  const encryptionKey = bytesOf(record['encryption_key']);
+  if (!noteKey || noteKey.byteLength !== 32 || !encryptionKey || encryptionKey.byteLength !== 32) {
+    throw new SppSignerError('register note_key and encryption_key must be 32 bytes');
+  }
+  let noteKeyProofHex: string | null = null;
+  if ('note_key_proof' in record) {
+    const proof = bytesOf(record['note_key_proof']);
+    if (!proof || proof.byteLength === 0) {
+      throw new SppSignerError('register note_key_proof is empty');
+    }
+    noteKeyProofHex = toHex(proof);
+  }
+  return {
+    owner: record['owner'],
+    noteKeyHex: toHex(noteKey),
+    encryptionKeyHex: toHex(encryptionKey),
+    noteKeyProofHex,
+  };
+}
+
+function registerBindingMatches(
+  facts: {
+    registerOwner: string | null;
+    registerNoteKeyHex: string | null;
+    registerEncryptionKeyHex: string | null;
+    registerNoteKeyProofHex: string | null;
+  },
+  intent: SppSignIntent,
+): boolean {
+  if (
+    intent.registerNoteKeyHex === null
+    || intent.registerEncryptionKeyHex === null
+    || facts.registerOwner === null
+    || facts.registerNoteKeyHex === null
+    || facts.registerEncryptionKeyHex === null
+  ) {
+    return false;
+  }
+  if (facts.registerOwner !== intent.account) return false;
+  if (!hexEq(facts.registerNoteKeyHex, intent.registerNoteKeyHex)) return false;
+  if (!hexEq(facts.registerEncryptionKeyHex, intent.registerEncryptionKeyHex)) return false;
+  if (intent.registerNoteKeyProofHex === null) return facts.registerNoteKeyProofHex === null;
+  return facts.registerNoteKeyProofHex !== null
+    && hexEq(facts.registerNoteKeyProofHex, intent.registerNoteKeyProofHex);
+}
+
+function bytesOf(value: unknown): Uint8Array | null {
+  if (value instanceof Uint8Array) return new Uint8Array(value);
+  return null;
+}
+
+function toHex(bytes: Uint8Array): string {
+  let hex = '';
+  for (let i = 0; i < bytes.byteLength; i += 1) {
+    hex += bytes[i]!.toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+function hexEq(actual: string, expected: string): boolean {
+  return actual.toLowerCase() === expected.toLowerCase();
+}
+
+function assertKeyHex(value: string | null, label: string): void {
+  if (value === null || !/^[0-9a-fA-F]{64}$/.test(value)) {
+    throw new SppSignerError(`Register ${label} must be 32 bytes of hex`, 'INVALID_REQUEST');
+  }
+}
+
+function assertEvenHex(value: string, label: string): void {
+  if (!/^[0-9a-fA-F]+$/.test(value) || value.length % 2 !== 0 || value.length === 0) {
+    throw new SppSignerError(`Register ${label} must be non-empty even-length hex`, 'INVALID_REQUEST');
+  }
+}
+
 function assertSubInvocations(
   subs: InvocationView[],
   expected: {
@@ -627,9 +793,11 @@ function assertSubInvocations(
     tokenContractId: string | null;
   },
 ): void {
-  if (subs.length === 0) return;
+  if (!expected.tokenContractId) {
+    throw new SppSignerError('Deposit intent is missing tokenContractId', 'INVALID_REQUEST');
+  }
   if (subs.length !== 1) {
-    throw new SppSignerError(`Refusing ${subs.length} auth sub-invocations`);
+    throw new SppSignerError('Deposit auth requires exactly one token.transfer sub-invocation');
   }
   const sub = subs[0]!;
   if ((sub.subInvocations?.length ?? 0) !== 0) {
@@ -639,7 +807,7 @@ function assertSubInvocations(
   if (parsed.functionName !== 'transfer' || parsed.args.length !== 3) {
     throw new SppSignerError('Unexpected auth sub-invocation; expected token.transfer');
   }
-  if (expected.tokenContractId && parsed.contractId !== expected.tokenContractId) {
+  if (parsed.contractId !== expected.tokenContractId) {
     throw new SppSignerError('token.transfer contract does not match the approved token');
   }
   let from: unknown;
@@ -734,7 +902,9 @@ function envelopeMatchesIntent(facts: SignatureFacts, intent: SppSignIntent): bo
   const expectedFn = expectedFunction(intent.operation);
   const expectedContract = contractForOperation(intent);
   if (facts.functionName !== expectedFn || facts.contractId !== expectedContract) return false;
-  if (intent.operation === 'register_public_keys') return true;
+  if (intent.operation === 'register_public_keys') {
+    return registerBindingMatches(facts, intent);
+  }
   if (facts.sender !== intent.account) return false;
   if (facts.amountStroops === null || facts.amountStroops !== BigInt(intent.amountStroops ?? '0')) {
     return false;
@@ -756,6 +926,15 @@ function assertInvocationAgainstIntent(
   if (intent.operation === 'register_public_keys') {
     if (invocation.subInvocations.length !== 0) {
       throw new SppSignerError('register auth entry must not carry sub-invocations');
+    }
+    const registered = readRegisterAccount(invocation.args);
+    if (!registerBindingMatches({
+      registerOwner: registered.owner,
+      registerNoteKeyHex: registered.noteKeyHex,
+      registerEncryptionKeyHex: registered.encryptionKeyHex,
+      registerNoteKeyProofHex: registered.noteKeyProofHex,
+    }, intent)) {
+      throw new SppSignerError('Register arguments do not match the approved intent');
     }
     return;
   }
@@ -856,6 +1035,9 @@ function freezeIntent(intent: SppSignIntent): SppSignIntent {
       if (!intent.poolContractId) {
         throw new SppSignerError('Deposit intent requires poolContractId', 'INVALID_REQUEST');
       }
+      if (!intent.tokenContractId) {
+        throw new SppSignerError('Deposit intent requires tokenContractId', 'INVALID_REQUEST');
+      }
       if (intent.exactMessage !== null) {
         throw new SppSignerError('Deposit intent cannot approve a SEP-53 message', 'INVALID_REQUEST');
       }
@@ -891,6 +1073,14 @@ function freezeIntent(intent: SppSignIntent): SppSignIntent {
       if (!intent.registryContractId) {
         throw new SppSignerError('Register intent requires registryContractId', 'INVALID_REQUEST');
       }
+      if (intent.exactMessage === null) {
+        throw new SppSignerError('Register intent requires the approved derivation message', 'INVALID_REQUEST');
+      }
+      assertKeyHex(intent.registerNoteKeyHex, 'note key');
+      assertKeyHex(intent.registerEncryptionKeyHex, 'encryption key');
+      if (intent.registerNoteKeyProofHex !== null) {
+        assertEvenHex(intent.registerNoteKeyProofHex, 'note_key_proof');
+      }
       break;
     default: {
       const unexpected: never = intent.operation;
@@ -905,6 +1095,9 @@ function freezeIntent(intent: SppSignIntent): SppSignIntent {
     poolContractId: intent.poolContractId,
     registryContractId: intent.registryContractId,
     tokenContractId: intent.tokenContractId,
+    registerNoteKeyHex: intent.registerNoteKeyHex?.toLowerCase() ?? null,
+    registerEncryptionKeyHex: intent.registerEncryptionKeyHex?.toLowerCase() ?? null,
+    registerNoteKeyProofHex: intent.registerNoteKeyProofHex?.toLowerCase() ?? null,
     maxFeeStroops: intent.maxFeeStroops,
     minResourceFeeStroops: intent.minResourceFeeStroops,
     account: intent.account,

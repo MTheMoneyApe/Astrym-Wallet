@@ -57,7 +57,10 @@ const SEP53_SIG_B64 =
   'fO5dbYhXUhBMhe6kId/cuVq/AfEnHRHEvsP8vXh03M1uLpi5e46yO2Q8rEBzu3feXQewcQE5GArp88u6ePK6BA==';
 /** SEP-0053 official TV2 (Japanese). */
 const POOL = 'CAMWBUWHYXEGBM3Q7M5DBGW7LLJL3I4QGANQEZFEWLRNTOJMTT2WG24U';
+const TOKEN = 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
 const REGISTRY = 'CARXHKOPSGMUMFRDI72KNCRENVOTCJIGXPCPYOW42APDY2NEYF7CLKIL';
+const NOTE_KEY = 'ab'.repeat(32);
+const ENC_KEY = 'ee'.repeat(32);
 const SEP53_MSG_JA = 'こんにちは、世界！';
 
 function baseIntent(overrides: Partial<SppSignIntent> = {}): SppSignIntent {
@@ -68,7 +71,10 @@ function baseIntent(overrides: Partial<SppSignIntent> = {}): SppSignIntent {
     networkPassphrase: Networks.TESTNET,
     poolContractId: POOL,
     registryContractId: null,
-    tokenContractId: null,
+    tokenContractId: TOKEN,
+    registerNoteKeyHex: null,
+    registerEncryptionKeyHex: null,
+    registerNoteKeyProofHex: null,
     maxFeeStroops: '8000000',
     minResourceFeeStroops: null,
     account: SEP0005_TV1_G,
@@ -84,6 +90,10 @@ function approveMessage(message: string): void {
     recipient: null,
     poolContractId: null,
     registryContractId: REGISTRY,
+    tokenContractId: null,
+    registerNoteKeyHex: NOTE_KEY,
+    registerEncryptionKeyHex: ENC_KEY,
+    registerNoteKeyProofHex: null,
     maxFeeStroops: '5000000',
     exactMessage: message,
   }));
@@ -268,7 +278,22 @@ function buildTransactAuth(
         ],
       }),
     ),
-    subInvocations: [],
+    subInvocations: [
+      new xdr.SorobanAuthorizedInvocation({
+        function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+          new xdr.InvokeContractArgs({
+            contractAddress: Address.fromString(TOKEN).toScAddress(),
+            functionName: 'transfer',
+            args: [
+              Address.fromString(SEP0005_TV1_G).toScVal(),
+              Address.fromString(contract).toScVal(),
+              nativeToScVal(10n, { type: 'i128' }),
+            ],
+          }),
+        ),
+        subInvocations: [],
+      }),
+    ],
   });
   const preimage = options.withAddress
     ? xdr.HashIdPreimage.envelopeTypeSorobanAuthorizationWithAddress(
