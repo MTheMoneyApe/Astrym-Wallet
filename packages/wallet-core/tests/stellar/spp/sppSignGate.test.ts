@@ -252,7 +252,20 @@ function depositPair(
   tokenContract: string,
   proofByte: number,
   encryptedByte: number,
+  options: {
+    nonce?: bigint;
+    expiration?: number;
+    authNonce?: bigint;
+    authExpiration?: number;
+    txCredentials?: 'address' | 'source';
+    txAddress?: string;
+  } = {},
 ): { auth: string; tx: string } {
+  const nonce = options.nonce ?? BigInt(proofByte + 10);
+  const expiration = options.expiration ?? 150;
+  const authNonce = options.authNonce ?? nonce;
+  const authExpiration = options.authExpiration ?? expiration;
+  const txAddress = options.txAddress ?? ACCOUNT;
   const ext = xdr.ScVal.scvMap([
     new xdr.ScMapEntry({
       key: xdr.ScVal.scvSymbol('encrypted_output0'),
@@ -296,11 +309,28 @@ function depositPair(
   const auth = xdr.HashIdPreimage.envelopeTypeSorobanAuthorization(
     new xdr.HashIdPreimageSorobanAuthorization({
       networkId: hash(Buffer.from(Networks.TESTNET)),
-      nonce: xdr.Int64(BigInt(proofByte + 10)),
-      signatureExpirationLedger: 50,
+      nonce: xdr.Int64(authNonce),
+      signatureExpirationLedger: authExpiration,
       invocation,
     }),
   ).toXDR('base64');
+  const credentials = options.txCredentials === 'source'
+    ? xdr.SorobanCredentials.sorobanCredentialsSourceAccount()
+    : xdr.SorobanCredentials.sorobanCredentialsAddress(new xdr.SorobanAddressCredentials({
+      address: Address.fromString(txAddress).toScAddress(),
+      nonce: xdr.Int64(nonce),
+      signatureExpirationLedger: expiration,
+      signature: xdr.ScVal.scvMap([
+        new xdr.ScMapEntry({
+          key: xdr.ScVal.scvSymbol('public_key'),
+          val: xdr.ScVal.scvBytes(Buffer.alloc(32, 7)),
+        }),
+        new xdr.ScMapEntry({
+          key: xdr.ScVal.scvSymbol('signature'),
+          val: xdr.ScVal.scvBytes(Buffer.alloc(64, 9)),
+        }),
+      ]),
+    }));
   const tx = new TransactionBuilder(new Account(ACCOUNT, '10'), {
     fee: '100',
     networkPassphrase: Networks.TESTNET,
@@ -311,7 +341,7 @@ function depositPair(
       args: [xdr.ScVal.scvBytes(Buffer.from([proofByte])), ext, sender],
       auth: [
         new xdr.SorobanAuthorizationEntry({
-          credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+          credentials,
           rootInvocation: invocation,
         }),
       ],
@@ -736,7 +766,7 @@ describe('SPP sign gate attack cases', () => {
       input: treeB.tx,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).toThrow(/authorization tree/);
+    })).toThrow(/authorization identity/);
     expect(() => authorizeSppSignature({
       kind: 'transaction',
       input: treeA.tx,
@@ -763,7 +793,7 @@ describe('SPP sign gate attack cases', () => {
       input: treeA.auth,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).toThrow(/authorization tree/);
+    })).toThrow(/authorization identity/);
     expect(() => authorizeSppSignature({
       kind: 'auth_entry',
       input: treeB.auth,
@@ -821,7 +851,66 @@ describe('SPP sign gate attack cases', () => {
       input: extOnly.tx,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).toThrow(/authorization tree/);
+    })).toThrow(/authorization identity/);
+  });
+
+  it('binds auth and transaction to one address nonce and expiration', async () => {
+    const token = tokenContractIdForEnabledPool(getNethermindPublicTestnetContractConfig(), XLM_POOL);
+    const deposit = intent({
+      operation: 'deposit',
+      amountStroops: '25',
+      recipient: null,
+      poolContractId: POOL,
+      tokenContractId: token,
+    });
+    const matched = depositPair(token, 1, 9, { nonce: 11n, expiration: 150 });
+    const otherNonce = depositPair(token, 1, 9, { nonce: 12n, expiration: 150 });
+    const otherExpiration = depositPair(token, 1, 9, { nonce: 11n, expiration: 151 });
+    const sourceTx = depositPair(token, 1, 9, { nonce: 11n, expiration: 150, txCredentials: 'source' });
+    const foreign = depositPair(token, 1, 9, { nonce: 11n, expiration: 150, txAddress: OTHER });
+
+    const sign = (kind: 'auth_entry' | 'transaction', input: string) => authorizeSppSignature({
+      kind,
+      input,
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    });
+
+    mintSppSignApproval(deposit);
+    expect(() => sign('auth_entry', matched.auth)).not.toThrow();
+    expect(() => sign('transaction', otherNonce.tx)).toThrow(/authorization identity/);
+    expect(() => sign('transaction', otherExpiration.tx)).toThrow(/authorization identity/);
+    expect(() => sign('transaction', sourceTx.tx)).toThrow(/authorization identity/);
+    expect(() => sign('transaction', foreign.tx)).toThrow(/bound Stellar account/);
+    expect(() => sign('transaction', matched.tx)).not.toThrow();
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/already used/);
+
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(deposit);
+    expect(() => sign('transaction', matched.tx)).not.toThrow();
+    expect(() => sign('auth_entry', otherNonce.auth)).toThrow(/authorization identity/);
+    expect(() => sign('auth_entry', otherExpiration.auth)).toThrow(/authorization identity/);
+    expect(() => sign('auth_entry', matched.auth)).not.toThrow();
+
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(deposit);
+    expect(() => sign('transaction', sourceTx.tx)).not.toThrow();
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/authorization identity/);
+
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(deposit);
+    expect(() => sign('auth_entry', matched.auth)).not.toThrow();
+    expect(() => sign('transaction', sourceTx.tx)).toThrow(/authorization identity/);
+    expect(() => sign('transaction', matched.tx)).not.toThrow();
+
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(deposit);
+    const raced = await Promise.allSettled([
+      Promise.resolve().then(() => sign('auth_entry', matched.auth)),
+      Promise.resolve().then(() => sign('transaction', otherNonce.tx)),
+    ]);
+    expect(raced.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(raced.filter((result) => result.status === 'rejected')).toHaveLength(1);
   });
 
   it('does not sign a register envelope against a transfer approval', () => {

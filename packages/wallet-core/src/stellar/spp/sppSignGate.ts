@@ -19,6 +19,12 @@
  *   when the approval recorded a simulation;
  * - spp-host: the same function, via the host fee scope, when the host signer
  *   sees the assembled transaction or a simulated resource fee.
+ *
+ * stellar-private-payments 0.2.1 signs an address-auth preimage, then the
+ * envelope that embeds that same address, nonce, expiration, and invocation.
+ * Those two signatures share one authorization id. A source-account entry has
+ * no auth nonce; that envelope cannot share an approval with an address
+ * signature. Signature bytes are not part of the id.
  */
 
 import {
@@ -131,10 +137,12 @@ type StoredApproval = {
   expiresAtMs: number;
   used: UsedSlots;
   /**
-   * Canonical Soroban invocation tree (no nonce, network id, or credentials)
-   * fixed by the first economic signature. The other economic slot must match it.
+   * Authorization identity fixed by the first economic signature.
+   * Address mode includes the bound account, nonce, expiration, and invocation.
+   * Source-account mode is the envelope source plus the invocation and does not
+   * pair with a separate auth-entry signature.
    */
-  economicTreeXdr: string | null;
+  authorizationId: string | null;
 };
 
 const pending: StoredApproval[] = [];
@@ -232,7 +240,7 @@ export function mintSppSignApproval(intent: SppSignIntent, nowMs: number = Date.
     mintedAtMs: nowMs,
     expiresAtMs: nowMs + APPROVAL_TTL_MS,
     used: { message: false, transaction: false, auth_entry: false },
-    economicTreeXdr: null,
+    authorizationId: null,
   });
   return id;
 }
@@ -327,6 +335,11 @@ type SignatureFacts = {
   embeddedAuth: ParsedInvocation[];
   /** Full invocation tree. Null for SEP-53 messages. */
   economicTreeXdr: string | null;
+  /**
+   * Credential mode plus tree. Null for SEP-53 messages.
+   * The signature bytes inside address credentials are not part of this id.
+   */
+  authorizationId: string | null;
   registerOwner: string | null;
   registerNoteKeyHex: string | null;
   registerEncryptionKeyHex: string | null;
@@ -376,6 +389,7 @@ function prepareMessage(message: string): PreparedSignature {
       invocation: null,
       embeddedAuth: [],
       economicTreeXdr: null,
+      authorizationId: null,
       registerOwner: null,
       registerNoteKeyHex: null,
       registerEncryptionKeyHex: null,
@@ -419,7 +433,7 @@ function prepareTransaction(
     type?: string;
     source?: string;
     func?: { type?: string; invokeContract?: InvokeContractView };
-    auth?: Array<{ rootInvocation?: InvocationView }>;
+    auth?: Array<{ rootInvocation?: InvocationView; credentials?: SorobanCredentialsView }>;
   };
   if (op.source && op.source !== boundAccount) {
     throw new SppSignerError('Operation source does not match the bound account');
@@ -458,6 +472,7 @@ function prepareTransaction(
     throw new SppSignerError(`Unexpected contract function "${functionName}"`);
   }
   const embeddedAuth: ParsedInvocation[] = [];
+  const embeddedCredentials: Array<SorobanCredentialsView | undefined> = [];
   if (Array.isArray(op.auth)) {
     for (const entry of op.auth) {
       if (!entry?.rootInvocation) {
@@ -471,9 +486,10 @@ function prepareTransaction(
         throw new SppSignerError('Root authorization arguments do not match the transaction invoke');
       }
       embeddedAuth.push(root);
+      embeddedCredentials.push(entry.credentials);
     }
   }
-  if (functionName === 'transact' && embeddedAuth.length > 1) {
+  if (embeddedAuth.length > 1) {
     throw new SppSignerError('Transaction carries more than one Soroban authorization');
   }
   const subs = embeddedAuth[0]?.subInvocations ?? [];
@@ -483,6 +499,9 @@ function prepareTransaction(
       throw new SppSignerError('Embedded authorization tree does not match the transaction invoke');
     }
   }
+  const authorizationId = embeddedAuth.length === 0
+    ? sourceAuthorizationId(boundAccount, economicTreeXdr)
+    : credentialAuthorizationId(embeddedCredentials[0], economicTreeXdr, boundAccount);
   const txHash = tx.hash();
   const digest = txHash instanceof Uint8Array ? txHash : new Uint8Array(txHash as ArrayLike<number>);
   return {
@@ -498,6 +517,7 @@ function prepareTransaction(
       invocation: null,
       embeddedAuth,
       economicTreeXdr,
+      authorizationId,
       registerOwner,
       registerNoteKeyHex,
       registerEncryptionKeyHex,
@@ -550,6 +570,7 @@ function prepareAuthEntry(xdrInput: string, boundAccount: string): PreparedSigna
       invocation: inspected,
       embeddedAuth: [],
       economicTreeXdr: inspected.treeXdr,
+      authorizationId: authPreimageAuthorizationId(preimage, inspected.treeXdr, boundAccount),
       registerOwner,
       registerNoteKeyHex,
       registerEncryptionKeyHex,
@@ -649,6 +670,108 @@ function assertAuthPreamble(preimage: AuthPreimageView, boundAccount: string): v
       throw new SppSignerError('Auth preimage address does not match the bound Stellar account');
     }
   }
+}
+
+type SorobanCredentialsView = {
+  type?: string;
+  value?: {
+    address?: xdr.ScAddress;
+    nonce?: bigint | number;
+    signatureExpirationLedger?: number | bigint;
+  } | null;
+};
+
+function canonicalNonce(value: unknown, label: string): string {
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'number' && Number.isInteger(value)) return String(value);
+  throw new SppSignerError(`${label} is missing`, 'INVALID_REQUEST');
+}
+
+function canonicalExpiration(value: unknown, label: string): number {
+  const raw = typeof value === 'bigint' ? Number(value) : value;
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0) {
+    throw new SppSignerError(`${label} must be a positive ledger`);
+  }
+  return raw;
+}
+
+/** Legacy address auth: the shape stellar-private-payments 0.2.1 signs and embeds. */
+function addressAuthorizationId(
+  address: string,
+  nonce: string,
+  expiration: number,
+  treeXdr: string,
+): string {
+  return `address\n${address}\n${nonce}\n${expiration}\n${treeXdr}`;
+}
+
+/** WithAddress preimage. A different signed payload from the 0.2.1 address entry. */
+function withAddressAuthorizationId(
+  address: string,
+  nonce: string,
+  expiration: number,
+  treeXdr: string,
+): string {
+  return `address-with\n${address}\n${nonce}\n${expiration}\n${treeXdr}`;
+}
+
+/** Envelope source authorizes the tree. No separate auth-entry nonce exists. */
+function sourceAuthorizationId(account: string, treeXdr: string): string {
+  return `source_account\n${account}\n${treeXdr}`;
+}
+
+function authPreimageAuthorizationId(
+  preimage: AuthPreimageView,
+  treeXdr: string,
+  boundAccount: string,
+): string {
+  const nonce = canonicalNonce(preimage.nonce, 'Auth preimage nonce');
+  const expiration = canonicalExpiration(
+    preimage.signatureExpirationLedger,
+    'Auth preimage signatureExpirationLedger',
+  );
+  if (preimage.typeName === 'envelopeTypeSorobanAuthorizationWithAddress') {
+    if (!preimage.address) {
+      throw new SppSignerError('Auth preimage WithAddress is missing address');
+    }
+    return withAddressAuthorizationId(preimage.address, nonce, expiration, treeXdr);
+  }
+  return addressAuthorizationId(boundAccount, nonce, expiration, treeXdr);
+}
+
+function credentialAuthorizationId(
+  credentials: SorobanCredentialsView | undefined,
+  treeXdr: string,
+  boundAccount: string,
+): string {
+  const typeName = credentials?.type ?? '';
+  if (typeName === 'sorobanCredentialsSourceAccount') {
+    return sourceAuthorizationId(boundAccount, treeXdr);
+  }
+  if (typeName !== 'sorobanCredentialsAddress') {
+    throw new SppSignerError(
+      `Unsupported Soroban credential "${typeName || 'missing'}"`,
+    );
+  }
+  const value = credentials?.value;
+  if (!value?.address) {
+    throw new SppSignerError('Transaction auth entry is missing its address');
+  }
+  let address: string;
+  try {
+    address = Address.fromScAddress(value.address).toString();
+  } catch {
+    throw new SppSignerError('Transaction auth address is not a recognizable ScAddress');
+  }
+  if (!StrKey.isValidEd25519PublicKey(address) || address !== boundAccount) {
+    throw new SppSignerError('Transaction auth address does not match the bound Stellar account');
+  }
+  const nonce = canonicalNonce(value.nonce, 'Transaction auth nonce');
+  const expiration = canonicalExpiration(
+    value.signatureExpirationLedger,
+    'Transaction auth expiration',
+  );
+  return addressAuthorizationId(address, nonce, expiration, treeXdr);
 }
 
 function scValListXdr(args: xdr.ScVal[]): string {
@@ -964,14 +1087,14 @@ function consumeMatchingApproval(
     }
   }
   if (kind === 'transaction' || kind === 'auth_entry') {
-    if (!facts.economicTreeXdr) {
-      throw new SppSignerError('Economic signature is missing its invocation tree', 'INVALID_REQUEST');
+    if (!facts.authorizationId) {
+      throw new SppSignerError('Economic signature is missing its authorization identity', 'INVALID_REQUEST');
     }
-    if (chosen.economicTreeXdr === null) {
-      chosen.economicTreeXdr = facts.economicTreeXdr;
-    } else if (chosen.economicTreeXdr !== facts.economicTreeXdr) {
+    if (chosen.authorizationId === null) {
+      chosen.authorizationId = facts.authorizationId;
+    } else if (chosen.authorizationId !== facts.authorizationId) {
       throw new SppSignerError(
-        'Signature authorization denied: authorization tree does not match the approved operation',
+        'Signature authorization denied: authorization identity does not match the approved operation',
       );
     }
   }
