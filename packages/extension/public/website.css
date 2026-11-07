@@ -337,3 +337,43 @@ img, svg {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+.language-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--tap-min);
+  padding: 3px;
+  border: 1px solid rgba(60, 232, 148, 0.35);
+  border-radius: 999px;
+}
+
+.language-button {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  min-width: 38px;
+  min-height: 34px;
+  padding: 0 9px;
+  background: transparent;
+  color: var(--grey);
+  cursor: pointer;
+  font: 600 0.72rem "JetBrains Mono", monospace;
+}
+
+.language-button.is-active {
+  background: var(--mint);
+  color: #102018;
+}
+
+.language-button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+@media (max-width: 429px) {
+  .top-nav { gap: 8px; }
+  .language-switch { gap: 2px; }
+  .language-button { min-width: 34px; padding: 0 7px; }
+}
