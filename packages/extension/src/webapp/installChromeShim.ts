@@ -340,7 +340,20 @@ export function installAndroidChromeShim(options?: AndroidChromeShimOptions): vo
         oldValue?: string | null;
         newValue?: string | null;
       };
-      if (record.key != null && record.key !== LOCAL_STORAGE_KEY) return;
+      // localStorage.clear() delivers key === null and no per-key diff.
+      if (record.key === null) {
+        onChanged.emit(
+          {
+            [NYM_PRIVACY_PREFERENCE_STORAGE_KEY]: {
+              oldValue: undefined,
+              newValue: undefined,
+            },
+          },
+          'local',
+        );
+        return;
+      }
+      if (record.key !== LOCAL_STORAGE_KEY) return;
       publishForeignLocal(record.oldValue ?? null, record.newValue ?? null);
     });
   }

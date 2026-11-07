@@ -58,6 +58,14 @@ function sharedLocalStorage(peers: EventTarget[]) {
         },
       };
     },
+    clear() {
+      data.clear();
+      for (const peer of peers) {
+        const event = new Event('storage');
+        Object.assign(event, { key: null, oldValue: null, newValue: null });
+        peer.dispatchEvent(event);
+      }
+    },
   };
 }
 
@@ -131,5 +139,33 @@ describe('webapp privacy sync across instances', () => {
     ).resolves.toMatchObject({ transportFetchInvoked: false });
     expect(clearnet).not.toHaveBeenCalled();
     expect(writer.getSnapshot().privacyPreference).toBe('nym');
+  });
+
+  it('revokes Direct on the peer when storage is cleared (key null)', async () => {
+    const eventsA = new EventTarget();
+    const eventsB = new EventTarget();
+    const backing = sharedLocalStorage([eventsA, eventsB]);
+    const writer = instance(backing.forPeer(eventsA), eventsA);
+    await writer.setMode('direct');
+    const peer = instance(backing.forPeer(eventsB), eventsB);
+    await peer.whenPrivacyReady();
+    expect(peer.getSnapshot().egressBlocked).toBe(false);
+
+    backing.clear();
+    expect(peer.getSnapshot().egressBlocked).toBe(true);
+    expect(peer.mode).not.toBe('direct');
+
+    const clearnet = vi.fn(async () => new Response('horizon', { status: 200 }));
+    vi.stubGlobal('fetch', clearnet);
+    await expect(peer.getStellarFetch()(HORIZON)).rejects.toMatchObject({ code: 'NOT_CONNECTED' });
+    await expect(peer.getRouter().fetch(HORIZON)).rejects.toMatchObject({ code: 'NOT_CONNECTED' });
+    await expect(
+      peer.fetchPublicData({ transport: 'direct', url: 'https://postman-echo.com/get' }),
+    ).resolves.toMatchObject({ transportFetchInvoked: false });
+    expect(clearnet).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(peer.getSnapshot().privacyPreference).toBeNull();
+    expect(peer.getSnapshot().egressBlocked).toBe(true);
+    expect(clearnet).not.toHaveBeenCalled();
   });
 });

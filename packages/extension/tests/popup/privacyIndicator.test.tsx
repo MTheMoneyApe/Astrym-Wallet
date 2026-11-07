@@ -80,7 +80,7 @@ describe('privacy indicator', () => {
         privacyPreference: null,
         diagnosticCode: 'PRIVACY_PREFERENCE_PERSIST_FAILED',
       }).label,
-    ).toBe('Privacy: not saved — wallet network blocked');
+    ).toBe('Privacy: not saved — reload may restore previous Direct');
 
     const blocked = describeWalletPrivacy({
       mode: 'nym',

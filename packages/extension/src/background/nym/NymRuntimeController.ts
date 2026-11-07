@@ -184,8 +184,13 @@ export class NymRuntimeController {
   private _privacyPreference: NymPrivacyChoice | null = null;
   private _preferenceDurable = false;
   private readonly _statusListeners = new Set<(snapshot: NymRuntimeUiSnapshot) => void>();
-  /** Bumped by an explicit setMode so a late storage read cannot overwrite it. */
-  private _explicitEpoch = 0;
+  /**
+   * One generation for hydration, remote invalidation, and local choices.
+   * A completion may apply Direct only when it still owns this generation.
+   */
+  private _policyGeneration = 0;
+  /** Set synchronously on invalidation, before any storage read. Blocks clearnet. */
+  private _directSuspended = false;
   /** Serializes explicit choices so a late Direct write cannot be overwritten by Nym. */
   private _choiceQueue: Promise<void> = Promise.resolve();
   private readonly _privacyStore: NymPrivacyPreferenceStore;
@@ -375,7 +380,7 @@ export class NymRuntimeController {
   }
 
   private isEgressBlocked(): boolean {
-    if (!this._preferenceHydrated) return true;
+    if (this._directSuspended || !this._preferenceHydrated) return true;
     // Clearnet requires a stored explicit Direct choice. Null is not Direct.
     if (this._privacyPreference !== 'direct' && this._privacyPreference !== 'nym') {
       return true;
@@ -422,7 +427,16 @@ export class NymRuntimeController {
    * Choices run one at a time.
    */
   async setMode(mode: NymTransportMode): Promise<void> {
-    const job = this._choiceQueue.then(() => this.commitMode(mode));
+    if (mode !== 'direct' && mode !== 'nym') {
+      throw new Error(`Invalid transport mode: ${String(mode)}`);
+    }
+    // Revoke Direct as soon as the choice is requested, before the write queue runs.
+    const generation = ++this._policyGeneration;
+    this.suspendDirect();
+    if (mode === 'nym') {
+      this.applyResolved('nym', 'nym', false);
+    }
+    const job = this._choiceQueue.then(() => this.commitMode(mode, generation));
     this._choiceQueue = job.then(
       () => undefined,
       () => undefined,
@@ -430,46 +444,41 @@ export class NymRuntimeController {
     return job;
   }
 
-  private async commitMode(mode: NymTransportMode): Promise<void> {
-    const epoch = ++this._explicitEpoch;
+  private async commitMode(mode: NymTransportMode, generation: number): Promise<void> {
     switch (mode) {
       case 'nym':
-        // Memory switches to Nym before the write so a failed save cannot leave Direct.
-        // preferenceDurable stays false until the write resolves. A later controller
-        // reads storage and restores the previous successful value; that reload is
-        // not a saved Nym choice.
-        this.applyResolved('nym', 'nym', false);
+        // Memory is already Nym and not durable. A failed write leaves the previous
+        // stored value in place. Reload restores that value, which may be Direct.
+        // This completion must not be described as a saved Nym choice.
         try {
           await writeNymPrivacyPreference(this._privacyStore, 'nym');
         } catch (err) {
-          if (this._explicitEpoch === epoch) {
+          if (this._policyGeneration === generation) {
             this._preferenceDurable = false;
             this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
             this.publishRuntimeStatus();
           }
           throw err;
         }
-        if (this._explicitEpoch !== epoch) return;
+        if (this._policyGeneration !== generation) return;
         this._preferenceDurable = true;
+        this._directSuspended = false;
         this.publishRuntimeStatus();
         return;
       case 'direct':
         try {
           await writeNymPrivacyPreference(this._privacyStore, 'direct');
         } catch (err) {
-          if (this._explicitEpoch === epoch) {
+          if (this._policyGeneration === generation) {
             this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
-            if (!this._preferenceHydrated) {
-              this._mode = 'nym';
-              this._preferenceHydrated = true;
-              this._preferenceDurable = false;
-              this._router.setMode('nym');
-            }
+            this._preferenceDurable = false;
             this.publishRuntimeStatus();
           }
           throw err;
         }
-        if (this._explicitEpoch !== epoch) return;
+        // A remote Nym/clear that arrived while this write was pending owns a newer
+        // generation. Do not rearm Direct from this stale completion.
+        if (this._policyGeneration !== generation) return;
         this.applyResolved('direct', 'direct', true);
         this.publishRuntimeStatus();
         return;
@@ -489,6 +498,8 @@ export class NymRuntimeController {
     this._privacyPreference = preference;
     this._preferenceHydrated = true;
     this._preferenceDurable = durable && (preference === 'direct' || preference === 'nym');
+    // A completed decision for this generation ends the revocation window.
+    this._directSuspended = false;
     if (
       this._diagnosticCode === 'PRIVACY_PREFERENCE_CORRUPT' ||
       this._diagnosticCode === 'PRIVACY_PREFERENCE_UNREADABLE' ||
@@ -500,26 +511,34 @@ export class NymRuntimeController {
     this._router.setMode(mode);
   }
 
+  /** Drop Direct before any async reread. A stale read cannot undo this generation. */
+  private suspendDirect(): void {
+    this._directSuspended = true;
+    if (this._mode === 'direct') this._mode = 'nym';
+    if (this._router.mode === 'direct') this._router.setMode('nym');
+  }
+
   private schedulePrivacyReload(): void {
+    const generation = ++this._policyGeneration;
+    this.suspendDirect();
     this._privacyReload = this._privacyReload
       .catch(() => undefined)
-      .then(() => this.reloadPrivacyFromStore());
+      .then(() => this.reloadPrivacyFromStore(generation));
   }
 
   /** Apply a privacy value written by another instance. Does not invent Direct. */
-  private async reloadPrivacyFromStore(): Promise<void> {
-    const epoch = this._explicitEpoch;
+  private async reloadPrivacyFromStore(generation: number): Promise<void> {
     let record: NymPrivacyPreferenceRecord;
     try {
       record = await readNymPrivacyPreference(this._privacyStore);
     } catch {
-      if (this._explicitEpoch !== epoch) return;
+      if (this._policyGeneration !== generation) return;
       this.applyResolved('nym', null, false);
       this._diagnosticCode = 'PRIVACY_PREFERENCE_UNREADABLE';
       this.publishRuntimeStatus();
       return;
     }
-    if (this._explicitEpoch !== epoch) return;
+    if (this._policyGeneration !== generation) return;
     this.applyPrivacyRecord(record);
     this.publishRuntimeStatus();
   }
@@ -545,12 +564,21 @@ export class NymRuntimeController {
   }
 
   private clearnetExplicitlyAuthorized(): boolean {
-    return (
-      this._preferenceHydrated &&
-      this._privacyPreference === 'direct' &&
-      this._mode === 'direct' &&
-      !this.isEgressBlocked()
-    );
+    if (this._directSuspended || !this._preferenceHydrated) return false;
+    return this._privacyPreference === 'direct' && this._mode === 'direct';
+  }
+
+  /** Last-moment Direct egress. Rechecks policy at the native fetch call. */
+  private authorizedClearnetFetch(url: string, init?: RequestInit): Promise<Response> {
+    if (!this.clearnetExplicitlyAuthorized()) {
+      return Promise.reject(
+        new NymTransportError(
+          'NOT_CONNECTED',
+          'Direct egress refused: persisted privacy choice does not allow clearnet',
+        ),
+      );
+    }
+    return clearnetFetchImpl(url, init);
   }
 
   /**
@@ -573,13 +601,13 @@ export class NymRuntimeController {
   }
 
   private async hydratePrivacyPreference(): Promise<void> {
-    const epoch = this._explicitEpoch;
+    const generation = this._policyGeneration;
     try {
       const record = await readNymPrivacyPreference(this._privacyStore);
-      if (this._explicitEpoch !== epoch) return;
+      if (this._policyGeneration !== generation) return;
       this.applyPrivacyRecord(record);
     } catch {
-      if (this._explicitEpoch !== epoch) return;
+      if (this._policyGeneration !== generation) return;
       // Storage failures stay fail-closed. Do not select Direct.
       this.applyResolved('nym', null, false);
       this._diagnosticCode = 'PRIVACY_PREFERENCE_UNREADABLE';
@@ -824,7 +852,7 @@ export class NymRuntimeController {
     },
   ): Promise<PublicDataFetchResult> {
     const transport = await this.diagnosticTransport(request?.transport);
-    if (transport === 'refused') {
+    if (transport === 'refused' || (transport === 'direct' && !this.clearnetExplicitlyAuthorized())) {
       return {
         state: 'error',
         transport: 'direct',
@@ -842,7 +870,7 @@ export class NymRuntimeController {
     }
     const fetchViaTransport: PublicDataTransportFetch = transport === 'nym'
       ? (url: string, init?: RequestInit) => this._transport.fetch(url, init)
-      : (url: string, init?: RequestInit) => clearnetFetchImpl(url, init);
+      : (url: string, init?: RequestInit) => this.authorizedClearnetFetch(url, init);
     return fetchPublicData({
       transport,
       injectedTransport: transport,
@@ -862,7 +890,7 @@ export class NymRuntimeController {
     timeoutMs?: number;
   }): Promise<StellarHorizonProbeResult> {
     const transport = await this.diagnosticTransport(options?.transport);
-    if (transport === 'refused') {
+    if (transport === 'refused' || (transport === 'direct' && !this.clearnetExplicitlyAuthorized())) {
       const logical = options?.horizonUrl ?? '';
       return {
         state: 'error',
@@ -897,7 +925,7 @@ export class NymRuntimeController {
         })
       : createStellarTransportFetch({
           getMode: () => 'direct' as NymTransportMode,
-          fetchViaRouter: clearnetFetchImpl,
+          fetchViaRouter: (url, init) => this.authorizedClearnetFetch(url, init),
           getNymHorizonConfig: () => this._stellarNymHorizon,
         });
     const probeOpts: {

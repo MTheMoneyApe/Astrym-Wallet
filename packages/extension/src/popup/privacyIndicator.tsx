@@ -52,13 +52,13 @@ export function describeWalletPrivacy(snapshot: PrivacyIndicatorSnapshot): Priva
     ) {
       return {
         tone: 'nym',
-        label: 'Privacy: Nym — choice not saved',
+        label: 'Privacy: Nym — not saved; reload may restore previous Direct',
         egress: 'open',
       };
     }
     return {
       tone: 'blocked',
-      label: 'Privacy: not saved — wallet network blocked',
+      label: 'Privacy: not saved — reload may restore previous Direct',
       egress: 'blocked',
     };
   }
