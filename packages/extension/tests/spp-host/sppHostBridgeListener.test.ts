@@ -74,7 +74,11 @@ describe('spp-host bridge listener sender', () => {
     expect(isSppServiceWorkerSender({
       id: 'astrym-android-webapp',
       url: '/webapp.html',
-    }, 'astrym-android-webapp')).toBe(true);
+    }, 'astrym-android-webapp')).toBe(false);
+    expect(isSppServiceWorkerSender({
+      id: 'astrym-android-webapp',
+      url: 'https://wallet.example/webapp.html',
+    }, 'astrym-android-webapp')).toBe(false);
     expect(isSppServiceWorkerSender(popup, RUNTIME_ID)).toBe(false);
     expect(isSppServiceWorkerSender(hostTab, RUNTIME_ID)).toBe(false);
     expect(isSppServiceWorkerSender({

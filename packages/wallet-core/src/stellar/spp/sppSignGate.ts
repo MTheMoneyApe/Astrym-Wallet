@@ -130,6 +130,11 @@ type StoredApproval = {
   mintedAtMs: number;
   expiresAtMs: number;
   used: UsedSlots;
+  /**
+   * Canonical Soroban invocation tree (no nonce, network id, or credentials)
+   * fixed by the first economic signature. The other economic slot must match it.
+   */
+  economicTreeXdr: string | null;
 };
 
 const pending: StoredApproval[] = [];
@@ -153,6 +158,8 @@ type ParsedInvocation = {
   functionName: string;
   args: xdr.ScVal[];
   subInvocations: InvocationView[];
+  /** Canonical XDR of this invocation tree. Credentials and nonces are excluded. */
+  treeXdr: string;
 };
 
 /**
@@ -225,6 +232,7 @@ export function mintSppSignApproval(intent: SppSignIntent, nowMs: number = Date.
     mintedAtMs: nowMs,
     expiresAtMs: nowMs + APPROVAL_TTL_MS,
     used: { message: false, transaction: false, auth_entry: false },
+    economicTreeXdr: null,
   });
   return id;
 }
@@ -317,6 +325,8 @@ type SignatureFacts = {
   txFeeStroops: bigint | null;
   invocation: ParsedInvocation | null;
   embeddedAuth: ParsedInvocation[];
+  /** Full invocation tree. Null for SEP-53 messages. */
+  economicTreeXdr: string | null;
   registerOwner: string | null;
   registerNoteKeyHex: string | null;
   registerEncryptionKeyHex: string | null;
@@ -365,6 +375,7 @@ function prepareMessage(message: string): PreparedSignature {
       txFeeStroops: null,
       invocation: null,
       embeddedAuth: [],
+      economicTreeXdr: null,
       registerOwner: null,
       registerNoteKeyHex: null,
       registerEncryptionKeyHex: null,
@@ -456,7 +467,20 @@ function prepareTransaction(
       if (root.contractId !== contractId || root.functionName !== functionName) {
         throw new SppSignerError('Transaction auth entry does not match the invoke');
       }
+      if (scValListXdr(root.args) !== scValListXdr(invoke.args)) {
+        throw new SppSignerError('Root authorization arguments do not match the transaction invoke');
+      }
       embeddedAuth.push(root);
+    }
+  }
+  if (functionName === 'transact' && embeddedAuth.length > 1) {
+    throw new SppSignerError('Transaction carries more than one Soroban authorization');
+  }
+  const subs = embeddedAuth[0]?.subInvocations ?? [];
+  const economicTreeXdr = invocationTreeXdr(invoke.contractAddress, functionName, invoke.args, subs);
+  for (const root of embeddedAuth) {
+    if (root.treeXdr !== economicTreeXdr) {
+      throw new SppSignerError('Embedded authorization tree does not match the transaction invoke');
     }
   }
   const txHash = tx.hash();
@@ -473,6 +497,7 @@ function prepareTransaction(
       txFeeStroops: txFee,
       invocation: null,
       embeddedAuth,
+      economicTreeXdr,
       registerOwner,
       registerNoteKeyHex,
       registerEncryptionKeyHex,
@@ -524,6 +549,7 @@ function prepareAuthEntry(xdrInput: string, boundAccount: string): PreparedSigna
       txFeeStroops: null,
       invocation: inspected,
       embeddedAuth: [],
+      economicTreeXdr: inspected.treeXdr,
       registerOwner,
       registerNoteKeyHex,
       registerEncryptionKeyHex,
@@ -625,16 +651,61 @@ function assertAuthPreamble(preimage: AuthPreimageView, boundAccount: string): v
   }
 }
 
+function scValListXdr(args: xdr.ScVal[]): string {
+  return args.map((arg) => arg.toXDR('base64')).join('\n');
+}
+
+function buildInvocationNode(
+  contractAddress: xdr.ScAddress,
+  functionName: string,
+  args: xdr.ScVal[],
+  subs: InvocationView[],
+): xdr.SorobanAuthorizedInvocation {
+  return new xdr.SorobanAuthorizedInvocation({
+    function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+      new xdr.InvokeContractArgs({
+        contractAddress,
+        functionName,
+        args,
+      }),
+    ),
+    subInvocations: subs.map((sub) => {
+      const fn = sub.function;
+      if (!fn?.contractFn) {
+        throw new SppSignerError('Auth invocation is not a contract function');
+      }
+      return buildInvocationNode(
+        fn.contractFn.contractAddress,
+        fn.contractFn.functionName.toString(),
+        fn.contractFn.args ?? [],
+        sub.subInvocations ?? [],
+      );
+    }),
+  });
+}
+
+function invocationTreeXdr(
+  contractAddress: xdr.ScAddress,
+  functionName: string,
+  args: xdr.ScVal[],
+  subs: InvocationView[],
+): string {
+  return buildInvocationNode(contractAddress, functionName, args, subs).toXDR('base64');
+}
+
 function readInvocation(invocation: InvocationView): ParsedInvocation {
   const fn = invocation.function;
   if (!fn || fn.type !== 'sorobanAuthorizedFunctionTypeContractFn' || !fn.contractFn) {
     throw new SppSignerError('Auth invocation is not a contract function');
   }
+  const args = fn.contractFn.args ?? [];
+  const subs = invocation.subInvocations ?? [];
   return {
     contractId: contractIdOf(fn.contractFn.contractAddress),
     functionName: fn.contractFn.functionName.toString(),
-    args: fn.contractFn.args ?? [],
-    subInvocations: invocation.subInvocations ?? [],
+    args,
+    subInvocations: subs,
+    treeXdr: invocationTreeXdr(fn.contractFn.contractAddress, fn.contractFn.functionName.toString(), args, subs),
   };
 }
 
@@ -871,7 +942,7 @@ function consumeMatchingApproval(
       requireTxFee: true,
       requireMinResourceFee: chosen.intent.minResourceFeeStroops !== null,
     });
-    if (chosen.intent.operation === 'deposit' && facts.embeddedAuth.length === 0) {
+    if (chosen.intent.operation === 'deposit' && facts.embeddedAuth.length !== 1) {
       throw new SppSignerError('Deposit transaction is missing Soroban authorization');
     }
     for (const embedded of facts.embeddedAuth) {
@@ -890,6 +961,18 @@ function consumeMatchingApproval(
         minResourceFeeStroops: chosen.intent.minResourceFeeStroops,
         requireMinResourceFee: true,
       });
+    }
+  }
+  if (kind === 'transaction' || kind === 'auth_entry') {
+    if (!facts.economicTreeXdr) {
+      throw new SppSignerError('Economic signature is missing its invocation tree', 'INVALID_REQUEST');
+    }
+    if (chosen.economicTreeXdr === null) {
+      chosen.economicTreeXdr = facts.economicTreeXdr;
+    } else if (chosen.economicTreeXdr !== facts.economicTreeXdr) {
+      throw new SppSignerError(
+        'Signature authorization denied: authorization tree does not match the approved operation',
+      );
     }
   }
   chosen.used[kind] = true;

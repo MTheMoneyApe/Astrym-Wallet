@@ -21,10 +21,11 @@ export type SppHostBridgeListenerHandles = {
 };
 
 /**
- * Execute, account-query, and lifecycle-clear messages may come only from
- * this extension's service worker (no tab). Extension pages and content
- * scripts are refused. The Android webapp has no MV3 worker; its in-page
- * background is the webapp document.
+ * Execute, account-query, and lifecycle-clear are accepted only from the
+ * MV3 service worker: same extension id, no tab, and either no URL or
+ * `chrome-extension://<id>/background.js`. A page path, including
+ * `/webapp.html`, is not a worker. The Android shim shares one document
+ * and is not treated as a service worker here.
  */
 export function isSppServiceWorkerSender(
   sender: { id?: string | undefined; url?: string | undefined; tab?: unknown } | undefined,
@@ -35,18 +36,13 @@ export function isSppServiceWorkerSender(
   if (!sender.url) return true;
   let parsed: URL;
   try {
-    parsed = new URL(sender.url, 'http://astrym.invalid');
+    parsed = new URL(sender.url);
   } catch {
     return false;
   }
-  if (
-    parsed.protocol === 'chrome-extension:'
+  return parsed.protocol === 'chrome-extension:'
     && parsed.host === runtimeId
-    && parsed.pathname === '/background.js'
-  ) {
-    return true;
-  }
-  return runtimeId === 'astrym-android-webapp' && parsed.pathname === '/webapp.html';
+    && parsed.pathname === '/background.js';
 }
 
 function publishLifecycleToBackground(event: SppHostLifecycleEvent): void {
