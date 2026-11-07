@@ -188,6 +188,68 @@ function registerXdr(noteKeyHex: string, encryptionKeyHex: string, proofHex?: st
     .toXDR();
 }
 
+function registerAccountArgs(noteKeyHex: string, encryptionKeyHex: string): xdr.ScVal[] {
+  return [xdr.ScVal.scvMap([
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('encryption_key'),
+      val: xdr.ScVal.scvBytes(Buffer.from(encryptionKeyHex, 'hex')),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('note_key'),
+      val: xdr.ScVal.scvBytes(Buffer.from(noteKeyHex, 'hex')),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('owner'),
+      val: Address.fromString(ACCOUNT).toScVal(),
+    }),
+  ])];
+}
+
+function registerInvocation(noteKeyHex: string, encryptionKeyHex: string): xdr.SorobanAuthorizedInvocation {
+  return new xdr.SorobanAuthorizedInvocation({
+    function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+      new xdr.InvokeContractArgs({
+        contractAddress: Address.fromString(REGISTRY).toScAddress(),
+        functionName: 'register',
+        args: registerAccountArgs(noteKeyHex, encryptionKeyHex),
+      }),
+    ),
+    subInvocations: [],
+  });
+}
+
+function registerAuthXdr(noteKeyHex: string, encryptionKeyHex: string): string {
+  return xdr.HashIdPreimage.envelopeTypeSorobanAuthorization(
+    new xdr.HashIdPreimageSorobanAuthorization({
+      networkId: hash(Buffer.from(Networks.TESTNET)),
+      nonce: xdr.Int64(4n),
+      signatureExpirationLedger: 150,
+      invocation: registerInvocation(noteKeyHex, encryptionKeyHex),
+    }),
+  ).toXDR('base64');
+}
+
+function registerTxWithTwoAuth(noteKeyHex: string, encryptionKeyHex: string): string {
+  const invocation = registerInvocation(noteKeyHex, encryptionKeyHex);
+  const entry = () => new xdr.SorobanAuthorizationEntry({
+    credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+    rootInvocation: invocation,
+  });
+  return new TransactionBuilder(new Account(ACCOUNT, '10'), {
+    fee: '100',
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(Operation.invokeContractFunction({
+      contract: REGISTRY,
+      function: 'register',
+      args: registerAccountArgs(noteKeyHex, encryptionKeyHex),
+      auth: [entry(), entry()],
+    }))
+    .setTimeout(30)
+    .build()
+    .toXDR();
+}
+
 function depositTxXdr(auth: 'none' | 'empty-sub' | 'token', tokenContract: string): string {
   const ext = xdr.ScVal.scvMap([
     new xdr.ScMapEntry({
@@ -248,6 +310,24 @@ function depositTxXdr(auth: 'none' | 'empty-sub' | 'token', tokenContract: strin
     .toXDR();
 }
 
+function sdkStyleAuthSignature(publicFill: number, signatureFill: number): xdr.ScVal {
+  // Dummy bytes. Not a signature of any preimage.
+  // sdk-v0.2.1 signer.rs address_credentials_signature returns
+  // ScVal::Vec([ScVal::Map { public_key, signature }]), not a bare map.
+  return xdr.ScVal.scvVec([
+    xdr.ScVal.scvMap([
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('public_key'),
+        val: xdr.ScVal.scvBytes(Buffer.alloc(32, publicFill)),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('signature'),
+        val: xdr.ScVal.scvBytes(Buffer.alloc(64, signatureFill)),
+      }),
+    ]),
+  ]);
+}
+
 function depositPair(
   tokenContract: string,
   proofByte: number,
@@ -257,8 +337,11 @@ function depositPair(
     expiration?: number;
     authNonce?: bigint;
     authExpiration?: number;
-    txCredentials?: 'address' | 'source';
+    authVariant?: 'legacy' | 'withAddress';
+    txCredentials?: 'address' | 'source' | 'address-v2';
     txAddress?: string;
+    publicFill?: number;
+    signatureFill?: number;
   } = {},
 ): { auth: string; tx: string } {
   const nonce = options.nonce ?? BigInt(proofByte + 10);
@@ -306,31 +389,36 @@ function depositPair(
       }),
     ],
   });
-  const auth = xdr.HashIdPreimage.envelopeTypeSorobanAuthorization(
-    new xdr.HashIdPreimageSorobanAuthorization({
-      networkId: hash(Buffer.from(Networks.TESTNET)),
-      nonce: xdr.Int64(authNonce),
-      signatureExpirationLedger: authExpiration,
-      invocation,
-    }),
-  ).toXDR('base64');
+  const authPreimage = options.authVariant === 'withAddress'
+    ? xdr.HashIdPreimage.envelopeTypeSorobanAuthorizationWithAddress(
+      new xdr.HashIdPreimageSorobanAuthorizationWithAddress({
+        networkId: hash(Buffer.from(Networks.TESTNET)),
+        nonce: xdr.Int64(authNonce),
+        signatureExpirationLedger: authExpiration,
+        address: Address.fromString(ACCOUNT).toScAddress(),
+        invocation,
+      }),
+    )
+    : xdr.HashIdPreimage.envelopeTypeSorobanAuthorization(
+      new xdr.HashIdPreimageSorobanAuthorization({
+        networkId: hash(Buffer.from(Networks.TESTNET)),
+        nonce: xdr.Int64(authNonce),
+        signatureExpirationLedger: authExpiration,
+        invocation,
+      }),
+    );
+  const auth = authPreimage.toXDR('base64');
+  const addressCredentials = new xdr.SorobanAddressCredentials({
+    address: Address.fromString(txAddress).toScAddress(),
+    nonce: xdr.Int64(nonce),
+    signatureExpirationLedger: expiration,
+    signature: sdkStyleAuthSignature(options.publicFill ?? 7, options.signatureFill ?? 9),
+  });
   const credentials = options.txCredentials === 'source'
     ? xdr.SorobanCredentials.sorobanCredentialsSourceAccount()
-    : xdr.SorobanCredentials.sorobanCredentialsAddress(new xdr.SorobanAddressCredentials({
-      address: Address.fromString(txAddress).toScAddress(),
-      nonce: xdr.Int64(nonce),
-      signatureExpirationLedger: expiration,
-      signature: xdr.ScVal.scvMap([
-        new xdr.ScMapEntry({
-          key: xdr.ScVal.scvSymbol('public_key'),
-          val: xdr.ScVal.scvBytes(Buffer.alloc(32, 7)),
-        }),
-        new xdr.ScMapEntry({
-          key: xdr.ScVal.scvSymbol('signature'),
-          val: xdr.ScVal.scvBytes(Buffer.alloc(64, 9)),
-        }),
-      ]),
-    }));
+    : options.txCredentials === 'address-v2'
+      ? xdr.SorobanCredentials.sorobanCredentialsAddressV2(addressCredentials)
+      : xdr.SorobanCredentials.sorobanCredentialsAddress(addressCredentials);
   const tx = new TransactionBuilder(new Account(ACCOUNT, '10'), {
     fee: '100',
     networkPassphrase: Networks.TESTNET,
@@ -911,6 +999,95 @@ describe('SPP sign gate attack cases', () => {
     ]);
     expect(raced.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     expect(raced.filter((result) => result.status === 'rejected')).toHaveLength(1);
+  });
+
+  it('covers supported credential routes and rejects the others', () => {
+    const token = tokenContractIdForEnabledPool(getNethermindPublicTestnetContractConfig(), XLM_POOL);
+    const deposit = intent({
+      operation: 'deposit',
+      amountStroops: '25',
+      recipient: null,
+      poolContractId: POOL,
+      tokenContractId: token,
+    });
+    const matched = depositPair(token, 1, 9, { nonce: 11n, expiration: 150, signatureFill: 9 });
+    const otherSignature = depositPair(token, 1, 9, {
+      nonce: 11n,
+      expiration: 150,
+      publicFill: 4,
+      signatureFill: 3,
+    });
+    const withAddress = depositPair(token, 1, 9, {
+      nonce: 11n,
+      expiration: 150,
+      authVariant: 'withAddress',
+    });
+    const addressV2 = depositPair(token, 1, 9, {
+      nonce: 11n,
+      expiration: 150,
+      txCredentials: 'address-v2',
+    });
+    const sign = (kind: 'auth_entry' | 'transaction', input: string) => authorizeSppSignature({
+      kind,
+      input,
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    });
+
+    mintSppSignApproval(deposit);
+    expect(() => sign('auth_entry', matched.auth)).not.toThrow();
+    expect(() => sign('transaction', otherSignature.tx)).not.toThrow();
+    expect(() => sign('transaction', matched.tx)).toThrow(/already used/);
+
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(deposit);
+    expect(() => sign('transaction', matched.tx)).not.toThrow();
+    expect(() => sign('auth_entry', withAddress.auth)).toThrow(/authorization identity/);
+
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(deposit);
+    expect(() => sign('auth_entry', withAddress.auth)).not.toThrow();
+    expect(() => sign('transaction', matched.tx)).toThrow(/authorization identity/);
+
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(deposit);
+    expect(() => sign('transaction', addressV2.tx)).toThrow(/Unsupported Soroban credential/);
+    expect(() => sign('transaction', matched.tx)).not.toThrow();
+
+    mintSppSignApproval(deposit);
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/ambiguous/);
+
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(intent());
+    expect(() => sign('transaction', transactXdr())).not.toThrow();
+    expect(() => sign('auth_entry', authXdr())).toThrow(/authorization identity/);
+
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(intent({ operation: 'withdraw', recipient: null }));
+    expect(() => sign('transaction', transactXdr({ recipient: ACCOUNT }))).not.toThrow();
+    expect(() => sign('auth_entry', authXdr({ recipient: ACCOUNT }))).toThrow(/authorization identity/);
+
+    const config = getNethermindPublicTestnetContractConfig();
+    const registered = intent({
+      operation: 'register_public_keys',
+      amountStroops: null,
+      recipient: null,
+      poolContractId: null,
+      registryContractId: config.public_key_registry,
+      maxFeeStroops: '5000000',
+      exactMessage: sppKeyDerivationMessage(config.kdf_domain),
+      registerNoteKeyHex: NOTE_KEY,
+      registerEncryptionKeyHex: ENC_KEY,
+    });
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(registered);
+    expect(() => sign('transaction', registerXdr(NOTE_KEY, ENC_KEY))).not.toThrow();
+    expect(() => sign('auth_entry', registerAuthXdr(NOTE_KEY, ENC_KEY))).toThrow(/authorization identity/);
+
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(registered);
+    expect(() => sign('transaction', registerTxWithTwoAuth(NOTE_KEY, ENC_KEY))).toThrow(/more than one Soroban authorization/);
+    expect(() => sign('transaction', registerXdr(NOTE_KEY, ENC_KEY))).not.toThrow();
   });
 
   it('does not sign a register envelope against a transfer approval', () => {
