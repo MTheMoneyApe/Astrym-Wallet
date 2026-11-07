@@ -49,14 +49,27 @@ describe('privacy indicator', () => {
       }).label,
     ).toBe('Privacy: Direct');
 
-    expect(
-      describeWalletPrivacy({
-        mode: 'direct',
-        preferenceHydrated: true,
-        egressBlocked: false,
-        privacyPreference: null,
-      }).label,
-    ).toBe('Privacy: Direct (not chosen)');
+    const unset = describeWalletPrivacy({
+      mode: 'nym',
+      connected: false,
+      preferenceHydrated: true,
+      egressBlocked: true,
+      privacyPreference: null,
+      diagnosticCode: 'PRIVACY_CHOICE_REQUIRED',
+    });
+    expect(unset.tone).toBe('blocked');
+    expect(unset.egress).toBe('blocked');
+    expect(unset.label).toBe('Privacy: no saved choice — wallet network blocked');
+    expect(unset.label).not.toMatch(/Direct/);
+
+    const implicitDirect = describeWalletPrivacy({
+      mode: 'direct',
+      preferenceHydrated: true,
+      egressBlocked: false,
+      privacyPreference: null,
+    });
+    expect(implicitDirect.tone).toBe('blocked');
+    expect(implicitDirect.label).not.toMatch(/^Privacy: Direct$/);
 
     const blocked = describeWalletPrivacy({
       mode: 'nym',

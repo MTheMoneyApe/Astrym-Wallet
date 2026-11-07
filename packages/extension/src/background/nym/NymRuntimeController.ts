@@ -3,10 +3,11 @@
  * FailClosedTransportRouter.
  *
  * The privacy choice lives in chrome.storage.local (webapp shim: localStorage).
- * Until that read finishes, and whenever the choice is Nym but MixFetch is down,
- * wallet HTTP does not use clearnet. Direct is reached only when nothing was
- * stored, or when the user explicitly selects Direct. Disconnect does not
- * select Direct. The SPP broadcast gate is not persisted.
+ * Until that read finishes, wallet HTTP does not use clearnet. A missing,
+ * corrupt, or unreadable choice stays blocked. Direct is armed only when the
+ * stored value is the explicit choice `'direct'`. Nym without MixFetch stays
+ * blocked. Disconnect does not select Direct. The SPP broadcast gate is not
+ * persisted.
  */
 
 import type { NymMixFetchBridge } from '@solanym/wallet-core/src/nym/NymMixFetchBridge.js';
@@ -258,11 +259,15 @@ export class NymRuntimeController {
 
   private isEgressBlocked(): boolean {
     if (!this._preferenceHydrated) return true;
+    // Clearnet requires a stored explicit Direct choice. Null is not Direct.
+    if (this._privacyPreference !== 'direct' && this._privacyPreference !== 'nym') {
+      return true;
+    }
     switch (this._mode) {
       case 'nym':
         return this._transport.getSnapshot().connected !== true;
       case 'direct':
-        return false;
+        return this._privacyPreference !== 'direct';
       default: {
         const _never: never = this._mode;
         return _never;
@@ -353,7 +358,8 @@ export class NymRuntimeController {
     if (
       this._diagnosticCode === 'PRIVACY_PREFERENCE_CORRUPT' ||
       this._diagnosticCode === 'PRIVACY_PREFERENCE_UNREADABLE' ||
-      this._diagnosticCode === 'PRIVACY_PREFERENCE_PERSIST_FAILED'
+      this._diagnosticCode === 'PRIVACY_PREFERENCE_PERSIST_FAILED' ||
+      this._diagnosticCode === 'PRIVACY_CHOICE_REQUIRED'
     ) {
       this._diagnosticCode = 'OK';
     }
@@ -367,7 +373,9 @@ export class NymRuntimeController {
       if (this._explicitEpoch !== epoch) return;
       switch (record.kind) {
         case 'unset':
-          this.applyResolved('direct', null);
+          // No saved choice is not an implicit Direct. Stay fail-closed.
+          this.applyResolved('nym', null);
+          this._diagnosticCode = 'PRIVACY_CHOICE_REQUIRED';
           return;
         case 'chosen':
           this.applyResolved(record.choice, record.choice);
@@ -705,7 +713,8 @@ export class NymRuntimeController {
     if (
       this._diagnosticCode !== 'PRIVACY_PREFERENCE_CORRUPT' &&
       this._diagnosticCode !== 'PRIVACY_PREFERENCE_UNREADABLE' &&
-      this._diagnosticCode !== 'PRIVACY_PREFERENCE_PERSIST_FAILED'
+      this._diagnosticCode !== 'PRIVACY_PREFERENCE_PERSIST_FAILED' &&
+      this._diagnosticCode !== 'PRIVACY_CHOICE_REQUIRED'
     ) {
       this._diagnosticCode = 'OK';
     }

@@ -147,14 +147,14 @@ async function createTestController(bridgeOverrides: any = {}) {
 }
 
 describe('Nym Diagnostic Isolation & Direct/Nym mode policy', () => {
-  it('resolves to Direct when no privacy choice is stored', async () => {
+  it('stays blocked when no privacy choice is stored', async () => {
     const { controller } = await createTestController();
     await controller.whenPrivacyReady();
-    expect(controller.mode).toBe('direct');
-    expect(controller.getSnapshot().mode).toBe('direct');
+    expect(controller.mode).not.toBe('direct');
     expect(controller.getSnapshot().privacyPreference).toBeNull();
     expect(controller.getSnapshot().preferenceHydrated).toBe(true);
-    expect(controller.getSnapshot().egressBlocked).toBe(false);
+    expect(controller.getSnapshot().egressBlocked).toBe(true);
+    expect(controller.getSnapshot().diagnosticCode).toBe('PRIVACY_CHOICE_REQUIRED');
   });
 
   it('allows switching to Direct and Nym via setMode()', async () => {

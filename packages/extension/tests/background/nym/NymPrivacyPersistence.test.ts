@@ -133,7 +133,7 @@ describe('Nym privacy persistence', () => {
     expect(dashboardSrc).not.toMatch(/mode:\s*res\.transport/);
   });
 
-  it('blocks wallet egress while the persisted choice is loading, then allows Direct only if unset', async () => {
+  it('blocks wallet egress while the choice is loading and when nothing was stored', async () => {
     const gated = gatedStore();
     const ctrl = controllerFor(gated.store);
     expect(ctrl.mode).toBe('nym');
@@ -148,12 +148,21 @@ describe('Nym privacy persistence', () => {
     expect(clearnet).not.toHaveBeenCalled();
 
     gated.release();
-    const response = await pending;
-    expect(response.status).toBe(200);
-    expect(clearnet).toHaveBeenCalledTimes(1);
-    expect(ctrl.mode).toBe('direct');
+    await expect(pending).rejects.toMatchObject({ code: 'NOT_CONNECTED' });
+    expect(clearnet).not.toHaveBeenCalled();
+    expect(ctrl.mode).not.toBe('direct');
     expect(ctrl.getSnapshot().privacyPreference).toBeNull();
-    expect(ctrl.getSnapshot().egressBlocked).toBe(false);
+    expect(ctrl.getSnapshot().diagnosticCode).toBe('PRIVACY_CHOICE_REQUIRED');
+    expect(ctrl.getSnapshot().egressBlocked).toBe(true);
+
+    const reloaded = controllerFor(gated.store);
+    await reloaded.whenPrivacyReady();
+    expect(reloaded.getSnapshot().egressBlocked).toBe(true);
+    expect(reloaded.getSnapshot().privacyPreference).toBeNull();
+    await expect(reloaded.getStellarFetch()(HORIZON)).rejects.toMatchObject({
+      code: 'NOT_CONNECTED',
+    });
+    expect(clearnet).not.toHaveBeenCalled();
     expect(isSppTestnetBroadcastAuthorized()).toBe(false);
   });
 

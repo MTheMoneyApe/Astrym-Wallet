@@ -46,27 +46,40 @@ export function describeWalletPrivacy(snapshot: PrivacyIndicatorSnapshot): Priva
       egress: 'blocked',
     };
   }
-  if (snapshot.mode === 'nym' && snapshot.connected === true && snapshot.egressBlocked !== true) {
+  if (snapshot.preferenceHydrated === true && snapshot.privacyPreference === null) {
+    return {
+      tone: 'blocked',
+      label: 'Privacy: no saved choice — wallet network blocked',
+      egress: 'blocked',
+    };
+  }
+  if (
+    snapshot.mode === 'nym' &&
+    snapshot.connected === true &&
+    snapshot.egressBlocked !== true &&
+    snapshot.privacyPreference !== null
+  ) {
     return {
       tone: 'nym',
       label: 'Privacy: Nym',
       egress: 'open',
     };
   }
-  if (snapshot.mode === 'nym') {
+  if (snapshot.mode === 'nym' || snapshot.privacyPreference === 'nym') {
     return {
       tone: 'blocked',
       label: 'Privacy: Nym — disconnected, network blocked',
       egress: 'blocked',
     };
   }
-  if (snapshot.mode === 'direct' && snapshot.egressBlocked !== true) {
+  if (
+    snapshot.mode === 'direct' &&
+    snapshot.privacyPreference === 'direct' &&
+    snapshot.egressBlocked !== true
+  ) {
     return {
       tone: 'direct',
-      label:
-        snapshot.privacyPreference === 'direct'
-          ? 'Privacy: Direct'
-          : 'Privacy: Direct (not chosen)',
+      label: 'Privacy: Direct',
       egress: 'open',
     };
   }

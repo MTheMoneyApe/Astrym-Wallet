@@ -9,7 +9,7 @@ import type { NymTransportMode } from '@solanym/wallet-core/src/nym/NymTransport
 import { NYM_VERIFIED_GATEWAY } from '../nym-offscreen/verifiedGateway.js';
 import { NYM_HTTP_SMOKE_DEFAULT_URL } from '../nym-offscreen/httpSmokeConfig.js';
 import { NYM_PUBLIC_DATA_DEFAULT_URL } from '../nym-offscreen/publicDataConfig.js';
-import { PrivacyModeIndicator } from './privacyIndicator.js';
+import { PrivacyModeIndicator, describeWalletPrivacy } from './privacyIndicator.js';
 
 export type NymHttpSmokeUiResult = {
   state: 'idle' | 'running' | 'success' | 'error' | 'timeout';
@@ -157,7 +157,7 @@ export function NymTransportPanel({
       </p>
       <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.78rem', color: 'var(--muted, #888)' }}>
         <li>Implementación: {snapshot.implementation}</li>
-        <li>Modo: {mode}</li>
+        <li data-testid="nym-mode-label">{describeWalletPrivacy(snapshot).label}</li>
         <li>Conectado: {snapshot.connected ? 'sí' : 'no'}</li>
         <li>
           Documento offscreen: {snapshot.documentReady ? 'abierto' : 'no'} (≠ Mixnet Ready)
@@ -300,7 +300,7 @@ export function NymTransportPanel({
             <button
               type="button"
               className="btn-secondary"
-              disabled={busy || mode === 'nym'}
+              disabled={busy || snapshot.privacyPreference === 'nym'}
               onClick={() => onSetMode('nym')}
               data-testid="nym-mode-nym"
             >
@@ -309,7 +309,7 @@ export function NymTransportPanel({
             <button
               type="button"
               className="btn-secondary"
-              disabled={busy || mode === 'direct'}
+              disabled={busy || snapshot.privacyPreference === 'direct'}
               onClick={() => onSetMode('direct')}
               data-testid="nym-mode-direct"
               title="Explicit switch to clearnet. Disconnect does not select Direct."
@@ -577,10 +577,10 @@ export function NymTransportPanel({
       ) : null}
 
       <p style={{ margin: '10px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
-        La elección se guarda y se restaura al reiniciar. Sin elección guardada, Horizon usa
-        Direct después de leer el almacenamiento. Connect o «Nym mode» eligen Nym. Disconnect
-        cierra MixFetch y no vuelve a Direct: el tráfico de la wallet sigue bloqueado hasta
-        Connect o hasta el botón Direct. En modo Nym no hay fallback silencioso a clearnet.
+        La elección se guarda y se restaura al reiniciar. Sin una elección explícita
+        guardada, la red de la wallet permanece bloqueada: no hay Direct por defecto.
+        Connect o «Nym mode» eligen Nym. «Direct (Horizon)» es el único paso a clearnet.
+        Disconnect cierra MixFetch y no elige Direct.
       </p>
       {mode === 'nym' && !ready ? (
         <p style={{ margin: '6px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
