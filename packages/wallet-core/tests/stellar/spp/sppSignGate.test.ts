@@ -188,6 +188,66 @@ function registerXdr(noteKeyHex: string, encryptionKeyHex: string, proofHex?: st
     .toXDR();
 }
 
+function depositTxXdr(auth: 'none' | 'empty-sub' | 'token', tokenContract: string): string {
+  const ext = xdr.ScVal.scvMap([
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('ext_amount'),
+      val: nativeToScVal(25n, { type: 'i256' }),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('recipient'),
+      val: Address.fromString(ACCOUNT).toScVal(),
+    }),
+  ]);
+  const sender = Address.fromString(ACCOUNT).toScVal();
+  const subs = auth === 'none'
+    ? []
+    : [
+      new xdr.SorobanAuthorizedInvocation({
+        function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+          new xdr.InvokeContractArgs({
+            contractAddress: Address.fromString(auth === 'token' ? tokenContract : OTHER_POOL).toScAddress(),
+            functionName: 'transfer',
+            args: [sender, Address.fromString(POOL).toScVal(), nativeToScVal(25n, { type: 'i128' })],
+          }),
+        ),
+        subInvocations: [],
+      }),
+    ];
+  if (auth === 'empty-sub') subs.length = 0;
+  const root = new xdr.SorobanAuthorizedInvocation({
+    function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+      new xdr.InvokeContractArgs({
+        contractAddress: Address.fromString(POOL).toScAddress(),
+        functionName: 'transact',
+        args: [xdr.ScVal.scvBytes(Buffer.from([1])), ext, sender],
+      }),
+    ),
+    subInvocations: subs,
+  });
+  const authEntries = auth === 'none'
+    ? []
+    : [
+      new xdr.SorobanAuthorizationEntry({
+        credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+        rootInvocation: root,
+      }),
+    ];
+  return new TransactionBuilder(new Account(ACCOUNT, '10'), {
+    fee: '100',
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(Operation.invokeContractFunction({
+      contract: POOL,
+      function: 'transact',
+      args: [xdr.ScVal.scvBytes(Buffer.from([1])), ext, sender],
+      auth: authEntries,
+    }))
+    .setTimeout(30)
+    .build()
+    .toXDR();
+}
+
 function depositAuthXdr(tokenContract: string): string {
   const ext = xdr.ScVal.scvMap([
     new xdr.ScMapEntry({
@@ -484,6 +544,33 @@ describe('SPP sign gate attack cases', () => {
     expect(() => authorizeSppSignature({
       kind: 'auth_entry',
       input: depositAuthXdr(token),
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).not.toThrow();
+
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(deposit);
+    expect(() => authorizeSppSignature({
+      kind: 'transaction',
+      input: depositTxXdr('none', token),
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/missing Soroban authorization/);
+
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(deposit);
+    expect(() => authorizeSppSignature({
+      kind: 'transaction',
+      input: depositTxXdr('empty-sub', token),
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/exactly one token\.transfer/);
+
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval(deposit);
+    expect(() => authorizeSppSignature({
+      kind: 'transaction',
+      input: depositTxXdr('token', token),
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
     })).not.toThrow();

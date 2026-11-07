@@ -120,8 +120,8 @@ export function SppAccountPanel({
       setError('note_key y encryption_key deben ser 32 bytes en hex.');
       return;
     }
-    if (noteKeyProofHex.trim().length > 0 && !/^[0-9a-fA-F]+$/.test(noteKeyProofHex.trim())) {
-      setError('note_key_proof debe ser hex.');
+    if (noteKeyProofHex.trim().length > 0 && !/^(?:[0-9a-fA-F]{2})+$/.test(noteKeyProofHex.trim())) {
+      setError('note_key_proof debe ser hex de longitud par.');
       return;
     }
     setBusy('register');

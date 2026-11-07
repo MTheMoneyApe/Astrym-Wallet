@@ -33,6 +33,7 @@ import {
   xdr,
 } from '@stellar/stellar-sdk';
 import { hashSep53Message } from './sep53.js';
+import { NETHERMIND_PUBLIC_KDF_DOMAIN } from './nethermind/nethermindPublicTestnet.js';
 import {
   SPP_PROPOSED_MAX_FEE_STROOPS,
   assertFeeWithinCeiling,
@@ -154,7 +155,6 @@ type ParsedInvocation = {
   subInvocations: InvocationView[];
 };
 
-/** Testnet allowlist. Futurenet, Public, standalone, and whitespace variants all fail. */
 /**
  * SEP-53 message the SDK 0.2.1 wallet signs to derive privacy keys.
  * `kdfDomain` is the contract config domain, trimmed the same way as the SDK.
@@ -167,6 +167,7 @@ export function sppKeyDerivationMessage(kdfDomain: string): string {
   return `Privacy Pool Key Derivation [v2] (${domain})`;
 }
 
+/** Testnet allowlist. Futurenet, Public, standalone, and whitespace variants all fail. */
 export function assertStellarTestnetPassphrase(passphrase: string): void {
   if (passphrase !== Networks.TESTNET) {
     throw new SppSignerError('Only the Stellar Testnet passphrase is allowed');
@@ -315,6 +316,7 @@ type SignatureFacts = {
   exactMessage: string | null;
   txFeeStroops: bigint | null;
   invocation: ParsedInvocation | null;
+  embeddedAuth: ParsedInvocation[];
   registerOwner: string | null;
   registerNoteKeyHex: string | null;
   registerEncryptionKeyHex: string | null;
@@ -362,6 +364,7 @@ function prepareMessage(message: string): PreparedSignature {
       exactMessage: message,
       txFeeStroops: null,
       invocation: null,
+      embeddedAuth: [],
       registerOwner: null,
       registerNoteKeyHex: null,
       registerEncryptionKeyHex: null,
@@ -443,6 +446,7 @@ function prepareTransaction(
   } else {
     throw new SppSignerError(`Unexpected contract function "${functionName}"`);
   }
+  const embeddedAuth: ParsedInvocation[] = [];
   if (Array.isArray(op.auth)) {
     for (const entry of op.auth) {
       if (!entry?.rootInvocation) {
@@ -452,6 +456,7 @@ function prepareTransaction(
       if (root.contractId !== contractId || root.functionName !== functionName) {
         throw new SppSignerError('Transaction auth entry does not match the invoke');
       }
+      embeddedAuth.push(root);
     }
   }
   const txHash = tx.hash();
@@ -467,6 +472,7 @@ function prepareTransaction(
       exactMessage: null,
       txFeeStroops: txFee,
       invocation: null,
+      embeddedAuth,
       registerOwner,
       registerNoteKeyHex,
       registerEncryptionKeyHex,
@@ -517,6 +523,7 @@ function prepareAuthEntry(xdrInput: string, boundAccount: string): PreparedSigna
       exactMessage: null,
       txFeeStroops: null,
       invocation: inspected,
+      embeddedAuth: [],
       registerOwner,
       registerNoteKeyHex,
       registerEncryptionKeyHex,
@@ -864,6 +871,12 @@ function consumeMatchingApproval(
       requireTxFee: true,
       requireMinResourceFee: chosen.intent.minResourceFeeStroops !== null,
     });
+    if (chosen.intent.operation === 'deposit' && facts.embeddedAuth.length === 0) {
+      throw new SppSignerError('Deposit transaction is missing Soroban authorization');
+    }
+    for (const embedded of facts.embeddedAuth) {
+      assertInvocationAgainstIntent(embedded, chosen.intent, chosen.intent.account);
+    }
     if (facts.invocation) {
       assertInvocationAgainstIntent(facts.invocation, chosen.intent, chosen.intent.account);
     }
@@ -1073,8 +1086,11 @@ function freezeIntent(intent: SppSignIntent): SppSignIntent {
       if (!intent.registryContractId) {
         throw new SppSignerError('Register intent requires registryContractId', 'INVALID_REQUEST');
       }
-      if (intent.exactMessage === null) {
-        throw new SppSignerError('Register intent requires the approved derivation message', 'INVALID_REQUEST');
+      if (intent.exactMessage !== sppKeyDerivationMessage(NETHERMIND_PUBLIC_KDF_DOMAIN)) {
+        throw new SppSignerError(
+          'Register intent derivation message does not match the pinned KDF domain',
+          'INVALID_REQUEST',
+        );
       }
       assertKeyHex(intent.registerNoteKeyHex, 'note key');
       assertKeyHex(intent.registerEncryptionKeyHex, 'encryption key');

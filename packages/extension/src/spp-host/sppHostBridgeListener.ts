@@ -20,6 +20,35 @@ export type SppHostBridgeListenerHandles = {
   dispose: () => void;
 };
 
+/**
+ * Execute, account-query, and lifecycle-clear messages may come only from
+ * this extension's service worker (no tab). Extension pages and content
+ * scripts are refused. The Android webapp has no MV3 worker; its in-page
+ * background is the webapp document.
+ */
+export function isSppServiceWorkerSender(
+  sender: { id?: string | undefined; url?: string | undefined; tab?: unknown } | undefined,
+  runtimeId: string | undefined,
+): boolean {
+  if (!runtimeId || !sender?.id || sender.id !== runtimeId) return false;
+  if (sender.tab != null) return false;
+  if (!sender.url) return true;
+  let parsed: URL;
+  try {
+    parsed = new URL(sender.url, 'http://astrym.invalid');
+  } catch {
+    return false;
+  }
+  if (
+    parsed.protocol === 'chrome-extension:'
+    && parsed.host === runtimeId
+    && parsed.pathname === '/background.js'
+  ) {
+    return true;
+  }
+  return runtimeId === 'astrym-android-webapp' && parsed.pathname === '/webapp.html';
+}
+
 function publishLifecycleToBackground(event: SppHostLifecycleEvent): void {
   try {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -40,10 +69,11 @@ export function installSppHostBridgeListener(): SppHostBridgeListenerHandles {
 
   const onMessage = (
     message: unknown,
-    _sender: chrome.runtime.MessageSender,
+    sender: chrome.runtime.MessageSender,
     sendResponse: (response: unknown) => void,
   ): boolean => {
     if (!isSppHostBridgeMessage(message)) return false;
+    if (!isSppServiceWorkerSender(sender, chrome.runtime?.id)) return false;
 
     const accountQuery = parseSppHostAccountQueryRequest(message);
     if (accountQuery) {
@@ -83,8 +113,12 @@ export function installSppHostBridgeListener(): SppHostBridgeListenerHandles {
     return true;
   };
 
-  const onDisconnectClear = (message: unknown): void => {
+  const onDisconnectClear = (
+    message: unknown,
+    sender: chrome.runtime.MessageSender,
+  ): void => {
     if (!isSppHostBridgeMessage(message)) return;
+    if (!isSppServiceWorkerSender(sender, chrome.runtime?.id)) return;
     const maybe = message as { type?: string; state?: string };
     if (maybe.type === 'SPP_HOST_POOL_LIFECYCLE' && maybe.state === 'cleared') {
       clearSppHostWritePool('background cleared lifecycle');

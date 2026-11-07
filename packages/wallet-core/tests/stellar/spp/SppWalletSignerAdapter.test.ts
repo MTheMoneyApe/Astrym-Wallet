@@ -36,8 +36,10 @@ import {
 import {
   mintSppSignApproval,
   resetSppSignApprovalsForTests,
+  sppKeyDerivationMessage,
   type SppSignIntent,
 } from '../../../src/stellar/spp/sppSignGate.js';
+import { NETHERMIND_PUBLIC_KDF_DOMAIN } from '../../../src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import { PasswordUnlocker } from '../../../src/vault/PasswordUnlocker.js';
 import { VaultService } from '../../../src/vault/VaultService.js';
 import type { IPersistentStorage, ISessionStorage } from '../../../src/vault/IVaultStorage.js';
@@ -83,7 +85,9 @@ function baseIntent(overrides: Partial<SppSignIntent> = {}): SppSignIntent {
   };
 }
 
-function approveMessage(message: string): void {
+const DERIVATION_MESSAGE = sppKeyDerivationMessage(NETHERMIND_PUBLIC_KDF_DOMAIN);
+
+function approveDerivationMessage(): void {
   mintSppSignApproval(baseIntent({
     operation: 'register_public_keys',
     amountStroops: null,
@@ -95,7 +99,7 @@ function approveMessage(message: string): void {
     registerEncryptionKeyHex: ENC_KEY,
     registerNoteKeyProofHex: null,
     maxFeeStroops: '5000000',
-    exactMessage: message,
+    exactMessage: DERIVATION_MESSAGE,
   }));
 }
 
@@ -110,6 +114,28 @@ function buildTransactXdr(fee = '100', amount = 10n): string {
       val: Address.fromString(SEP0005_TV1_G).toScVal(),
     }),
   ]);
+  const sender = Address.fromString(SEP0005_TV1_G).toScVal();
+  const invocation = new xdr.SorobanAuthorizedInvocation({
+    function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+      new xdr.InvokeContractArgs({
+        contractAddress: Address.fromString(POOL).toScAddress(),
+        functionName: 'transact',
+        args: [xdr.ScVal.scvBytes(Buffer.from([1])), ext, sender],
+      }),
+    ),
+    subInvocations: [
+      new xdr.SorobanAuthorizedInvocation({
+        function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+          new xdr.InvokeContractArgs({
+            contractAddress: Address.fromString(TOKEN).toScAddress(),
+            functionName: 'transfer',
+            args: [sender, Address.fromString(POOL).toScVal(), nativeToScVal(amount, { type: 'i128' })],
+          }),
+        ),
+        subInvocations: [],
+      }),
+    ],
+  });
   return new TransactionBuilder(new Account(SEP0005_TV1_G, '10'), {
     fee,
     networkPassphrase: Networks.TESTNET,
@@ -117,7 +143,13 @@ function buildTransactXdr(fee = '100', amount = 10n): string {
     .addOperation(Operation.invokeContractFunction({
       contract: POOL,
       function: 'transact',
-      args: [xdr.ScVal.scvBytes(Buffer.from([1])), ext, Address.fromString(SEP0005_TV1_G).toScVal()],
+      args: [xdr.ScVal.scvBytes(Buffer.from([1])), ext, sender],
+      auth: [
+        new xdr.SorobanAuthorizationEntry({
+          credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+          rootInvocation: invocation,
+        }),
+      ],
     }))
     .setTimeout(180)
     .build()
@@ -361,26 +393,37 @@ describe('SppWalletSignerAdapter hardening (offline)', () => {
     expect(ed25519.verify(b64ToBytes(SEP53_SIG_JA_B64), d2, kp.rawPublicKey())).toBe(true);
   });
 
-  it('signMessage: empty + Unicode; verifies with independent digest', async () => {
+  it('signMessage signs only the pinned derivation message', async () => {
     const { signer, vault } = await unlockedStellarSigner();
     const adapter = makeAdapter(signer);
     const pub = await signer.getPublicKey(0);
 
-    for (const message of ['', 'こんにちは、世界！', 'SOLANYM empty-ok']) {
-      approveMessage(message);
-      const result = await adapter.signMessage(message);
-      const { signedMessage, signerAddress } = result as {
-        signedMessage: string;
-        signerAddress?: string;
-      };
-      expect(signerAddress).toBe(SEP0005_TV1_G);
-      const digest = independentSep53Digest(message);
-      expect(ed25519.verify(b64ToBytes(signedMessage), digest, pub)).toBe(true);
-      // Raw UTF-8 must not verify (proves prefix hashing).
-      expect(ed25519.verify(b64ToBytes(signedMessage), new TextEncoder().encode(message), pub)).toBe(
-        false,
-      );
-    }
+    expect(() => mintSppSignApproval(baseIntent({
+      operation: 'register_public_keys',
+      amountStroops: null,
+      recipient: null,
+      poolContractId: null,
+      registryContractId: REGISTRY,
+      tokenContractId: null,
+      registerNoteKeyHex: NOTE_KEY,
+      registerEncryptionKeyHex: ENC_KEY,
+      maxFeeStroops: '5000000',
+      exactMessage: 'hello',
+    }))).toThrow(/pinned KDF domain/);
+
+    approveDerivationMessage();
+    const result = await adapter.signMessage(DERIVATION_MESSAGE);
+    const { signedMessage, signerAddress } = result as {
+      signedMessage: string;
+      signerAddress?: string;
+    };
+    expect(signerAddress).toBe(SEP0005_TV1_G);
+    const digest = independentSep53Digest(DERIVATION_MESSAGE);
+    expect(ed25519.verify(b64ToBytes(signedMessage), digest, pub)).toBe(true);
+    expect(ed25519.verify(b64ToBytes(signedMessage), new TextEncoder().encode(DERIVATION_MESSAGE), pub)).toBe(
+      false,
+    );
+    await expect(adapter.signMessage('')).rejects.toThrow(/approval|derivation/i);
     await vault.lock();
   });
 
@@ -507,8 +550,8 @@ describe('SppWalletSignerAdapter hardening (offline)', () => {
     const adapter = makeAdapter(signer, gate);
     await expect(adapter.signMessage('needs approval')).rejects.toThrow(/denied|approval/i);
 
-    approveMessage('approved msg');
-    const result = await adapter.signMessage('approved msg');
+    approveDerivationMessage();
+    const result = await adapter.signMessage(DERIVATION_MESSAGE);
     expect((result as { signedMessage: string }).signedMessage.length).toBeGreaterThan(0);
     await vault.lock();
   });
@@ -566,8 +609,8 @@ describe('SppWalletSignerAdapter hardening (offline)', () => {
       networkPassphrase: Networks.TESTNET,
       authorizationGate: gate,
     });
-    approveMessage('fail');
-    await expect(adapter.signMessage('fail')).rejects.toThrow(/synthetic signer failure/);
+    approveDerivationMessage();
+    await expect(adapter.signMessage(DERIVATION_MESSAGE)).rejects.toThrow(/synthetic signer failure/);
     expect(calls).toBe(1);
     expect(gate.activeLeaseCount()).toBe(0);
     await vault.lock();
@@ -608,8 +651,8 @@ describe('SppWalletSignerAdapter hardening (offline)', () => {
       end: (lease: SignatureLease) => inner.end(lease),
     };
     const adapter = makeAdapter(signer, revoking);
-    approveMessage('revoked');
-    await expect(adapter.signMessage('revoked')).rejects.toThrow(/no longer active/i);
+    approveDerivationMessage();
+    await expect(adapter.signMessage(DERIVATION_MESSAGE)).rejects.toThrow(/no longer active/i);
     expect(assertCount).toBeGreaterThanOrEqual(2);
     expect(inner.activeLeaseCount()).toBe(0);
     await vault.lock();

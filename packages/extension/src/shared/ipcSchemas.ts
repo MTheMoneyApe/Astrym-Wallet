@@ -757,7 +757,7 @@ export const MessageSchemas = {
       /** 32-byte encryption public key the user is registering, hex. */
       encryptionKeyHex: z.string().regex(/^[0-9a-fA-F]{64}$/),
       /** Present only when the registry call includes note_key_proof. */
-      noteKeyProofHex: z.string().regex(/^[0-9a-fA-F]+$/).optional(),
+      noteKeyProofHex: z.string().regex(/^(?:[0-9a-fA-F]{2})+$/).optional(),
     }),
     response: z.object({
       txHash: z.string().nullable(),
