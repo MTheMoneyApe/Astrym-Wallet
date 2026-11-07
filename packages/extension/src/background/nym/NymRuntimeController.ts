@@ -54,9 +54,11 @@ import type { StellarReadFetch } from '@solanym/wallet-core/src/stellar/read/Ste
 import type { NymOffscreenStatusPayload } from '../../nym-offscreen/protocol.js';
 import { NYM_VERIFIED_GATEWAY } from '../../nym-offscreen/verifiedGateway.js';
 import {
+  NYM_PRIVACY_PREFERENCE_STORAGE_KEY,
   readNymPrivacyPreference,
   writeNymPrivacyPreference,
   type NymPrivacyChoice,
+  type NymPrivacyPreferenceRecord,
   type NymPrivacyPreferenceStore,
 } from '../../shared/nymPrivacyPreference.js';
 
@@ -90,12 +92,32 @@ export type NymRuntimeUiSnapshot = NymTransportSnapshot & {
   stellarNymHorizon?: StellarNymHorizonConfig;
 };
 
+const DIRECT_DIAGNOSTIC_REFUSAL =
+  'Direct diagnostics refused: privacy policy does not allow clearnet';
+
 function clearnetFetchImpl(
   url: string,
   init?: RequestInit,
 ): Promise<Response> {
   const fn = globalThis.fetch.bind(globalThis);
   return fn(url, init);
+}
+
+function subscribeChromePrivacyChanges(listener: () => void): () => void {
+  if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return () => {};
+  const wrapped = (changes: Record<string, unknown>, area: string) => {
+    if (
+      area !== 'local' ||
+      !Object.prototype.hasOwnProperty.call(changes, NYM_PRIVACY_PREFERENCE_STORAGE_KEY)
+    ) {
+      return;
+    }
+    listener();
+  };
+  chrome.storage.onChanged.addListener(wrapped);
+  return () => {
+    chrome.storage.onChanged.removeListener(wrapped);
+  };
 }
 
 function defaultLocalStorage(): {
@@ -180,6 +202,7 @@ export class NymRuntimeController {
   };
   /** Serializes Connect so duplicate createMixFetch / offscreen races cannot overlap. */
   private _connectInFlight: Promise<NymRuntimeUiSnapshot> | null = null;
+  private _privacyReload: Promise<void> = Promise.resolve();
 
   constructor(options?: {
     bridge?: NymSessionBridge;
@@ -188,6 +211,11 @@ export class NymRuntimeController {
     allowConnectWithoutHostPermission?: boolean;
     /** Privacy choice store. Defaults to chrome.storage.local (in-memory if absent). */
     privacyPreferenceStore?: NymPrivacyPreferenceStore;
+    /**
+     * Notified when another instance writes the privacy key.
+     * Defaults to chrome.storage.onChanged when the default store is used.
+     */
+    onPrivacyStoreChanged?: (listener: () => void) => () => void;
   }) {
     const docs = createOffscreenDocumentManager();
     this._allowConnectWithoutHostPermission = options?.allowConnectWithoutHostPermission === true;
@@ -202,8 +230,17 @@ export class NymRuntimeController {
       options?.gatewayConfig ?? new NymGatewayConfigService(defaultLocalStorage());
     this._hostPermissions =
       options?.hostPermissions ?? new NymHostPermissionService();
+    const usingDefaultStore = options?.privacyPreferenceStore == null;
     this._privacyStore = options?.privacyPreferenceStore ?? defaultLocalStorage();
     this._hydratePromise = this.hydratePrivacyPreference();
+    const subscribe =
+      options?.onPrivacyStoreChanged ??
+      (usingDefaultStore ? subscribeChromePrivacyChanges : undefined);
+    if (subscribe) {
+      subscribe(() => {
+        this.schedulePrivacyReload();
+      });
+    }
   }
 
   get mode(): NymTransportMode {
@@ -366,29 +403,82 @@ export class NymRuntimeController {
     this._router.setMode(mode);
   }
 
+  private schedulePrivacyReload(): void {
+    this._privacyReload = this._privacyReload
+      .catch(() => undefined)
+      .then(() => this.reloadPrivacyFromStore());
+  }
+
+  /** Apply a privacy value written by another instance. Does not invent Direct. */
+  private async reloadPrivacyFromStore(): Promise<void> {
+    const epoch = this._explicitEpoch;
+    let record: NymPrivacyPreferenceRecord;
+    try {
+      record = await readNymPrivacyPreference(this._privacyStore);
+    } catch {
+      if (this._explicitEpoch !== epoch) return;
+      this.applyResolved('nym', null);
+      this._diagnosticCode = 'PRIVACY_PREFERENCE_UNREADABLE';
+      return;
+    }
+    if (this._explicitEpoch !== epoch) return;
+    this.applyPrivacyRecord(record);
+  }
+
+  private applyPrivacyRecord(record: NymPrivacyPreferenceRecord): void {
+    switch (record.kind) {
+      case 'unset':
+        this.applyResolved('nym', null);
+        this._diagnosticCode = 'PRIVACY_CHOICE_REQUIRED';
+        return;
+      case 'chosen':
+        this.applyResolved(record.choice, record.choice);
+        return;
+      case 'corrupt':
+        this.applyResolved('nym', null);
+        this._diagnosticCode = 'PRIVACY_PREFERENCE_CORRUPT';
+        return;
+      default: {
+        const _never: never = record;
+        throw new Error(`Unhandled privacy preference ${JSON.stringify(_never)}`);
+      }
+    }
+  }
+
+  private clearnetExplicitlyAuthorized(): boolean {
+    return (
+      this._preferenceHydrated &&
+      this._privacyPreference === 'direct' &&
+      this._mode === 'direct' &&
+      !this.isEgressBlocked()
+    );
+  }
+
+  /**
+   * Diagnostics use the same clearnet rule as wallet fetch.
+   * A requested transport does not change the saved choice.
+   */
+  private async diagnosticTransport(
+    requested: NymTransportMode | undefined,
+  ): Promise<'direct' | 'nym' | 'refused'> {
+    await this.whenPrivacyReady();
+    await this._privacyReload;
+    const transport: NymTransportMode =
+      requested === 'direct' || requested === 'nym'
+        ? requested
+        : this._mode === 'direct'
+          ? 'direct'
+          : 'nym';
+    if (transport === 'direct' && !this.clearnetExplicitlyAuthorized()) return 'refused';
+    return transport;
+  }
+
   private async hydratePrivacyPreference(): Promise<void> {
     const epoch = this._explicitEpoch;
     try {
       const record = await readNymPrivacyPreference(this._privacyStore);
       if (this._explicitEpoch !== epoch) return;
-      switch (record.kind) {
-        case 'unset':
-          // No saved choice is not an implicit Direct. Stay fail-closed.
-          this.applyResolved('nym', null);
-          this._diagnosticCode = 'PRIVACY_CHOICE_REQUIRED';
-          return;
-        case 'chosen':
-          this.applyResolved(record.choice, record.choice);
-          return;
-        case 'corrupt':
-          this.applyResolved('nym', null);
-          this._diagnosticCode = 'PRIVACY_PREFERENCE_CORRUPT';
-          return;
-        default: {
-          const _never: never = record;
-          throw new Error(`Unhandled privacy preference ${JSON.stringify(_never)}`);
-        }
-      }
+      this.applyPrivacyRecord(record);
     } catch {
       if (this._explicitEpoch !== epoch) return;
       // Storage failures stay fail-closed. Do not select Direct.
@@ -622,23 +712,32 @@ export class NymRuntimeController {
   }
 
   /**
-   * Public (non-wallet) GET via FailClosedTransportRouter.
-   * mode=nym → mixFetch path; mode=direct → explicit clearnet only.
-   * No silent fallback between modes.
+   * Public (non-wallet) GET.
+   * Direct is allowed only when clearnet is explicitly authorized.
+   * The request does not change the saved privacy choice.
    */
   async fetchPublicData(
     request?: Omit<PublicDataFetchRequest, 'transport'> & {
       transport?: NymTransportMode;
     },
   ): Promise<PublicDataFetchResult> {
-    // Diagnostic isolation: the requested transport for a public-data fetch must NOT
-    // mutate the shared wallet router mode. Derive a one-off fetch without setMode().
-    const transport: NymTransportMode = (request?.transport === 'direct' || request?.transport === 'nym')
-      ? request.transport
-      : this._mode;
-    // Diagnostic isolation: For an explicitly requested Nym diagnostic, use this._transport.fetch directly.
-    // Do NOT call this._router.fetch() or getStellarFetch() or mutate router mode.
-    // For Direct diagnostics, call isolated clearnetFetchImpl directly.
+    const transport = await this.diagnosticTransport(request?.transport);
+    if (transport === 'refused') {
+      return {
+        state: 'error',
+        transport: 'direct',
+        url: request?.url ?? '',
+        probeId: '',
+        durationMs: 0,
+        httpStatus: null,
+        httpOk: null,
+        probeMatched: false,
+        echoedProbeId: null,
+        responsePreview: null,
+        message: DIRECT_DIAGNOSTIC_REFUSAL,
+        transportFetchInvoked: false,
+      };
+    }
     const fetchViaTransport: PublicDataTransportFetch = transport === 'nym'
       ? (url: string, init?: RequestInit) => this._transport.fetch(url, init)
       : (url: string, init?: RequestInit) => clearnetFetchImpl(url, init);
@@ -660,15 +759,34 @@ export class NymRuntimeController {
     horizonUrl?: string;
     timeoutMs?: number;
   }): Promise<StellarHorizonProbeResult> {
-    // Diagnostic isolation: probe transport must NOT mutate the shared router mode.
-    const transport: NymTransportMode = (options?.transport === 'direct' || options?.transport === 'nym')
-      ? options.transport
-      : this._mode;
-    // For a direct diagnostic probe, use clearnet fetch directly rather than routing
-    // through the shared router (which may be in nym mode for wallet operations).
-    // For Nym diagnostic probe: use this._transport.fetch directly via createStellarTransportFetch.
-    // Do NOT call this._router.fetch() or this.getStellarFetch().
-    // For Direct diagnostic probe: use isolated clearnetFetchImpl.
+    const transport = await this.diagnosticTransport(options?.transport);
+    if (transport === 'refused') {
+      const logical = options?.horizonUrl ?? '';
+      return {
+        state: 'error',
+        transport: 'direct',
+        url: logical,
+        logicalUrl: logical,
+        effectiveUrl: logical,
+        urlRewritten: false,
+        rewriteReason: null,
+        durationMs: 0,
+        httpStatus: null,
+        httpOk: null,
+        contentType: null,
+        horizonVersion: null,
+        networkPassphrase: null,
+        lastLedger: null,
+        lastLedgerBaseFee: null,
+        horizonErrorType: null,
+        horizonErrorTitle: null,
+        horizonErrorDetail: null,
+        responsePreview: null,
+        message: DIRECT_DIAGNOSTIC_REFUSAL,
+        transportFetchInvoked: false,
+      };
+    }
+    // Probe result must not call setMode. Direct uses clearnet only after authorization above.
     const fetchViaStellarTransport: StellarReadFetch = transport === 'nym'
       ? createStellarTransportFetch({
           getMode: () => 'nym' as NymTransportMode,

@@ -39,6 +39,24 @@ export function describeWalletPrivacy(snapshot: PrivacyIndicatorSnapshot): Priva
       egress: 'blocked',
     };
   }
+  if (snapshot.diagnosticCode === 'PRIVACY_PREFERENCE_PERSIST_FAILED') {
+    if (
+      snapshot.privacyPreference === 'nym' &&
+      snapshot.connected === true &&
+      snapshot.egressBlocked !== true
+    ) {
+      return {
+        tone: 'nym',
+        label: 'Privacy: Nym — choice not saved',
+        egress: 'open',
+      };
+    }
+    return {
+      tone: 'blocked',
+      label: 'Privacy: not saved — wallet network blocked',
+      egress: 'blocked',
+    };
+  }
   if (preferenceDiagnostic(snapshot.diagnosticCode) && snapshot.connected !== true) {
     return {
       tone: 'blocked',

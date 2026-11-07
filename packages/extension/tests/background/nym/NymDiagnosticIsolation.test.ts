@@ -292,23 +292,26 @@ describe('Nym Diagnostic Isolation & Direct/Nym mode policy', () => {
     expect(controller.mode).toBe('nym');
     expect((controller as any)._router.mode).toBe('nym');
 
-    // Run direct diagnostic
     const directMock = vi.fn(async () => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', directMock);
     try {
-      await controller.fetchPublicData({ transport: 'direct' });
+      const refused = await controller.fetchPublicData({ transport: 'direct' });
+      expect(refused.transportFetchInvoked).toBe(false);
+      expect(directMock).not.toHaveBeenCalled();
       expect(controller.mode).toBe('nym');
+      expect(controller.getSnapshot().privacyPreference).toBe('nym');
       expect((controller as any)._router.mode).toBe('nym');
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it('A diagnostic explicitly requesting Direct uses isolated clearnet while wallet router is in Nym mode', async () => {
+  it('refuses Direct diagnostics while Nym is selected, without changing mode', async () => {
     const { controller, bridge } = await createTestController();
     await controller.connect();
 
     expect(controller.mode).toBe('nym');
+    expect(controller.getSnapshot().privacyPreference).toBe('nym');
 
     const directMock = vi.fn(async () => {
       return new Response(JSON.stringify({ ok: true, source: 'clearnet' }), {
@@ -323,12 +326,45 @@ describe('Nym Diagnostic Isolation & Direct/Nym mode policy', () => {
         transport: 'direct',
         url: 'https://postman-echo.com/post',
       });
+      const horizon = await controller.probeStellarHorizon({
+        transport: 'direct',
+        horizonUrl: 'https://horizon-testnet.stellar.org',
+      });
 
-      expect(directMock).toHaveBeenCalled();
+      expect(directMock).not.toHaveBeenCalled();
       expect(bridge.mixFetch).not.toHaveBeenCalled();
-      expect(result.transport).toBe('direct');
+      expect(result.transportFetchInvoked).toBe(false);
+      expect(result.state).toBe('error');
+      expect(horizon.transportFetchInvoked).toBe(false);
+      expect(horizon.state).toBe('error');
       expect(controller.mode).toBe('nym');
+      expect(controller.getSnapshot().privacyPreference).toBe('nym');
       expect((controller as any)._router.mode).toBe('nym');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('allows a Direct diagnostic only after Direct was explicitly stored', async () => {
+    const { controller } = await createTestController();
+    await controller.whenPrivacyReady();
+    await controller.setMode('direct');
+    const directMock = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', directMock);
+    try {
+      const result = await controller.fetchPublicData({
+        transport: 'direct',
+        url: 'https://postman-echo.com/post',
+      });
+      expect(directMock).toHaveBeenCalled();
+      expect(result.transport).toBe('direct');
+      expect(controller.mode).toBe('direct');
+      expect(controller.getSnapshot().privacyPreference).toBe('direct');
     } finally {
       vi.unstubAllGlobals();
     }

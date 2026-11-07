@@ -254,27 +254,62 @@ describe('Nym privacy persistence', () => {
     expect(isSppTestnetBroadcastAuthorized()).toBe(false);
   });
 
-  it('does not let a direct diagnostic probe rewrite the persisted Nym choice', async () => {
-    const store = memoryStore();
-    const ctrl = controllerFor(store);
-    await ctrl.setMode('nym');
-    const probe = vi.fn(async () =>
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
-    vi.stubGlobal('fetch', probe);
-    const result = await ctrl.fetchPublicData({
+  it('does not send Direct diagnostics while Nym, unset, pending, or corrupt', async () => {
+    const clearnet = vi.fn(async () => new Response('nope', { status: 200 }));
+    vi.stubGlobal('fetch', clearnet);
+
+    const nym = controllerFor(memoryStore());
+    await nym.setMode('nym');
+    const nymProbe = await nym.fetchPublicData({
       transport: 'direct',
       url: 'https://postman-echo.com/get',
     });
-    expect(result.transport).toBe('direct');
-    expect(ctrl.mode).toBe('nym');
-    expect(store.snapshot()[NYM_PRIVACY_PREFERENCE_STORAGE_KEY]).toBe('nym');
-    probe.mockClear();
-    await expect(ctrl.getStellarFetch()(HORIZON)).rejects.toMatchObject({ code: 'NOT_CONNECTED' });
-    expect(probe).not.toHaveBeenCalled();
+    const nymHorizon = await nym.probeStellarHorizon({
+      transport: 'direct',
+      horizonUrl: 'https://horizon-testnet.stellar.org',
+    });
+    expect(nymProbe.transportFetchInvoked).toBe(false);
+    expect(nymHorizon.transportFetchInvoked).toBe(false);
+    expect(nym.mode).toBe('nym');
+    expect(nym.getSnapshot().privacyPreference).toBe('nym');
+
+    const unset = controllerFor(memoryStore());
+    await unset.whenPrivacyReady();
+    const unsetProbe = await unset.fetchPublicData({ transport: 'direct' });
+    expect(unsetProbe.transportFetchInvoked).toBe(false);
+    expect(unset.getSnapshot().privacyPreference).toBeNull();
+
+    const corrupt = controllerFor(
+      memoryStore({ [NYM_PRIVACY_PREFERENCE_STORAGE_KEY]: 'clearnet' }),
+    );
+    await corrupt.whenPrivacyReady();
+    const corruptHorizon = await corrupt.probeStellarHorizon({ transport: 'direct' });
+    expect(corruptHorizon.transportFetchInvoked).toBe(false);
+    expect(corrupt.getSnapshot().diagnosticCode).toBe('PRIVACY_PREFERENCE_CORRUPT');
+
+    const broken: NymPrivacyPreferenceStore = {
+      get: async () => {
+        throw new Error('storage unavailable');
+      },
+      set: async () => {},
+    };
+    const unreadable = controllerFor(broken);
+    await unreadable.whenPrivacyReady();
+    const failedProbe = await unreadable.fetchPublicData({ transport: 'direct' });
+    expect(failedProbe.transportFetchInvoked).toBe(false);
+    expect(unreadable.getSnapshot().diagnosticCode).toBe('PRIVACY_PREFERENCE_UNREADABLE');
+
+    const gated = gatedStore();
+    const pending = controllerFor(gated.store);
+    const inflight = pending.fetchPublicData({ transport: 'direct' });
+    await Promise.resolve();
+    expect(clearnet).not.toHaveBeenCalled();
+    gated.seed('nym');
+    gated.release();
+    const pendingResult = await inflight;
+    expect(pendingResult.transportFetchInvoked).toBe(false);
+    expect(clearnet).not.toHaveBeenCalled();
+    expect(pending.mode).toBe('nym');
     expect(isSppTestnetBroadcastAuthorized()).toBe(false);
   });
 
