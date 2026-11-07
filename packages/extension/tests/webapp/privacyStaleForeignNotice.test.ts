@@ -234,4 +234,102 @@ describe('stale foreign Direct notice', () => {
     expect(backing.storedChoice()).toBe('nym');
     expect(clearnet).not.toHaveBeenCalled();
   });
+
+  it('keeps a failed local Nym when a queued Direct notice rereads the previous Direct', async () => {
+    const eventsA = new EventTarget();
+    const eventsB = new EventTarget();
+    const backing = queuedSharedStorage([eventsA, eventsB]);
+    const peerStorage = backing.forPeer(eventsB);
+    let failNym = false;
+    const throwingPeerStorage = {
+      ...peerStorage,
+      setItem: (key: string, value: string) => {
+        const parsed = JSON.parse(value) as Record<string, unknown>;
+        if (failNym && parsed[KEY] === 'nym') {
+          const error = new Error('QuotaExceededError');
+          error.name = 'QuotaExceededError';
+          throw error;
+        }
+        peerStorage.setItem(key, value);
+      },
+    };
+    const holdReads = { current: null as Promise<void> | null };
+    const writer = instance(backing.forPeer(eventsA), eventsA, holdReads);
+    const peer = instance(throwingPeerStorage, eventsB, holdReads);
+    await writer.whenPrivacyReady();
+    await peer.whenPrivacyReady();
+
+    await writer.setMode('direct');
+    await writer.setMode('direct');
+    expect(backing.storedChoice()).toBe('direct');
+
+    failNym = true;
+    await expect(peer.setMode('nym')).rejects.toThrow(/QuotaExceededError/);
+    expect(backing.storedChoice()).toBe('direct');
+    expect(peer.getSnapshot()).toMatchObject({
+      mode: 'nym',
+      privacyPreference: 'nym',
+      preferenceDurable: false,
+      egressBlocked: true,
+      diagnosticCode: 'PRIVACY_PREFERENCE_PERSIST_FAILED',
+    });
+
+    let release: () => void = () => {};
+    holdReads.current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const clearnet = vi.fn(async () => new Response('horizon', { status: 200 }));
+    vi.stubGlobal('fetch', clearnet);
+    backing.flush(eventsB);
+    expect(peer.getSnapshot()).toMatchObject({
+      privacyPreference: 'nym',
+      preferenceDurable: false,
+      egressBlocked: true,
+      diagnosticCode: 'PRIVACY_PREFERENCE_PERSIST_FAILED',
+    });
+    expect(peer.mode).not.toBe('direct');
+    const pending = refuseClearnet(peer, clearnet);
+    release();
+    holdReads.current = null;
+    await pending;
+
+    expect(backing.storedChoice()).toBe('direct');
+    expect(peer.getSnapshot()).toMatchObject({
+      mode: 'nym',
+      privacyPreference: 'nym',
+      preferenceDurable: false,
+      egressBlocked: true,
+      diagnosticCode: 'PRIVACY_PREFERENCE_PERSIST_FAILED',
+    });
+    expect(clearnet).not.toHaveBeenCalled();
+
+    const reloaded = instance(backing.forPeer(eventsB), eventsB, { current: null });
+    await reloaded.whenPrivacyReady();
+    expect(reloaded.getSnapshot()).toMatchObject({
+      privacyPreference: 'direct',
+      preferenceDurable: true,
+      egressBlocked: false,
+    });
+    expect((await reloaded.getStellarFetch()(HORIZON)).status).toBe(200);
+    expect(clearnet).toHaveBeenCalledTimes(1);
+    expect(peer.getSnapshot()).toMatchObject({
+      privacyPreference: 'nym',
+      preferenceDurable: false,
+      diagnosticCode: 'PRIVACY_PREFERENCE_PERSIST_FAILED',
+      egressBlocked: true,
+    });
+
+    failNym = false;
+    clearnet.mockClear();
+    await peer.setMode('direct');
+    expect(peer.getSnapshot()).toMatchObject({
+      mode: 'direct',
+      privacyPreference: 'direct',
+      preferenceDurable: true,
+      egressBlocked: false,
+      diagnosticCode: 'OK',
+    });
+    expect((await peer.getStellarFetch()(HORIZON)).status).toBe(200);
+    expect(clearnet).toHaveBeenCalledTimes(1);
+  });
 });

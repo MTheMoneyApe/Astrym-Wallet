@@ -206,6 +206,13 @@ export class NymRuntimeController {
   private _policyGeneration = 0;
   /** Latest explicit setMode. Newer than any queued choice it replaced. */
   private _localIntent: { generation: number; choice: NymPrivacyChoice } | null = null;
+  /**
+   * Local Nym was requested and is not the durable record yet.
+   * A reread of the previous Direct must not clear it. A new controller
+   * does not carry this flag, so reload still restores that Direct.
+   * A later local Direct save, or a disk value that is actually Nym, clears it.
+   */
+  private _unpersistedNymRevocation = false;
   /** Write posted to storage and not yet settled. Its echo must not rearm policy. */
   private _inflightWrite: { generation: number; choice: NymPrivacyChoice } | null = null;
   /** Set while that write's synchronous self-echo is still being delivered. */
@@ -463,6 +470,8 @@ export class NymRuntimeController {
     this._localIntent = { generation, choice: mode };
     this.suspendDirect();
     if (mode === 'nym') {
+      // Not durable until the write succeeds. A stale Direct reread must not undo this.
+      this._unpersistedNymRevocation = true;
       this.applyResolved('nym', 'nym', false);
     }
     const job = this._choiceQueue.then(() => this.commitMode(mode, generation));
@@ -475,8 +484,13 @@ export class NymRuntimeController {
 
   private async commitMode(mode: NymTransportMode, generation: number): Promise<void> {
     // Queued work that already lost to a newer choice or a foreign notice
-    // must not touch storage. The newer owner performs the durable effect.
-    if (this._policyGeneration !== generation) return;
+    // must not touch storage. A skipped Nym save is still an unsaved revocation.
+    if (this._policyGeneration !== generation) {
+      if (mode === 'nym' && this._localIntent?.generation === generation) {
+        this.notePersistFailed(generation, 'nym');
+      }
+      return;
+    }
     switch (mode) {
       case 'nym':
         // Memory is already Nym and not durable. A failed write leaves the previous
@@ -492,6 +506,7 @@ export class NymRuntimeController {
           await this.repairForeignClobber('nym');
           return;
         }
+        this._unpersistedNymRevocation = false;
         this._preferenceDurable = true;
         this._directSuspended = false;
         this.publishRuntimeStatus();
@@ -507,6 +522,7 @@ export class NymRuntimeController {
           await this.repairForeignClobber('direct');
           return;
         }
+        this._unpersistedNymRevocation = false;
         this.applyResolved('direct', 'direct', true);
         this.publishRuntimeStatus();
         return;
@@ -541,18 +557,29 @@ export class NymRuntimeController {
    * the outcome instead, and this failure must not hide that.
    */
   private notePersistFailed(generation: number, choice: NymPrivacyChoice): void {
-    if (this._policyGeneration !== generation) return;
     if (this._localIntent?.generation !== generation) return;
+    if (choice === 'nym') {
+      // A foreign notice may already have moved the policy generation. The
+      // failed Nym is still the latest local intent, so the failure stays.
+      this.keepUnpersistedNymRevocation();
+      return;
+    }
+    if (this._policyGeneration !== generation) return;
     this._preferenceDurable = false;
     this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
-    if (choice === 'nym') {
-      this._mode = 'nym';
-      this._privacyPreference = 'nym';
-      this._directSuspended = false;
-      if (this._router.mode === 'direct') this._router.setMode('nym');
-    } else {
-      this.suspendDirect();
-    }
+    this.suspendDirect();
+    this.publishRuntimeStatus();
+  }
+
+  /** Failed local Nym stays blocked. Receiving an old Direct notice is not a new choice. */
+  private keepUnpersistedNymRevocation(): void {
+    this._unpersistedNymRevocation = true;
+    this._mode = 'nym';
+    this._privacyPreference = 'nym';
+    this._preferenceDurable = false;
+    this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
+    this._directSuspended = true;
+    if (this._router.mode === 'direct') this._router.setMode('nym');
     this.publishRuntimeStatus();
   }
 
@@ -589,6 +616,7 @@ export class NymRuntimeController {
         return;
       }
       if (this._policyGeneration !== generation) return;
+      this._unpersistedNymRevocation = false;
       this.applyResolved('nym', 'nym', true);
       this.publishRuntimeStatus();
       return;
@@ -723,6 +751,11 @@ export class NymRuntimeController {
         this._diagnosticCode = 'PRIVACY_CHOICE_REQUIRED';
         return;
       case 'chosen':
+        if (record.choice === 'direct' && this._unpersistedNymRevocation) {
+          this.keepUnpersistedNymRevocation();
+          return;
+        }
+        if (record.choice === 'nym') this._unpersistedNymRevocation = false;
         this.applyResolved(record.choice, record.choice, true);
         return;
       case 'corrupt':
