@@ -557,26 +557,29 @@ export class NymRuntimeController {
   }
 
   /**
-   * A write that was already in flight may land after a foreign notice.
-   * If disk still shows that obsolete value, put back the foreign choice.
-   * A newer local intent writes for itself; this does not invent one.
+   * A local write finished after a foreign invalidation. Apply the fresh read.
+   * A Nym notice may revoke a Direct value this write just stored. A Direct
+   * notice is never written back: it may be older than the Nym already on disk.
    */
   private async repairForeignClobber(written: NymPrivacyChoice): Promise<void> {
     if (this._localIntent && this._localIntent.generation === this._policyGeneration) return;
-    if (!this._foreignValueKnown || this._foreignGeneration !== this._policyGeneration) return;
+    const generation = this._policyGeneration;
     let record: NymPrivacyPreferenceRecord;
     try {
       record = await readNymPrivacyPreference(this._privacyStore);
     } catch {
       return;
     }
-    if (!(record.kind === 'chosen' && record.choice === written)) return;
-    const foreign = this._foreignValue;
-    const generation = this._policyGeneration;
-    if (foreign === 'nym' || foreign === 'direct') {
-      if (foreign === written) return;
+    if (this._policyGeneration !== generation) return;
+    const foreign = this._foreignValueKnown ? this._foreignValue : undefined;
+    if (
+      record.kind === 'chosen' &&
+      record.choice === written &&
+      foreign === 'nym' &&
+      written !== 'nym'
+    ) {
       try {
-        await this.writeChoice(foreign, generation);
+        await this.writeChoice('nym', generation);
       } catch {
         if (this._policyGeneration === generation) {
           this._preferenceDurable = false;
@@ -585,32 +588,43 @@ export class NymRuntimeController {
         }
         return;
       }
-      if (this._policyGeneration === generation) {
-        this.applyResolved(foreign, foreign, true);
-        this.publishRuntimeStatus();
-      }
+      if (this._policyGeneration !== generation) return;
+      this.applyResolved('nym', 'nym', true);
+      this.publishRuntimeStatus();
       return;
     }
-    const remove = this._privacyStore.remove;
-    if (typeof remove !== 'function') return;
-    this._echoSuppress = 'clear';
-    try {
-      await remove.call(this._privacyStore, NYM_PRIVACY_PREFERENCE_STORAGE_KEY);
-    } catch {
-      if (this._policyGeneration === generation) {
-        this._preferenceDurable = false;
-        this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
+    if (
+      record.kind === 'chosen' &&
+      record.choice === written &&
+      this._foreignValueKnown &&
+      foreign == null
+    ) {
+      const remove = this._privacyStore.remove;
+      if (typeof remove !== 'function') {
         this.publishRuntimeStatus();
+        return;
       }
-      return;
-    } finally {
-      this._echoSuppress = null;
-    }
-    if (this._policyGeneration === generation) {
+      this._echoSuppress = 'clear';
+      try {
+        await remove.call(this._privacyStore, NYM_PRIVACY_PREFERENCE_STORAGE_KEY);
+      } catch {
+        if (this._policyGeneration === generation) {
+          this._preferenceDurable = false;
+          this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
+          this.publishRuntimeStatus();
+        }
+        return;
+      } finally {
+        this._echoSuppress = null;
+      }
+      if (this._policyGeneration !== generation) return;
       this.applyResolved('nym', null, false);
       this._diagnosticCode = 'PRIVACY_CHOICE_REQUIRED';
       this.publishRuntimeStatus();
+      return;
     }
+    this.applyPrivacyRecord(record);
+    this.publishRuntimeStatus();
   }
 
   private applyResolved(
@@ -644,8 +658,9 @@ export class NymRuntimeController {
 
   /**
    * Storage notification. The echo of a write this controller just posted is
-   * not a new choice and must not outrank the local intent that posted it.
-   * Any other notice revokes Direct before the reread.
+   * not a new choice. Every other notice only invalidates: Direct stays
+   * suspended until a fresh read of the durable value. A Nym payload revokes
+   * immediately, but it does not authorize clearnet and does not outrank the read.
    */
   private onPrivacyNotice(notice?: PrivacyStorageNotice): void {
     if (this.isOwnEcho(notice)) return;
@@ -654,9 +669,13 @@ export class NymRuntimeController {
     this._foreignValueKnown = notice !== undefined;
     this._foreignValue = notice?.newValue;
     this.suspendDirect();
-    if (notice && (notice.newValue === 'nym' || notice.newValue === 'direct')) {
-      this.applyResolved(notice.newValue, notice.newValue, true);
+    if (notice?.newValue === 'nym') {
+      this._mode = 'nym';
+      this._privacyPreference = 'nym';
+      this._preferenceDurable = false;
+      if (this._router.mode === 'direct') this._router.setMode('nym');
     }
+    this.publishRuntimeStatus();
     this._privacyReload = this._privacyReload
       .catch(() => undefined)
       .then(() => this.reloadPrivacyFromStore(generation));
@@ -681,25 +700,20 @@ export class NymRuntimeController {
       return;
     }
     if (this._policyGeneration !== generation) return;
-    if (this.diskReadDisagreesWithForeignNotice(record, generation)) return;
+    if (this.pendingLocalWriteStillOnDisk(record)) {
+      // The read saw this controller's own unsettled write, not a foreign decision.
+      this.publishRuntimeStatus();
+      return;
+    }
     this.applyPrivacyRecord(record);
     this.publishRuntimeStatus();
   }
 
-  /**
-   * This generation was opened by a foreign notice. If disk still shows a
-   * different choice, that read is an obsolete local write, not a new decision.
-   */
-  private diskReadDisagreesWithForeignNotice(
-    record: NymPrivacyPreferenceRecord,
-    generation: number,
-  ): boolean {
-    if (!this._foreignValueKnown || this._foreignGeneration !== generation) return false;
-    if (this._foreignValue === 'nym' || this._foreignValue === 'direct') {
-      return !(record.kind === 'chosen' && record.choice === this._foreignValue);
-    }
-    if (this._foreignValue == null) return record.kind === 'chosen';
-    return false;
+  /** True when the fresh read is still the local write that a notice invalidated. */
+  private pendingLocalWriteStillOnDisk(record: NymPrivacyPreferenceRecord): boolean {
+    if (!this._inflightWrite) return false;
+    if (this._inflightWrite.generation === this._policyGeneration) return false;
+    return record.kind === 'chosen' && record.choice === this._inflightWrite.choice;
   }
 
   private applyPrivacyRecord(record: NymPrivacyPreferenceRecord): void {
