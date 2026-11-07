@@ -85,10 +85,14 @@ export type SppSignIntent = {
   /** 32-byte encryption public key, hex. Required for register. */
   registerEncryptionKeyHex: string | null;
   /**
-   * Optional `note_key_proof` bytes, hex. Null means the register map must
-   * not contain a proof (SDK 0.2.1). A non-null value must match exactly.
+   * Canonical XDR hex of the `note_key_proof` ScVal inside KeyOwnershipProof.
+   * Required for the current registry. A v2 register map must not carry this.
    */
   registerNoteKeyProofHex: string | null;
+  /** 64-byte Ed25519 signature by the encryption key, hex. Required for register. */
+  registerEncryptionKeySignatureHex: string | null;
+  /** 64-byte SEP-53 owner signature over the registration message, hex. */
+  registerOwnerSignatureHex: string | null;
   maxFeeStroops: string;
   /**
    * Simulated Soroban minResourceFee, when the preparer measured one.
@@ -171,15 +175,46 @@ type ParsedInvocation = {
 };
 
 /**
- * SEP-53 message the SDK 0.2.1 wallet signs to derive privacy keys.
- * `kdfDomain` is the contract config domain, trimmed the same way as the SDK.
+ * SEP-53 message the current Nethermind SDK signs to derive privacy keys.
+ * Byte-identical to `key_derivation_message` at source commit
+ * e6ce95c2a71ed6313f78bb19cfdd0de1d9663120. A v2 signature is a different key
+ * and is never rewritten into this message.
  */
+export const SPP_KEY_DERIVATION_V3_WARNING =
+  'WARNING: signing this gives full control of your private funds. Only sign in the Stellar Private Payments app or CLI.';
+
 export function sppKeyDerivationMessage(kdfDomain: string): string {
+  const domain = assertKdfDomain(kdfDomain);
+  return `Privacy Pool Key Derivation [v3] (${domain})\n${SPP_KEY_DERIVATION_V3_WARNING}`;
+}
+
+/** Previous derivation message. Detects stale keys. Do not sign it for a new registration. */
+export function sppStaleKeyDerivationMessageV2(kdfDomain: string): string {
+  const domain = assertKdfDomain(kdfDomain);
+  return `Privacy Pool Key Derivation [v2] (${domain})`;
+}
+
+export function sppRegistrationMessage(
+  registry: string,
+  owner: string,
+  noteKeyHex: string,
+  encryptionKeyHex: string,
+): string {
+  return [
+    'Privacy Pool Key Registration [v1]',
+    `Registry: ${registry}`,
+    `Account: ${owner}`,
+    `Note key: 0x${noteKeyHex.toLowerCase()}`,
+    `Encryption key (Ed25519): 0x${encryptionKeyHex.toLowerCase()}`,
+  ].join('\n');
+}
+
+function assertKdfDomain(kdfDomain: string): string {
   const domain = kdfDomain.trim();
   if (domain.length === 0 || /[()\r\n]/.test(domain)) {
     throw new SppSignerError('KDF domain is not safe to bind into the derivation message', 'INVALID_REQUEST');
   }
-  return `Privacy Pool Key Derivation [v2] (${domain})`;
+  return domain;
 }
 
 /** Testnet allowlist. Futurenet, Public, standalone, and whitespace variants all fail. */
@@ -344,6 +379,8 @@ type SignatureFacts = {
   registerNoteKeyHex: string | null;
   registerEncryptionKeyHex: string | null;
   registerNoteKeyProofHex: string | null;
+  registerEncryptionKeySignatureHex: string | null;
+  registerOwnerSignatureHex: string | null;
 };
 
 type PreparedSignature = {
@@ -394,6 +431,8 @@ function prepareMessage(message: string): PreparedSignature {
       registerNoteKeyHex: null,
       registerEncryptionKeyHex: null,
       registerNoteKeyProofHex: null,
+      registerEncryptionKeySignatureHex: null,
+      registerOwnerSignatureHex: null,
     },
     digest: hashSep53Message(message),
     unsignedTransactionXdr: null,
@@ -457,6 +496,8 @@ function prepareTransaction(
   let registerNoteKeyHex: string | null = null;
   let registerEncryptionKeyHex: string | null = null;
   let registerNoteKeyProofHex: string | null = null;
+  let registerEncryptionKeySignatureHex: string | null = null;
+  let registerOwnerSignatureHex: string | null = null;
   if (functionName === 'transact') {
     const ext = readTransactArgs(invoke.args, boundAccount);
     amountStroops = ext.amount;
@@ -468,6 +509,8 @@ function prepareTransaction(
     registerNoteKeyHex = registered.noteKeyHex;
     registerEncryptionKeyHex = registered.encryptionKeyHex;
     registerNoteKeyProofHex = registered.noteKeyProofHex;
+    registerEncryptionKeySignatureHex = registered.encryptionKeySignatureHex;
+    registerOwnerSignatureHex = registered.ownerSignatureHex;
   } else {
     throw new SppSignerError(`Unexpected contract function "${functionName}"`);
   }
@@ -522,6 +565,8 @@ function prepareTransaction(
       registerNoteKeyHex,
       registerEncryptionKeyHex,
       registerNoteKeyProofHex,
+      registerEncryptionKeySignatureHex,
+      registerOwnerSignatureHex,
     },
     digest,
     unsignedTransactionXdr: xdrInput,
@@ -540,6 +585,8 @@ function prepareAuthEntry(xdrInput: string, boundAccount: string): PreparedSigna
   let registerNoteKeyHex: string | null = null;
   let registerEncryptionKeyHex: string | null = null;
   let registerNoteKeyProofHex: string | null = null;
+  let registerEncryptionKeySignatureHex: string | null = null;
+  let registerOwnerSignatureHex: string | null = null;
   if (inspected.functionName === 'transact') {
     const ext = readTransactArgs(inspected.args, boundAccount);
     amountStroops = ext.amount;
@@ -554,6 +601,8 @@ function prepareAuthEntry(xdrInput: string, boundAccount: string): PreparedSigna
     registerNoteKeyHex = registered.noteKeyHex;
     registerEncryptionKeyHex = registered.encryptionKeyHex;
     registerNoteKeyProofHex = registered.noteKeyProofHex;
+    registerEncryptionKeySignatureHex = registered.encryptionKeySignatureHex;
+    registerOwnerSignatureHex = registered.ownerSignatureHex;
   } else {
     throw new SppSignerError(`Unexpected auth function "${inspected.functionName}"`);
   }
@@ -575,6 +624,8 @@ function prepareAuthEntry(xdrInput: string, boundAccount: string): PreparedSigna
       registerNoteKeyHex,
       registerEncryptionKeyHex,
       registerNoteKeyProofHex,
+      registerEncryptionKeySignatureHex,
+      registerOwnerSignatureHex,
     },
     digest,
     unsignedTransactionXdr: null,
@@ -876,57 +927,84 @@ type RegisterAccountBytes = {
   owner: string;
   noteKeyHex: string;
   encryptionKeyHex: string;
-  noteKeyProofHex: string | null;
+  noteKeyProofHex: string;
+  encryptionKeySignatureHex: string;
+  ownerSignatureHex: string;
 };
 
+function scMapEntries(value: xdr.ScVal): xdr.ScMapEntry[] {
+  if (value.type !== 'scvMap' || !value.map) {
+    throw new SppSignerError('register argument is not a map');
+  }
+  return value.map;
+}
+
+function symbolOf(value: xdr.ScVal): string {
+  if (value.type !== 'scvSymbol' || value.sym == null) {
+    throw new SppSignerError('register map key is not a symbol');
+  }
+  return value.sym.toString();
+}
+
 function readRegisterAccount(args: xdr.ScVal[]): RegisterAccountBytes {
-  if (args.length !== 1) {
+  if (args.length !== 2) {
     throw new SppSignerError(
-      `register expects 1 Account argument, got ${args.length}`,
+      `register expects Account and KeyOwnershipProof, got ${args.length} argument(s)`,
     );
   }
-  let native: unknown;
-  try {
-    native = scValToNative(args[0]!);
-  } catch {
-    throw new SppSignerError('register Account argument could not be decoded');
-  }
-  if (!native || typeof native !== 'object' || Array.isArray(native)) {
-    throw new SppSignerError('register Account argument is not a map');
-  }
-  const record = native as Record<string, unknown>;
-  const allowed = new Set(['encryption_key', 'note_key', 'owner', 'note_key_proof']);
-  for (const key of Object.keys(record)) {
-    if (!allowed.has(key)) {
+  const accountEntries = scMapEntries(args[0]!);
+  const account = new Map(accountEntries.map((entry) => [symbolOf(entry.key), entry.val]));
+  const accountKeys = [...account.keys()];
+  for (const key of accountKeys) {
+    if (key !== 'encryption_key' && key !== 'note_key' && key !== 'owner') {
       throw new SppSignerError(`register Account has unexpected field "${key}"`);
     }
   }
   for (const key of ['encryption_key', 'note_key', 'owner']) {
-    if (!(key in record)) {
-      throw new SppSignerError(`register Account is missing ${key}`);
-    }
+    if (!account.has(key)) throw new SppSignerError(`register Account is missing ${key}`);
   }
-  if (typeof record['owner'] !== 'string' || !StrKey.isValidEd25519PublicKey(record['owner'])) {
+  let owner: string;
+  try {
+    owner = String(scValToNative(account.get('owner')!));
+  } catch {
+    throw new SppSignerError('register owner could not be decoded');
+  }
+  if (!StrKey.isValidEd25519PublicKey(owner)) {
     throw new SppSignerError('register owner is not a G… address');
   }
-  const noteKey = bytesOf(record['note_key']);
-  const encryptionKey = bytesOf(record['encryption_key']);
+  const noteKey = bytesOf(scValToNative(account.get('note_key')!));
+  const encryptionKey = bytesOf(scValToNative(account.get('encryption_key')!));
   if (!noteKey || noteKey.byteLength !== 32 || !encryptionKey || encryptionKey.byteLength !== 32) {
     throw new SppSignerError('register note_key and encryption_key must be 32 bytes');
   }
-  let noteKeyProofHex: string | null = null;
-  if ('note_key_proof' in record) {
-    const proof = bytesOf(record['note_key_proof']);
-    if (!proof || proof.byteLength === 0) {
-      throw new SppSignerError('register note_key_proof is empty');
+  const proofEntries = scMapEntries(args[1]!);
+  const proof = new Map(proofEntries.map((entry) => [symbolOf(entry.key), entry.val]));
+  for (const key of proof.keys()) {
+    if (key !== 'encryption_key_signature' && key !== 'note_key_proof' && key !== 'owner_signature') {
+      throw new SppSignerError(`register KeyOwnershipProof has unexpected field "${key}"`);
     }
-    noteKeyProofHex = toHex(proof);
+  }
+  const noteProof = proof.get('note_key_proof');
+  const encryptionSig = proof.get('encryption_key_signature');
+  const ownerSig = proof.get('owner_signature');
+  if (!noteProof || !encryptionSig || !ownerSig) {
+    throw new SppSignerError('register KeyOwnershipProof is missing a required field');
+  }
+  if (noteProof.type !== 'scvMap') {
+    throw new SppSignerError('register note_key_proof is not a Groth16 proof map');
+  }
+  const encryptionBytes = bytesOf(scValToNative(encryptionSig));
+  const ownerBytes = bytesOf(scValToNative(ownerSig));
+  if (!encryptionBytes || encryptionBytes.byteLength !== 64 || !ownerBytes || ownerBytes.byteLength !== 64) {
+    throw new SppSignerError('register signatures must be 64 bytes');
   }
   return {
-    owner: record['owner'],
+    owner,
     noteKeyHex: toHex(noteKey),
     encryptionKeyHex: toHex(encryptionKey),
-    noteKeyProofHex,
+    noteKeyProofHex: toHex(noteProof.toXDR()),
+    encryptionKeySignatureHex: toHex(encryptionBytes),
+    ownerSignatureHex: toHex(ownerBytes),
   };
 }
 
@@ -936,24 +1014,32 @@ function registerBindingMatches(
     registerNoteKeyHex: string | null;
     registerEncryptionKeyHex: string | null;
     registerNoteKeyProofHex: string | null;
+    registerEncryptionKeySignatureHex: string | null;
+    registerOwnerSignatureHex: string | null;
   },
   intent: SppSignIntent,
 ): boolean {
   if (
     intent.registerNoteKeyHex === null
     || intent.registerEncryptionKeyHex === null
+    || intent.registerNoteKeyProofHex === null
+    || intent.registerEncryptionKeySignatureHex === null
+    || intent.registerOwnerSignatureHex === null
     || facts.registerOwner === null
     || facts.registerNoteKeyHex === null
     || facts.registerEncryptionKeyHex === null
+    || facts.registerNoteKeyProofHex === null
+    || facts.registerEncryptionKeySignatureHex === null
+    || facts.registerOwnerSignatureHex === null
   ) {
     return false;
   }
   if (facts.registerOwner !== intent.account) return false;
   if (!hexEq(facts.registerNoteKeyHex, intent.registerNoteKeyHex)) return false;
   if (!hexEq(facts.registerEncryptionKeyHex, intent.registerEncryptionKeyHex)) return false;
-  if (intent.registerNoteKeyProofHex === null) return facts.registerNoteKeyProofHex === null;
-  return facts.registerNoteKeyProofHex !== null
-    && hexEq(facts.registerNoteKeyProofHex, intent.registerNoteKeyProofHex);
+  if (!hexEq(facts.registerNoteKeyProofHex, intent.registerNoteKeyProofHex)) return false;
+  if (!hexEq(facts.registerEncryptionKeySignatureHex, intent.registerEncryptionKeySignatureHex)) return false;
+  return hexEq(facts.registerOwnerSignatureHex, intent.registerOwnerSignatureHex);
 }
 
 function bytesOf(value: unknown): Uint8Array | null {
@@ -971,6 +1057,12 @@ function toHex(bytes: Uint8Array): string {
 
 function hexEq(actual: string, expected: string): boolean {
   return actual.toLowerCase() === expected.toLowerCase();
+}
+
+function assertSignatureHex(value: string | null, label: string): void {
+  if (value === null || !/^[0-9a-fA-F]{128}$/.test(value)) {
+    throw new SppSignerError(`Register ${label} must be 64 bytes of hex`, 'INVALID_REQUEST');
+  }
 }
 
 function assertKeyHex(value: string | null, label: string): void {
@@ -1152,6 +1244,8 @@ function assertInvocationAgainstIntent(
       registerNoteKeyHex: registered.noteKeyHex,
       registerEncryptionKeyHex: registered.encryptionKeyHex,
       registerNoteKeyProofHex: registered.noteKeyProofHex,
+      registerEncryptionKeySignatureHex: registered.encryptionKeySignatureHex,
+      registerOwnerSignatureHex: registered.ownerSignatureHex,
     }, intent)) {
       throw new SppSignerError('Register arguments do not match the approved intent');
     }
@@ -1292,6 +1386,12 @@ function freezeIntent(intent: SppSignIntent): SppSignIntent {
       if (!intent.registryContractId) {
         throw new SppSignerError('Register intent requires registryContractId', 'INVALID_REQUEST');
       }
+      if (intent.exactMessage === sppStaleKeyDerivationMessageV2(NETHERMIND_PUBLIC_KDF_DOMAIN)) {
+        throw new SppSignerError(
+          'Register derivation message is the stale v2 KDF. Signing the current v3 message creates a new key and does not reuse or migrate a v2 signature.',
+          'INVALID_REQUEST',
+        );
+      }
       if (intent.exactMessage !== sppKeyDerivationMessage(NETHERMIND_PUBLIC_KDF_DOMAIN)) {
         throw new SppSignerError(
           'Register intent derivation message does not match the pinned KDF domain',
@@ -1300,9 +1400,12 @@ function freezeIntent(intent: SppSignIntent): SppSignIntent {
       }
       assertKeyHex(intent.registerNoteKeyHex, 'note key');
       assertKeyHex(intent.registerEncryptionKeyHex, 'encryption key');
-      if (intent.registerNoteKeyProofHex !== null) {
-        assertEvenHex(intent.registerNoteKeyProofHex, 'note_key_proof');
+      if (intent.registerNoteKeyProofHex === null) {
+        throw new SppSignerError('Register intent requires note_key_proof', 'INVALID_REQUEST');
       }
+      assertEvenHex(intent.registerNoteKeyProofHex, 'note_key_proof');
+      assertSignatureHex(intent.registerEncryptionKeySignatureHex, 'encryption_key_signature');
+      assertSignatureHex(intent.registerOwnerSignatureHex, 'owner_signature');
       break;
     default: {
       const unexpected: never = intent.operation;
@@ -1320,6 +1423,8 @@ function freezeIntent(intent: SppSignIntent): SppSignIntent {
     registerNoteKeyHex: intent.registerNoteKeyHex?.toLowerCase() ?? null,
     registerEncryptionKeyHex: intent.registerEncryptionKeyHex?.toLowerCase() ?? null,
     registerNoteKeyProofHex: intent.registerNoteKeyProofHex?.toLowerCase() ?? null,
+    registerEncryptionKeySignatureHex: intent.registerEncryptionKeySignatureHex?.toLowerCase() ?? null,
+    registerOwnerSignatureHex: intent.registerOwnerSignatureHex?.toLowerCase() ?? null,
     maxFeeStroops: intent.maxFeeStroops,
     minResourceFeeStroops: intent.minResourceFeeStroops,
     account: intent.account,

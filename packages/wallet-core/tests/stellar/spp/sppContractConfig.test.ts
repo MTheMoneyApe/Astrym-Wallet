@@ -7,15 +7,19 @@ import { describe, expect, it } from 'vitest';
 import {
   findEnabledPoolContract,
   parseSppContractConfig,
+  tokenContractIdForEnabledPool,
 } from '../../../src/stellar/spp/sppContractConfig.js';
 import {
   classifySppDeploymentOwnership,
   compareCircuitFingerprints,
   getNethermindPublicTestnetContractConfig,
   NETHERMIND_PUBLIC_KDF_DOMAIN,
+  NETHERMIND_PUBLIC_TESTNET_CIRCUITS_SHA256,
   NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS,
   NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS_SHA256,
   NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
+  STALE_NETHERMIND_PUBLIC_KEY_REGISTRY,
+  STALE_NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
   resolveNethermindPublicXlmPool,
   resolveSppBootnodeUrl,
 } from '../../../src/stellar/spp/nethermind/nethermindPublicTestnet.js';
@@ -155,6 +159,19 @@ describe('Nethermind public Testnet pin', () => {
     );
     expect(fromConst.admin).toBe(fromPin.admin);
     expect(fromConst.kdf_domain).toBe(fromPin.kdf_domain);
+  });
+
+  it('rejects the previous Testnet deployment and matches the circuits lock hash', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const circuitsPath = join(here, '../../../src/stellar/spp/nethermind/testnet-circuits.json');
+    const raw = readFileSync(circuitsPath);
+    expect(createHash('sha256').update(raw).digest('hex')).toBe(
+      NETHERMIND_PUBLIC_TESTNET_CIRCUITS_SHA256,
+    );
+    const config = getNethermindPublicTestnetContractConfig();
+    expect(config.public_key_registry).not.toBe(STALE_NETHERMIND_PUBLIC_KEY_REGISTRY);
+    expect(() => tokenContractIdForEnabledPool(config, STALE_NETHERMIND_PUBLIC_XLM_POOL_CONTRACT))
+      .toThrow(/No enabled pool/);
   });
 
   it('classifies Nethermind public vs Astrym-owned vs custom', () => {

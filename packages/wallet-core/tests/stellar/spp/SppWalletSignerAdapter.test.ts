@@ -58,9 +58,9 @@ const SEP53_MSG = 'Hello, World!';
 const SEP53_SIG_B64 =
   'fO5dbYhXUhBMhe6kId/cuVq/AfEnHRHEvsP8vXh03M1uLpi5e46yO2Q8rEBzu3feXQewcQE5GArp88u6ePK6BA==';
 /** SEP-0053 official TV2 (Japanese). */
-const POOL = 'CAMWBUWHYXEGBM3Q7M5DBGW7LLJL3I4QGANQEZFEWLRNTOJMTT2WG24U';
+const POOL = 'CCSI25UI6P42ZZWFPHAJ44BIYFLZV2QLMJ3BBT3XHDKNM5RRHXOLB5TW';
 const TOKEN = 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
-const REGISTRY = 'CARXHKOPSGMUMFRDI72KNCRENVOTCJIGXPCPYOW42APDY2NEYF7CLKIL';
+const REGISTRY = 'CA5MA3LDXS4TQKBQ7SY57IHO3VMYV7G3ZJH45CWCX4QVP25IDFMZWZ3E';
 const NOTE_KEY = 'ab'.repeat(32);
 const ENC_KEY = 'ee'.repeat(32);
 const SEP53_MSG_JA = 'こんにちは、世界！';
@@ -77,6 +77,8 @@ function baseIntent(overrides: Partial<SppSignIntent> = {}): SppSignIntent {
     registerNoteKeyHex: null,
     registerEncryptionKeyHex: null,
     registerNoteKeyProofHex: null,
+    registerEncryptionKeySignatureHex: null,
+    registerOwnerSignatureHex: null,
     maxFeeStroops: '8000000',
     minResourceFeeStroops: null,
     account: SEP0005_TV1_G,
@@ -97,7 +99,9 @@ function approveDerivationMessage(): void {
     tokenContractId: null,
     registerNoteKeyHex: NOTE_KEY,
     registerEncryptionKeyHex: ENC_KEY,
-    registerNoteKeyProofHex: null,
+    registerNoteKeyProofHex: 'aa'.repeat(16),
+    registerEncryptionKeySignatureHex: 'bb'.repeat(64),
+    registerOwnerSignatureHex: 'cc'.repeat(64),
     maxFeeStroops: '5000000',
     exactMessage: DERIVATION_MESSAGE,
   }));

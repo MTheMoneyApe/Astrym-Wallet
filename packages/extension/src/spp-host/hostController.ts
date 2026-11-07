@@ -508,6 +508,9 @@ export class SppHostController {
         if (meta.version !== '0.2.1') {
           throw new Error(`Unexpected SPP asset version: ${String(meta.version)}`);
         }
+        // npm 0.2.1 (published 2026-10-16) is the only packaged runtime. It is
+        // not the current Testnet deployment (KDF v3, register(Account, KeyOwnershipProof)).
+        // Loading it does not mark that deployment verified.
         this._metaVersion = meta.version;
       } catch (metaErr) {
         throw new Error(`SPP_ASSET_META.json: ${sanitizeError(metaErr)}`);

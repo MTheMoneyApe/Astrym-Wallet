@@ -126,6 +126,8 @@ export function createSppRegisterPublicKeysHandler(deps: {
       registerNoteKeyHex: payload.noteKeyHex,
       registerEncryptionKeyHex: payload.encryptionKeyHex,
       registerNoteKeyProofHex: payload.noteKeyProofHex ?? null,
+      registerEncryptionKeySignatureHex: payload.encryptionKeySignatureHex ?? null,
+      registerOwnerSignatureHex: payload.ownerSignatureHex ?? null,
       maxFeeStroops: maxFeeStroopsForOperation('register_public_keys'),
       minResourceFeeStroops: null,
       account: address,

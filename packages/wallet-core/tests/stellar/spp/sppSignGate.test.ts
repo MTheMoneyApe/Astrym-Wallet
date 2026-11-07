@@ -25,17 +25,18 @@ import {
   resetSppSignApprovalsForTests,
   signDigestWithSppGate,
   sppKeyDerivationMessage,
+  sppStaleKeyDerivationMessageV2,
   type SppSignIntent,
 } from '../../../src/stellar/spp/sppSignGate.js';
 
 const ACCOUNT = 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6';
 const OTHER = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
-const POOL = 'CAMWBUWHYXEGBM3Q7M5DBGW7LLJL3I4QGANQEZFEWLRNTOJMTT2WG24U';
+const POOL = 'CCSI25UI6P42ZZWFPHAJ44BIYFLZV2QLMJ3BBT3XHDKNM5RRHXOLB5TW';
 const OTHER_POOL = 'CBTA5THUFNLDMFSH54YSHZJPAACLIBTT66ANWX2EPMP5F7ORPI24MXBQ';
-const REGISTRY = 'CARXHKOPSGMUMFRDI72KNCRENVOTCJIGXPCPYOW42APDY2NEYF7CLKIL';
+const REGISTRY = 'CA5MA3LDXS4TQKBQ7SY57IHO3VMYV7G3ZJH45CWCX4QVP25IDFMZWZ3E';
 const NOTE_KEY = '11'.repeat(32);
 const ENC_KEY = '22'.repeat(32);
-const XLM_POOL = 'CAMWBUWHYXEGBM3Q7M5DBGW7LLJL3I4QGANQEZFEWLRNTOJMTT2WG24U';
+const XLM_POOL = 'CCSI25UI6P42ZZWFPHAJ44BIYFLZV2QLMJ3BBT3XHDKNM5RRHXOLB5TW';
 
 function intent(overrides: Partial<SppSignIntent> = {}): SppSignIntent {
   return {
@@ -49,6 +50,8 @@ function intent(overrides: Partial<SppSignIntent> = {}): SppSignIntent {
     registerNoteKeyHex: null,
     registerEncryptionKeyHex: null,
     registerNoteKeyProofHex: null,
+    registerEncryptionKeySignatureHex: null,
+    registerOwnerSignatureHex: null,
     maxFeeStroops: '8000000',
     minResourceFeeStroops: null,
     account: ACCOUNT,
@@ -153,27 +156,7 @@ function authXdr(args: {
   ).toXDR('base64');
 }
 
-function registerXdr(noteKeyHex: string, encryptionKeyHex: string, proofHex?: string): string {
-  const entries = [
-    new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('encryption_key'),
-      val: xdr.ScVal.scvBytes(Buffer.from(encryptionKeyHex, 'hex')),
-    }),
-    new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('note_key'),
-      val: xdr.ScVal.scvBytes(Buffer.from(noteKeyHex, 'hex')),
-    }),
-    new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('owner'),
-      val: Address.fromString(ACCOUNT).toScVal(),
-    }),
-  ];
-  if (proofHex) {
-    entries.push(new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('note_key_proof'),
-      val: xdr.ScVal.scvBytes(Buffer.from(proofHex, 'hex')),
-    }));
-  }
+function legacyRegisterXdr(noteKeyHex: string, encryptionKeyHex: string): string {
   return new TransactionBuilder(new Account(ACCOUNT, '10'), {
     fee: '100',
     networkPassphrase: Networks.TESTNET,
@@ -181,28 +164,87 @@ function registerXdr(noteKeyHex: string, encryptionKeyHex: string, proofHex?: st
     .addOperation(Operation.invokeContractFunction({
       contract: REGISTRY,
       function: 'register',
-      args: [xdr.ScVal.scvMap(entries)],
+      args: [registerArgs(noteKeyHex, encryptionKeyHex)[0]!],
     }))
     .setTimeout(30)
     .build()
     .toXDR();
 }
 
-function registerAccountArgs(noteKeyHex: string, encryptionKeyHex: string): xdr.ScVal[] {
-  return [xdr.ScVal.scvMap([
+function registerXdr(noteKeyHex: string, encryptionKeyHex: string): string {
+  return new TransactionBuilder(new Account(ACCOUNT, '10'), {
+    fee: '100',
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(Operation.invokeContractFunction({
+      contract: REGISTRY,
+      function: 'register',
+      args: registerArgs(noteKeyHex, encryptionKeyHex),
+    }))
+    .setTimeout(30)
+    .build()
+    .toXDR();
+}
+
+const OWNER_SIG_HEX = 'ab'.repeat(64);
+const ENC_SIG_HEX = 'cd'.repeat(64);
+
+function ownershipProof(): xdr.ScVal {
+  return xdr.ScVal.scvMap([
     new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('encryption_key'),
-      val: xdr.ScVal.scvBytes(Buffer.from(encryptionKeyHex, 'hex')),
+      key: xdr.ScVal.scvSymbol('encryption_key_signature'),
+      val: xdr.ScVal.scvBytes(Buffer.from(ENC_SIG_HEX, 'hex')),
     }),
     new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('note_key'),
-      val: xdr.ScVal.scvBytes(Buffer.from(noteKeyHex, 'hex')),
+      key: xdr.ScVal.scvSymbol('note_key_proof'),
+      val: noteProofVal(),
     }),
     new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('owner'),
-      val: Address.fromString(ACCOUNT).toScVal(),
+      key: xdr.ScVal.scvSymbol('owner_signature'),
+      val: xdr.ScVal.scvBytes(Buffer.from(OWNER_SIG_HEX, 'hex')),
     }),
-  ])];
+  ]);
+}
+
+function noteProofVal(): xdr.ScVal {
+  return xdr.ScVal.scvMap([
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('a'),
+      val: xdr.ScVal.scvBytes(Buffer.alloc(64, 1)),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('b'),
+      val: xdr.ScVal.scvBytes(Buffer.alloc(128, 2)),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('c'),
+      val: xdr.ScVal.scvBytes(Buffer.alloc(64, 3)),
+    }),
+  ]);
+}
+
+function noteProofHex(): string {
+  return Buffer.from(noteProofVal().toXDR()).toString('hex');
+}
+
+function registerArgs(noteKeyHex: string, encryptionKeyHex: string): xdr.ScVal[] {
+  return [
+    xdr.ScVal.scvMap([
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('encryption_key'),
+        val: xdr.ScVal.scvBytes(Buffer.from(encryptionKeyHex, 'hex')),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('note_key'),
+        val: xdr.ScVal.scvBytes(Buffer.from(noteKeyHex, 'hex')),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('owner'),
+        val: Address.fromString(ACCOUNT).toScVal(),
+      }),
+    ]),
+    ownershipProof(),
+  ];
 }
 
 function registerInvocation(noteKeyHex: string, encryptionKeyHex: string): xdr.SorobanAuthorizedInvocation {
@@ -211,7 +253,7 @@ function registerInvocation(noteKeyHex: string, encryptionKeyHex: string): xdr.S
       new xdr.InvokeContractArgs({
         contractAddress: Address.fromString(REGISTRY).toScAddress(),
         functionName: 'register',
-        args: registerAccountArgs(noteKeyHex, encryptionKeyHex),
+        args: registerArgs(noteKeyHex, encryptionKeyHex),
       }),
     ),
     subInvocations: [],
@@ -242,7 +284,7 @@ function registerTxWithTwoAuth(noteKeyHex: string, encryptionKeyHex: string): st
     .addOperation(Operation.invokeContractFunction({
       contract: REGISTRY,
       function: 'register',
-      args: registerAccountArgs(noteKeyHex, encryptionKeyHex),
+      args: registerArgs(noteKeyHex, encryptionKeyHex),
       auth: [entry(), entry()],
     }))
     .setTimeout(30)
@@ -705,7 +747,9 @@ describe('SPP sign gate attack cases', () => {
       exactMessage: message,
       registerNoteKeyHex: NOTE_KEY,
       registerEncryptionKeyHex: ENC_KEY,
-      registerNoteKeyProofHex: null,
+      registerNoteKeyProofHex: noteProofHex(),
+      registerEncryptionKeySignatureHex: ENC_SIG_HEX,
+      registerOwnerSignatureHex: OWNER_SIG_HEX,
     });
     mintSppSignApproval(approved);
     const signed = await signDigestWithSppGate({
@@ -744,14 +788,29 @@ describe('SPP sign gate attack cases', () => {
       networkPassphrase: Networks.TESTNET,
     })).toThrow(/no matching prior approval/);
 
+    expect(() => mintSppSignApproval(intent({
+      operation: 'register_public_keys',
+      amountStroops: null,
+      recipient: null,
+      poolContractId: null,
+      registryContractId: config.public_key_registry,
+      maxFeeStroops: '5000000',
+      exactMessage: sppStaleKeyDerivationMessageV2(config.kdf_domain),
+      registerNoteKeyHex: NOTE_KEY,
+      registerEncryptionKeyHex: ENC_KEY,
+      registerNoteKeyProofHex: noteProofHex(),
+      registerEncryptionKeySignatureHex: ENC_SIG_HEX,
+      registerOwnerSignatureHex: OWNER_SIG_HEX,
+    }))).toThrow(/stale v2/);
+
     resetSppSignApprovalsForTests();
     mintSppSignApproval(approved);
     expect(() => authorizeSppSignature({
       kind: 'transaction',
-      input: registerXdr(NOTE_KEY, ENC_KEY, 'abcd'),
+      input: legacyRegisterXdr(NOTE_KEY, ENC_KEY),
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).toThrow(/no matching prior approval/);
+    })).toThrow(/Account and KeyOwnershipProof/);
   });
 
   it('requires the configured pool token and a token.transfer sub-invocation on deposit auth', () => {
@@ -1078,6 +1137,9 @@ describe('SPP sign gate attack cases', () => {
       exactMessage: sppKeyDerivationMessage(config.kdf_domain),
       registerNoteKeyHex: NOTE_KEY,
       registerEncryptionKeyHex: ENC_KEY,
+      registerNoteKeyProofHex: noteProofHex(),
+      registerEncryptionKeySignatureHex: ENC_SIG_HEX,
+      registerOwnerSignatureHex: OWNER_SIG_HEX,
     });
     resetSppSignApprovalsForTests();
     mintSppSignApproval(registered);

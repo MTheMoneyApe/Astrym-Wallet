@@ -47,6 +47,8 @@ export function createSppPrivatePaymentHandler(deps: { keyManager: KeyManager })
       registerNoteKeyHex: null,
       registerEncryptionKeyHex: null,
       registerNoteKeyProofHex: null,
+      registerEncryptionKeySignatureHex: null,
+      registerOwnerSignatureHex: null,
       maxFeeStroops,
       minResourceFeeStroops: null,
       account: address,
