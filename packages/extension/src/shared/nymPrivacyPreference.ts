@@ -25,6 +25,8 @@ export type NymPrivacyChoice = 'direct' | 'nym';
 export type NymPrivacyPreferenceStore = {
   get: (keys?: string | string[] | null) => Promise<Record<string, unknown>>;
   set: (items: Record<string, unknown>) => Promise<void>;
+  /** Present on chrome.storage. Used to undo an obsolete write after a clear. */
+  remove?: (keys: string | string[]) => Promise<void>;
 };
 
 export type NymPrivacyPreferenceRecord =

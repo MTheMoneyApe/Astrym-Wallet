@@ -115,16 +115,21 @@ function clearnetFetchImpl(
   return fn(url, init);
 }
 
-function subscribeChromePrivacyChanges(listener: () => void): () => void {
+export type PrivacyStorageNotice = { newValue: unknown };
+
+function subscribeChromePrivacyChanges(
+  listener: (notice?: PrivacyStorageNotice) => void,
+): () => void {
   if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return () => {};
-  const wrapped = (changes: Record<string, unknown>, area: string) => {
+  const wrapped = (changes: Record<string, { newValue?: unknown } | undefined>, area: string) => {
     if (
       area !== 'local' ||
       !Object.prototype.hasOwnProperty.call(changes, NYM_PRIVACY_PREFERENCE_STORAGE_KEY)
     ) {
       return;
     }
-    listener();
+    const change = changes[NYM_PRIVACY_PREFERENCE_STORAGE_KEY];
+    listener({ newValue: change?.newValue });
   };
   chrome.storage.onChanged.addListener(wrapped);
   return () => {
@@ -132,10 +137,7 @@ function subscribeChromePrivacyChanges(listener: () => void): () => void {
   };
 }
 
-function defaultLocalStorage(): {
-  get: (keys?: string | string[] | null) => Promise<Record<string, unknown>>;
-  set: (items: Record<string, unknown>) => Promise<void>;
-} {
+function defaultLocalStorage(): NymPrivacyPreferenceStore {
   if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
     return {
       get: (keys) =>
@@ -149,6 +151,14 @@ function defaultLocalStorage(): {
       set: (items) =>
         new Promise((resolve, reject) => {
           chrome.storage.local.set(items, () => {
+            const err = chrome.runtime?.lastError;
+            if (err) reject(new Error(err.message));
+            else resolve();
+          });
+        }),
+      remove: (keys: string | string[]) =>
+        new Promise<void>((resolve, reject) => {
+          chrome.storage.local.remove(keys, () => {
             const err = chrome.runtime?.lastError;
             if (err) reject(new Error(err.message));
             else resolve();
@@ -170,6 +180,10 @@ function defaultLocalStorage(): {
     set: async (items) => {
       for (const [k, v] of Object.entries(items)) mem.set(k, v);
     },
+    remove: async (keys: string | string[]) => {
+      const list = Array.isArray(keys) ? keys : [keys];
+      for (const key of list) mem.delete(key);
+    },
   };
 }
 
@@ -186,9 +200,20 @@ export class NymRuntimeController {
   private readonly _statusListeners = new Set<(snapshot: NymRuntimeUiSnapshot) => void>();
   /**
    * One generation for hydration, remote invalidation, and local choices.
-   * A completion may apply Direct only when it still owns this generation.
+   * A local write may start only while it still owns this generation.
+   * Its own storage echo is not a new generation.
    */
   private _policyGeneration = 0;
+  /** Latest explicit setMode. Newer than any queued choice it replaced. */
+  private _localIntent: { generation: number; choice: NymPrivacyChoice } | null = null;
+  /** Write posted to storage and not yet settled. Its echo must not rearm policy. */
+  private _inflightWrite: { generation: number; choice: NymPrivacyChoice } | null = null;
+  /** Set while that write's synchronous self-echo is still being delivered. */
+  private _echoSuppress: 'value' | 'clear' | null = null;
+  /** Last foreign privacy notice. Undefined value means the key was cleared. */
+  private _foreignGeneration = 0;
+  private _foreignValueKnown = false;
+  private _foreignValue: unknown = undefined;
   /** Set synchronously on invalidation, before any storage read. Blocks clearnet. */
   private _directSuspended = false;
   /** Serializes explicit choices so a late Direct write cannot be overwritten by Nym. */
@@ -231,10 +256,13 @@ export class NymRuntimeController {
     /** Privacy choice store. Defaults to chrome.storage.local (in-memory if absent). */
     privacyPreferenceStore?: NymPrivacyPreferenceStore;
     /**
-     * Notified when another instance writes the privacy key.
+     * Notified when storage reports a privacy-key change.
+     * A notice carries the event's new value. Calling the listener with no
+     * notice is an unspecified invalidation (tests and unknown adapters).
      * Defaults to chrome.storage.onChanged when the default store is used.
+     * The writer's own echo is ignored inside the controller; it is not a new choice.
      */
-    onPrivacyStoreChanged?: (listener: () => void) => () => void;
+    onPrivacyStoreChanged?: (listener: (notice?: PrivacyStorageNotice) => void) => () => void;
   }) {
     const docs = createOffscreenDocumentManager();
     this._allowConnectWithoutHostPermission = options?.allowConnectWithoutHostPermission === true;
@@ -266,8 +294,8 @@ export class NymRuntimeController {
       options?.onPrivacyStoreChanged ??
       (usingDefaultStore ? subscribeChromePrivacyChanges : undefined);
     if (subscribe) {
-      subscribe(() => {
-        this.schedulePrivacyReload();
+      subscribe((notice) => {
+        this.onPrivacyNotice(notice);
       });
     }
     if (typeof this._bridge.watchConnection === 'function') {
@@ -432,6 +460,7 @@ export class NymRuntimeController {
     }
     // Revoke Direct as soon as the choice is requested, before the write queue runs.
     const generation = ++this._policyGeneration;
+    this._localIntent = { generation, choice: mode };
     this.suspendDirect();
     if (mode === 'nym') {
       this.applyResolved('nym', 'nym', false);
@@ -445,40 +474,39 @@ export class NymRuntimeController {
   }
 
   private async commitMode(mode: NymTransportMode, generation: number): Promise<void> {
+    // Queued work that already lost to a newer choice or a foreign notice
+    // must not touch storage. The newer owner performs the durable effect.
+    if (this._policyGeneration !== generation) return;
     switch (mode) {
       case 'nym':
         // Memory is already Nym and not durable. A failed write leaves the previous
         // stored value in place. Reload restores that value, which may be Direct.
         // This completion must not be described as a saved Nym choice.
         try {
-          await writeNymPrivacyPreference(this._privacyStore, 'nym');
+          await this.writeChoice('nym', generation);
         } catch (err) {
-          if (this._policyGeneration === generation) {
-            this._preferenceDurable = false;
-            this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
-            this.publishRuntimeStatus();
-          }
+          this.notePersistFailed(generation, 'nym');
           throw err;
         }
-        if (this._policyGeneration !== generation) return;
+        if (this._policyGeneration !== generation) {
+          await this.repairForeignClobber('nym');
+          return;
+        }
         this._preferenceDurable = true;
         this._directSuspended = false;
         this.publishRuntimeStatus();
         return;
       case 'direct':
         try {
-          await writeNymPrivacyPreference(this._privacyStore, 'direct');
+          await this.writeChoice('direct', generation);
         } catch (err) {
-          if (this._policyGeneration === generation) {
-            this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
-            this._preferenceDurable = false;
-            this.publishRuntimeStatus();
-          }
+          this.notePersistFailed(generation, 'direct');
           throw err;
         }
-        // A remote Nym/clear that arrived while this write was pending owns a newer
-        // generation. Do not rearm Direct from this stale completion.
-        if (this._policyGeneration !== generation) return;
+        if (this._policyGeneration !== generation) {
+          await this.repairForeignClobber('direct');
+          return;
+        }
         this.applyResolved('direct', 'direct', true);
         this.publishRuntimeStatus();
         return;
@@ -486,6 +514,102 @@ export class NymRuntimeController {
         const _never: never = mode;
         throw new Error(`Invalid transport mode: ${String(_never)}`);
       }
+    }
+  }
+
+  /** Storage write whose own onChanged must not become a newer privacy generation. */
+  private async writeChoice(choice: NymPrivacyChoice, generation: number): Promise<void> {
+    if (this._policyGeneration !== generation) return;
+    this._inflightWrite = { generation, choice };
+    this._echoSuppress = 'value';
+    try {
+      await writeNymPrivacyPreference(this._privacyStore, choice);
+    } finally {
+      this._echoSuppress = null;
+      if (
+        this._inflightWrite?.generation === generation &&
+        this._inflightWrite.choice === choice
+      ) {
+        this._inflightWrite = null;
+      }
+    }
+  }
+
+  /**
+   * The latest local attempt failed. Keep its revocation even if an older
+   * self-echo was in flight. A newer foreign notice or a newer setMode owns
+   * the outcome instead, and this failure must not hide that.
+   */
+  private notePersistFailed(generation: number, choice: NymPrivacyChoice): void {
+    if (this._policyGeneration !== generation) return;
+    if (this._localIntent?.generation !== generation) return;
+    this._preferenceDurable = false;
+    this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
+    if (choice === 'nym') {
+      this._mode = 'nym';
+      this._privacyPreference = 'nym';
+      this._directSuspended = false;
+      if (this._router.mode === 'direct') this._router.setMode('nym');
+    } else {
+      this.suspendDirect();
+    }
+    this.publishRuntimeStatus();
+  }
+
+  /**
+   * A write that was already in flight may land after a foreign notice.
+   * If disk still shows that obsolete value, put back the foreign choice.
+   * A newer local intent writes for itself; this does not invent one.
+   */
+  private async repairForeignClobber(written: NymPrivacyChoice): Promise<void> {
+    if (this._localIntent && this._localIntent.generation === this._policyGeneration) return;
+    if (!this._foreignValueKnown || this._foreignGeneration !== this._policyGeneration) return;
+    let record: NymPrivacyPreferenceRecord;
+    try {
+      record = await readNymPrivacyPreference(this._privacyStore);
+    } catch {
+      return;
+    }
+    if (!(record.kind === 'chosen' && record.choice === written)) return;
+    const foreign = this._foreignValue;
+    const generation = this._policyGeneration;
+    if (foreign === 'nym' || foreign === 'direct') {
+      if (foreign === written) return;
+      try {
+        await this.writeChoice(foreign, generation);
+      } catch {
+        if (this._policyGeneration === generation) {
+          this._preferenceDurable = false;
+          this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
+          this.publishRuntimeStatus();
+        }
+        return;
+      }
+      if (this._policyGeneration === generation) {
+        this.applyResolved(foreign, foreign, true);
+        this.publishRuntimeStatus();
+      }
+      return;
+    }
+    const remove = this._privacyStore.remove;
+    if (typeof remove !== 'function') return;
+    this._echoSuppress = 'clear';
+    try {
+      await remove.call(this._privacyStore, NYM_PRIVACY_PREFERENCE_STORAGE_KEY);
+    } catch {
+      if (this._policyGeneration === generation) {
+        this._preferenceDurable = false;
+        this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
+        this.publishRuntimeStatus();
+      }
+      return;
+    } finally {
+      this._echoSuppress = null;
+    }
+    if (this._policyGeneration === generation) {
+      this.applyResolved('nym', null, false);
+      this._diagnosticCode = 'PRIVACY_CHOICE_REQUIRED';
+      this.publishRuntimeStatus();
     }
   }
 
@@ -518,12 +642,30 @@ export class NymRuntimeController {
     if (this._router.mode === 'direct') this._router.setMode('nym');
   }
 
-  private schedulePrivacyReload(): void {
+  /**
+   * Storage notification. The echo of a write this controller just posted is
+   * not a new choice and must not outrank the local intent that posted it.
+   * Any other notice revokes Direct before the reread.
+   */
+  private onPrivacyNotice(notice?: PrivacyStorageNotice): void {
+    if (this.isOwnEcho(notice)) return;
     const generation = ++this._policyGeneration;
+    this._foreignGeneration = generation;
+    this._foreignValueKnown = notice !== undefined;
+    this._foreignValue = notice?.newValue;
     this.suspendDirect();
+    if (notice && (notice.newValue === 'nym' || notice.newValue === 'direct')) {
+      this.applyResolved(notice.newValue, notice.newValue, true);
+    }
     this._privacyReload = this._privacyReload
       .catch(() => undefined)
       .then(() => this.reloadPrivacyFromStore(generation));
+  }
+
+  private isOwnEcho(notice?: PrivacyStorageNotice): boolean {
+    if (!notice || this._echoSuppress == null) return false;
+    if (this._echoSuppress === 'clear') return notice.newValue == null;
+    return this._inflightWrite != null && Object.is(notice.newValue, this._inflightWrite.choice);
   }
 
   /** Apply a privacy value written by another instance. Does not invent Direct. */
@@ -539,8 +681,25 @@ export class NymRuntimeController {
       return;
     }
     if (this._policyGeneration !== generation) return;
+    if (this.diskReadDisagreesWithForeignNotice(record, generation)) return;
     this.applyPrivacyRecord(record);
     this.publishRuntimeStatus();
+  }
+
+  /**
+   * This generation was opened by a foreign notice. If disk still shows a
+   * different choice, that read is an obsolete local write, not a new decision.
+   */
+  private diskReadDisagreesWithForeignNotice(
+    record: NymPrivacyPreferenceRecord,
+    generation: number,
+  ): boolean {
+    if (!this._foreignValueKnown || this._foreignGeneration !== generation) return false;
+    if (this._foreignValue === 'nym' || this._foreignValue === 'direct') {
+      return !(record.kind === 'chosen' && record.choice === this._foreignValue);
+    }
+    if (this._foreignValue == null) return record.kind === 'chosen';
+    return false;
   }
 
   private applyPrivacyRecord(record: NymPrivacyPreferenceRecord): void {

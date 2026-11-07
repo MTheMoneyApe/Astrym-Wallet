@@ -94,7 +94,8 @@ function instance(storage: ReturnType<ReturnType<typeof sharedLocalStorage>['for
     onPrivacyStoreChanged: (listener) => {
       const wrapped = (changes: Record<string, unknown>, area: string) => {
         if (area === 'local' && Object.prototype.hasOwnProperty.call(changes, NYM_PRIVACY_PREFERENCE_STORAGE_KEY)) {
-          listener();
+          const change = changes[NYM_PRIVACY_PREFERENCE_STORAGE_KEY] as { newValue?: unknown } | undefined;
+          listener({ newValue: change?.newValue });
         }
       };
       chromeApi.storage.onChanged.addListener(wrapped);

@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { NymRuntimeController } from '../../../src/background/nym/NymRuntimeController.js';
+import {
+  NymRuntimeController,
+  type PrivacyStorageNotice,
+} from '../../../src/background/nym/NymRuntimeController.js';
 import { NymGatewayConfigService } from '../../../src/background/nym/NymGatewayConfigService.js';
 import { NymHostPermissionService } from '../../../src/background/nym/NymHostPermissionService.js';
 import type { NymSessionBridge } from '../../../src/background/nym/NymRuntimeController.js';
@@ -72,7 +75,7 @@ describe('Nym privacy revocation races', () => {
         for (const [key, value] of Object.entries(items)) mem.set(key, value);
       },
     };
-    let notify = () => {};
+    let notify: (notice?: PrivacyStorageNotice) => void = () => {};
     const ctrl = controller(store, (listener) => {
       notify = listener;
       return () => {};
@@ -115,7 +118,7 @@ describe('Nym privacy revocation races', () => {
         for (const [key, value] of Object.entries(items)) mem.set(key, value);
       },
     };
-    let notify = () => {};
+    let notify: (notice?: PrivacyStorageNotice) => void = () => {};
     const ctrl = controller(store, (listener) => {
       notify = listener;
       return () => {};
@@ -128,7 +131,7 @@ describe('Nym privacy revocation races', () => {
       expect(sawDirectWrite).toBe(true);
     });
     mem.set(KEY, 'nym');
-    notify();
+    notify({ newValue: 'nym' });
     await Promise.resolve();
     await Promise.resolve();
 
@@ -141,6 +144,7 @@ describe('Nym privacy revocation races', () => {
 
     directWrite.release();
     await pendingDirect;
+    expect(mem.get(KEY)).toBe('nym');
     expect(ctrl.mode).not.toBe('direct');
     expect(ctrl.getSnapshot().privacyPreference).not.toBe('direct');
     await expect(ctrl.fetchPublicData({ transport: 'direct' })).resolves.toMatchObject({
@@ -166,7 +170,7 @@ describe('Nym privacy revocation races', () => {
         for (const [key, value] of Object.entries(items)) mem.set(key, value);
       },
     };
-    let notify = () => {};
+    let notify: (notice?: PrivacyStorageNotice) => void = () => {};
     const ctrl = controller(store, (listener) => {
       notify = listener;
       return () => {};
