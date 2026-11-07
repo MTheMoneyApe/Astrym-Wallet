@@ -364,6 +364,7 @@ export const NymRuntimeSnapshotSchema = z.object({
   preferenceHydrated: z.boolean(),
   egressBlocked: z.boolean(),
   privacyPreference: z.enum(['direct', 'nym']).nullable(),
+  preferenceDurable: z.boolean(),
   documentReady: z.boolean(),
   diagnosticCode: z.string().optional(),
   diagnosticStage: z.string().nullable().optional(),

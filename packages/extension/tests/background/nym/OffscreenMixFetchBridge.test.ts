@@ -288,4 +288,43 @@ describe('MixFetchNymTransport + FailClosed via offscreen bridge', () => {
     });
     expect(directFetch).not.toHaveBeenCalled();
   });
+
+  it('watchConnection fires when the offscreen lifeline port disconnects', () => {
+    const connectListeners: Array<(port: { name: string; onDisconnect: { addListener: (fn: () => void) => void } }) => void> = [];
+    vi.stubGlobal('chrome', {
+      runtime: {
+        onConnect: {
+          addListener: (fn: (port: { name: string; onDisconnect: { addListener: (cb: () => void) => void } }) => void) => {
+            connectListeners.push(fn);
+          },
+          removeListener: () => undefined,
+        },
+      },
+    });
+    const docs = {
+      isApiAvailable: () => false,
+      hasOpenDocument: async () => false,
+      ensureDocument: async () => undefined,
+      closeDocument: async () => undefined,
+    } as unknown as OffscreenDocumentManager;
+    const bridge = new OffscreenMixFetchBridge(docs, {
+      sendMessage: async () => {
+        throw new Error('unused');
+      },
+    });
+    const lost = vi.fn();
+    bridge.watchConnection(lost);
+    const disconnectListeners: Array<() => void> = [];
+    connectListeners[0]?.({
+      name: 'astrym-nym-offscreen',
+      onDisconnect: {
+        addListener: (fn) => {
+          disconnectListeners.push(fn);
+        },
+      },
+    });
+    disconnectListeners[0]?.();
+    expect(lost).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
 });

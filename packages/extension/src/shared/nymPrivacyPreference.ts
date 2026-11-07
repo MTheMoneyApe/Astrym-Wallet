@@ -10,6 +10,12 @@
  * Only the strings `'direct'` and `'nym'` are valid. Anything else is corrupt
  * and must fail closed (no silent clearnet). The SPP broadcast gate is
  * process-local and is intentionally not stored here.
+ *
+ * A failed `setMode('nym')` does not update this record. The running controller
+ * may show Nym in memory with `preferenceDurable: false` and
+ * `PRIVACY_PREFERENCE_PERSIST_FAILED`. That selection was not saved. The next
+ * controller reads this key and restores the last successful value, which can
+ * be a previous explicit `direct`. Do not describe the failed Nym write as persisted.
  */
 
 export const NYM_PRIVACY_PREFERENCE_STORAGE_KEY = 'astrym.nym.privacyMode.v1';

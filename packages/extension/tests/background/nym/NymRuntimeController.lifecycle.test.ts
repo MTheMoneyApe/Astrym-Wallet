@@ -42,8 +42,10 @@ async function seededController(bridge: OffscreenMixFetchBridge): Promise<NymRun
 
 function mockBridge(setupImpl?: () => Promise<void>): OffscreenMixFetchBridge & {
   setup: ReturnType<typeof vi.fn>;
+  emitLost: () => void;
 } {
   let setupComplete = false;
+  let onLost: (() => void) | null = null;
   const setup = vi.fn(async () => {
     if (setupImpl) await setupImpl();
     setupComplete = true;
@@ -78,10 +80,22 @@ function mockBridge(setupImpl?: () => Promise<void>): OffscreenMixFetchBridge & 
             gatewayAllowlistConfigured: true,
           },
     ),
+    watchConnection(cb: () => void) {
+      onLost = cb;
+      return () => {
+        onLost = null;
+      };
+    },
+    emitLost() {
+      onLost?.();
+    },
     get setupComplete() {
       return setupComplete;
     },
-  } as unknown as OffscreenMixFetchBridge & { setup: ReturnType<typeof vi.fn> };
+  } as unknown as OffscreenMixFetchBridge & {
+    setup: ReturnType<typeof vi.fn>;
+    emitLost: () => void;
+  };
 }
 
 describe('NymRuntimeController lifecycle', () => {
@@ -122,6 +136,30 @@ describe('NymRuntimeController lifecycle', () => {
     expect(again.connected).toBe(true);
     expect(bridge.setup).toHaveBeenCalledTimes(2);
     expect(again.lastError).toBeNull();
+  });
+
+  it('publishes MixFetch loss to listeners without a storage write', async () => {
+    const bridge = mockBridge();
+    const ctrl = await seededController(bridge);
+    const published: Array<{ connected: boolean; egressBlocked: boolean; mode: string }> = [];
+    ctrl.subscribeRuntimeStatus((snap) => {
+      published.push({
+        connected: snap.connected,
+        egressBlocked: snap.egressBlocked,
+        mode: snap.mode,
+      });
+    });
+    await ctrl.connect();
+    expect(ctrl.getSnapshot().connected).toBe(true);
+    published.length = 0;
+    bridge.emitLost();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(ctrl.getSnapshot().connected).toBe(false);
+    expect(ctrl.getSnapshot().egressBlocked).toBe(true);
+    expect(ctrl.mode).toBe('nym');
+    expect(published.some((snap) => snap.connected === false && snap.egressBlocked && snap.mode === 'nym')).toBe(
+      true,
+    );
   });
 
   it('serializes concurrent Connect into a single setup', async () => {

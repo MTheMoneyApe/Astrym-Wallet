@@ -37,6 +37,7 @@ import type {
 } from './NymTransportPanel.js';
 import { PrivacyModeIndicator } from './privacyIndicator.js';
 import { NYM_PRIVACY_PREFERENCE_STORAGE_KEY } from '../shared/nymPrivacyPreference.js';
+import { bindNymRuntimeStatus } from '../shared/nymRuntimeStatus.js';
 import { beginGatewayPermissionRequestFromUserGesture } from './nymPermissionGesture.js';
 import { NYM_LIVE_SMOKE_EXECUTION_AUTHORIZED } from '../nym-offscreen/liveSmokeAuth.js';
 import { NYM_VERIFIED_GATEWAY } from '../nym-offscreen/verifiedGateway.js';
@@ -51,6 +52,7 @@ function coerceNymUiSnapshot(snap: {
   preferenceHydrated?: boolean;
   egressBlocked?: boolean;
   privacyPreference?: 'direct' | 'nym' | null;
+  preferenceDurable?: boolean;
   documentReady: boolean;
   diagnosticCode?: string | undefined;
   diagnosticStage?: string | null | undefined;
@@ -72,6 +74,7 @@ function coerceNymUiSnapshot(snap: {
   if (snap.preferenceHydrated !== undefined) out.preferenceHydrated = snap.preferenceHydrated;
   if (snap.egressBlocked !== undefined) out.egressBlocked = snap.egressBlocked;
   if (snap.privacyPreference !== undefined) out.privacyPreference = snap.privacyPreference;
+  if (snap.preferenceDurable !== undefined) out.preferenceDurable = snap.preferenceDurable;
   if (snap.selfAddress !== undefined) out.selfAddress = snap.selfAddress;
   if (snap.diagnosticCode !== undefined) out.diagnosticCode = snap.diagnosticCode;
   if (snap.diagnosticStage !== undefined) out.diagnosticStage = snap.diagnosticStage;
@@ -1111,8 +1114,15 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
       chrome.storage.onChanged.addListener(onChanged);
     }
+    const unbindStatus = bindNymRuntimeStatus(
+      typeof chrome !== 'undefined' ? chrome.runtime?.onMessage : undefined,
+      (snapshot) => {
+        if (!cancelled) setNymSnapshot(coerceNymUiSnapshot(snapshot));
+      },
+    );
     return () => {
       cancelled = true;
+      unbindStatus();
       if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
         chrome.storage.onChanged.removeListener(onChanged);
       }

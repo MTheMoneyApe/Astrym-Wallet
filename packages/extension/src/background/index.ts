@@ -35,6 +35,7 @@ import {
   createNymStatusHandler,
 } from './handlers/nymHandlers.js';
 import { isNymOffscreenChannelMessage } from '../nym-offscreen/protocol.js';
+import { isNymRuntimeStatusMessage } from '../shared/nymRuntimeStatus.js';
 import {
   isSppHostBridgeMessage,
   parseSppHostLifecycleEvent,
@@ -251,6 +252,10 @@ function initBackgroundSynchronous() {
   // claim the response Promise (offscreen document owns that protocol).
   browser.runtime.onMessage.addListener((message: any, sender: any) => {
     if (isNymOffscreenChannelMessage(message)) {
+      return;
+    }
+    // Status push for open views. Not a command and not a clearnet grant.
+    if (isNymRuntimeStatusMessage(message)) {
       return;
     }
     // spp-host ↔ SW bridge: lifecycle events update the registry; sign + Nym

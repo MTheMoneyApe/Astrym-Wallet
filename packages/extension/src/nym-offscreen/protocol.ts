@@ -8,6 +8,8 @@ import type { NymDiagnosticCode } from './diagnostics.js';
 
 export const NYM_OFFSCREEN_CHANNEL = 'nym-offscreen' as const;
 export const NYM_OFFSCREEN_TARGET = 'nym-runtime' as const;
+/** Long-lived port. Closing the offscreen document disconnects it. */
+export const NYM_OFFSCREEN_LIFELINE = 'astrym-nym-offscreen' as const;
 
 export type NymOffscreenRequestType =
   | 'ping'

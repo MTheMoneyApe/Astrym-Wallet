@@ -61,10 +61,16 @@ import {
   type NymPrivacyPreferenceRecord,
   type NymPrivacyPreferenceStore,
 } from '../../shared/nymPrivacyPreference.js';
+import {
+  NYM_RUNTIME_STATUS_CHANNEL,
+  type NymRuntimeStatusSnapshot,
+} from '../../shared/nymRuntimeStatus.js';
 
 /** Offscreen IPC bridge or the in-page MixFetch bridge used by the Android webapp. */
 export type NymSessionBridge = NymMixFetchBridge & {
   queryStatus(): Promise<NymOffscreenStatusPayload | null>;
+  /** Optional. Called when the MixFetch host disappears without an explicit disconnect. */
+  watchConnection?(onLost: () => void): () => void;
 };
 
 export type NymRuntimeUiSnapshot = NymTransportSnapshot & {
@@ -78,6 +84,12 @@ export type NymRuntimeUiSnapshot = NymTransportSnapshot & {
   egressBlocked: boolean;
   /** Null when unset, corrupt, or not yet read. `'direct'` only after an explicit save. */
   privacyPreference: NymPrivacyChoice | null;
+  /**
+   * True only when privacyPreference was loaded from storage or last written
+   * successfully. False after a failed save: memory may show Nym, but reload
+   * restores the previous durable value and must not be described as a saved Nym choice.
+   */
+  preferenceDurable: boolean;
   documentReady: boolean;
   diagnosticCode?: NymDiagnosticCode | string;
   diagnosticStage?: string | null;
@@ -170,6 +182,8 @@ export class NymRuntimeController {
   private _mode: NymTransportMode = 'nym';
   private _preferenceHydrated = false;
   private _privacyPreference: NymPrivacyChoice | null = null;
+  private _preferenceDurable = false;
+  private readonly _statusListeners = new Set<(snapshot: NymRuntimeUiSnapshot) => void>();
   /** Bumped by an explicit setMode so a late storage read cannot overwrite it. */
   private _explicitEpoch = 0;
   /** Serializes explicit choices so a late Direct write cannot be overwritten by Nym. */
@@ -225,7 +239,17 @@ export class NymRuntimeController {
       mode: this._mode,
       nym: this._transport,
       directFetch: clearnetFetchImpl as typeof fetch,
+      directAuthorized: () => this.clearnetExplicitlyAuthorized(),
     });
+    const allowRouterMode = this._router.setMode.bind(this._router);
+    this._router.setMode = (mode: NymTransportMode) => {
+      if (mode === 'direct' && !this.clearnetExplicitlyAuthorized()) {
+        throw new Error(
+          'Direct requires an explicit persisted privacy choice; router setMode cannot grant clearnet',
+        );
+      }
+      allowRouterMode(mode);
+    };
     this._gatewayConfig =
       options?.gatewayConfig ?? new NymGatewayConfigService(defaultLocalStorage());
     this._hostPermissions =
@@ -240,6 +264,62 @@ export class NymRuntimeController {
       subscribe(() => {
         this.schedulePrivacyReload();
       });
+    }
+    if (typeof this._bridge.watchConnection === 'function') {
+      this._bridge.watchConnection(() => {
+        void this.noteMixFetchLost();
+      });
+    }
+  }
+
+  /** Same-realm listeners. Extension pages also receive {@link publishRuntimeStatus}. */
+  subscribeRuntimeStatus(listener: (snapshot: NymRuntimeUiSnapshot) => void): () => void {
+    this._statusListeners.add(listener);
+    return () => {
+      this._statusListeners.delete(listener);
+    };
+  }
+
+  /**
+   * MixFetch host disappeared. Closes the transport and tells open views.
+   * Does not select Direct and does not write storage.
+   */
+  async noteMixFetchLost(): Promise<NymRuntimeUiSnapshot> {
+    if (this._transport.getSnapshot().connected === true) {
+      try {
+        await this._transport.close();
+      } catch {
+        /* still publish the loss */
+      }
+    }
+    this._documentReady = false;
+    const snapshot = this.getSnapshot();
+    this.publishRuntimeStatus(snapshot);
+    return snapshot;
+  }
+
+  private publishRuntimeStatus(snapshot: NymRuntimeUiSnapshot = this.getSnapshot()): void {
+    for (const listener of this._statusListeners) {
+      try {
+        listener(snapshot);
+      } catch {
+        /* one view must not block the others */
+      }
+    }
+    if (typeof chrome === 'undefined' || typeof chrome.runtime?.sendMessage !== 'function') return;
+    try {
+      const pending = chrome.runtime.sendMessage({
+        channel: NYM_RUNTIME_STATUS_CHANNEL,
+        snapshot: snapshot as NymRuntimeStatusSnapshot,
+      });
+      if (pending && typeof (pending as Promise<unknown>).then === 'function') {
+        void (pending as Promise<unknown>).then(
+          () => undefined,
+          () => undefined,
+        );
+      }
+    } catch {
+      /* no listener in this realm */
     }
   }
 
@@ -354,15 +434,24 @@ export class NymRuntimeController {
     const epoch = ++this._explicitEpoch;
     switch (mode) {
       case 'nym':
-        this.applyResolved('nym', 'nym');
+        // Memory switches to Nym before the write so a failed save cannot leave Direct.
+        // preferenceDurable stays false until the write resolves. A later controller
+        // reads storage and restores the previous successful value; that reload is
+        // not a saved Nym choice.
+        this.applyResolved('nym', 'nym', false);
         try {
           await writeNymPrivacyPreference(this._privacyStore, 'nym');
         } catch (err) {
           if (this._explicitEpoch === epoch) {
+            this._preferenceDurable = false;
             this._diagnosticCode = 'PRIVACY_PREFERENCE_PERSIST_FAILED';
+            this.publishRuntimeStatus();
           }
           throw err;
         }
+        if (this._explicitEpoch !== epoch) return;
+        this._preferenceDurable = true;
+        this.publishRuntimeStatus();
         return;
       case 'direct':
         try {
@@ -373,13 +462,16 @@ export class NymRuntimeController {
             if (!this._preferenceHydrated) {
               this._mode = 'nym';
               this._preferenceHydrated = true;
+              this._preferenceDurable = false;
               this._router.setMode('nym');
             }
+            this.publishRuntimeStatus();
           }
           throw err;
         }
         if (this._explicitEpoch !== epoch) return;
-        this.applyResolved('direct', 'direct');
+        this.applyResolved('direct', 'direct', true);
+        this.publishRuntimeStatus();
         return;
       default: {
         const _never: never = mode;
@@ -388,10 +480,15 @@ export class NymRuntimeController {
     }
   }
 
-  private applyResolved(mode: NymTransportMode, preference: NymPrivacyChoice | null): void {
+  private applyResolved(
+    mode: NymTransportMode,
+    preference: NymPrivacyChoice | null,
+    durable: boolean,
+  ): void {
     this._mode = mode;
     this._privacyPreference = preference;
     this._preferenceHydrated = true;
+    this._preferenceDurable = durable && (preference === 'direct' || preference === 'nym');
     if (
       this._diagnosticCode === 'PRIVACY_PREFERENCE_CORRUPT' ||
       this._diagnosticCode === 'PRIVACY_PREFERENCE_UNREADABLE' ||
@@ -417,25 +514,27 @@ export class NymRuntimeController {
       record = await readNymPrivacyPreference(this._privacyStore);
     } catch {
       if (this._explicitEpoch !== epoch) return;
-      this.applyResolved('nym', null);
+      this.applyResolved('nym', null, false);
       this._diagnosticCode = 'PRIVACY_PREFERENCE_UNREADABLE';
+      this.publishRuntimeStatus();
       return;
     }
     if (this._explicitEpoch !== epoch) return;
     this.applyPrivacyRecord(record);
+    this.publishRuntimeStatus();
   }
 
   private applyPrivacyRecord(record: NymPrivacyPreferenceRecord): void {
     switch (record.kind) {
       case 'unset':
-        this.applyResolved('nym', null);
+        this.applyResolved('nym', null, false);
         this._diagnosticCode = 'PRIVACY_CHOICE_REQUIRED';
         return;
       case 'chosen':
-        this.applyResolved(record.choice, record.choice);
+        this.applyResolved(record.choice, record.choice, true);
         return;
       case 'corrupt':
-        this.applyResolved('nym', null);
+        this.applyResolved('nym', null, false);
         this._diagnosticCode = 'PRIVACY_PREFERENCE_CORRUPT';
         return;
       default: {
@@ -482,7 +581,7 @@ export class NymRuntimeController {
     } catch {
       if (this._explicitEpoch !== epoch) return;
       // Storage failures stay fail-closed. Do not select Direct.
-      this.applyResolved('nym', null);
+      this.applyResolved('nym', null, false);
       this._diagnosticCode = 'PRIVACY_PREFERENCE_UNREADABLE';
     }
   }
@@ -499,6 +598,7 @@ export class NymRuntimeController {
       preferenceHydrated: this._preferenceHydrated,
       egressBlocked: this.isEgressBlocked(),
       privacyPreference: this._privacyPreference,
+      preferenceDurable: this._preferenceDurable,
       documentReady: this._documentReady,
       diagnosticCode: this._diagnosticCode,
       diagnosticStage: this._diagnosticStage,
@@ -665,7 +765,9 @@ export class NymRuntimeController {
           'Transport connect returned without MixFetch Ready',
         );
       }
-      return this.getSnapshot();
+      const snapshot = this.getSnapshot();
+      this.publishRuntimeStatus(snapshot);
+      return snapshot;
     } catch (cause) {
       this._documentReady = false;
       this._diagnosticCode =
@@ -839,15 +941,21 @@ export class NymRuntimeController {
     this._diagnosticStage = null;
     // Disconnect closes MixFetch only. The persisted choice stays. Clearnet
     // requires setMode('direct') from the user.
-    return this.getSnapshot();
+    const snapshot = this.getSnapshot();
+    this.publishRuntimeStatus(snapshot);
+    return snapshot;
   }
 
   async refreshStatus(): Promise<NymRuntimeUiSnapshot> {
+    const connectedBefore = this._transport.getSnapshot().connected === true;
     await this.syncGatewayConfigUi();
     // Avoid opening offscreen solely for idle status when MixFetch is down —
     // queryStatus ensures the document; that is OK but must not mark Ready.
     const remote = await this._bridge.queryStatus();
     if (!remote) {
+      if (connectedBefore && !this._connectInFlight) {
+        return this.noteMixFetchLost();
+      }
       this._documentReady = false;
       if (this._diagnosticCode === 'OK' && !this._transport.getSnapshot().connected) {
         // Idle / no offscreen: not an error; document simply not open.
@@ -861,17 +969,8 @@ export class NymRuntimeController {
     }
     this.applyRemoteFields(remote);
     // Soft teardown if SW thought connected but offscreen MixFetch is gone.
-    if (
-      !remote.connected &&
-      this._transport.getSnapshot().connected &&
-      !this._connectInFlight
-    ) {
-      try {
-        await this._transport.close();
-      } catch {
-        /* ignore */
-      }
-      this._documentReady = false;
+    if (!remote.connected && connectedBefore && !this._connectInFlight) {
+      return this.noteMixFetchLost();
     }
     return this.getSnapshot();
   }

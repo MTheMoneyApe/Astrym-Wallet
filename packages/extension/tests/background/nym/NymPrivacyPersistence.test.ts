@@ -254,6 +254,68 @@ describe('Nym privacy persistence', () => {
     expect(isSppTestnetBroadcastAuthorized()).toBe(false);
   });
 
+  it('does not let a stale router grant Direct, and a failed Nym write is not durable', async () => {
+    const mem = new Map<string, unknown>([[NYM_PRIVACY_PREFERENCE_STORAGE_KEY, 'direct']]);
+    let failNym = false;
+    const store = memoryStore();
+    store.set = async (items) => {
+      if (failNym && items[NYM_PRIVACY_PREFERENCE_STORAGE_KEY] === 'nym') {
+        throw new Error('QuotaExceededError');
+      }
+      for (const [key, value] of Object.entries(items)) mem.set(key, value);
+    };
+    store.get = async (keys) => {
+      const list = keys == null ? [...mem.keys()] : Array.isArray(keys) ? keys : [keys];
+      const out: Record<string, unknown> = {};
+      for (const key of list) {
+        if (mem.has(key)) out[key] = mem.get(key);
+      }
+      return out;
+    };
+
+    const first = controllerFor(store);
+    await first.whenPrivacyReady();
+    expect(first.getSnapshot()).toMatchObject({
+      privacyPreference: 'direct',
+      preferenceDurable: true,
+      egressBlocked: false,
+    });
+
+    const held = first.getRouter();
+    failNym = true;
+    await expect(first.setMode('nym')).rejects.toThrow(/QuotaExceededError/);
+    expect(first.getSnapshot()).toMatchObject({
+      mode: 'nym',
+      privacyPreference: 'nym',
+      preferenceDurable: false,
+      diagnosticCode: 'PRIVACY_PREFERENCE_PERSIST_FAILED',
+      egressBlocked: true,
+    });
+    expect(mem.get(NYM_PRIVACY_PREFERENCE_STORAGE_KEY)).toBe('direct');
+    expect(() => held.setMode('direct')).toThrow(/persisted privacy choice/);
+
+    const clearnet = vi.fn(async () => new Response('clearnet', { status: 200 }));
+    vi.stubGlobal('fetch', clearnet);
+    await expect(held.fetch(HORIZON)).rejects.toMatchObject({ code: 'NOT_CONNECTED' });
+    await expect(first.fetchPublicData({ transport: 'direct' })).resolves.toMatchObject({
+      transportFetchInvoked: false,
+    });
+    await expect(first.probeStellarHorizon({ transport: 'direct' })).resolves.toMatchObject({
+      transportFetchInvoked: false,
+    });
+    expect(clearnet).not.toHaveBeenCalled();
+
+    const reloaded = controllerFor(store);
+    await reloaded.whenPrivacyReady();
+    expect(reloaded.getSnapshot()).toMatchObject({
+      mode: 'direct',
+      privacyPreference: 'direct',
+      preferenceDurable: true,
+      egressBlocked: false,
+    });
+    expect(isSppTestnetBroadcastAuthorized()).toBe(false);
+  });
+
   it('does not send Direct diagnostics while Nym, unset, pending, or corrupt', async () => {
     const clearnet = vi.fn(async () => new Response('nope', { status: 200 }));
     vi.stubGlobal('fetch', clearnet);

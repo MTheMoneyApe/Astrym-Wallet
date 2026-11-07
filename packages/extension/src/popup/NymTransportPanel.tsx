@@ -66,6 +66,7 @@ export type NymUiSnapshot = NymTransportSnapshot & {
   preferenceHydrated?: boolean;
   egressBlocked?: boolean;
   privacyPreference?: 'direct' | 'nym' | null;
+  preferenceDurable?: boolean;
   documentReady?: boolean;
   diagnosticCode?: string;
   diagnosticStage?: string | null;

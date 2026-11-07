@@ -23,6 +23,7 @@ function toSnapshot(snap: NymRuntimeUiSnapshot): ValidatedResponsePayload<'NYM_S
     preferenceHydrated: snap.preferenceHydrated,
     egressBlocked: snap.egressBlocked,
     privacyPreference: snap.privacyPreference,
+    preferenceDurable: snap.preferenceDurable,
     documentReady: snap.documentReady,
     diagnosticCode: snap.diagnosticCode,
     diagnosticStage: snap.diagnosticStage ?? null,

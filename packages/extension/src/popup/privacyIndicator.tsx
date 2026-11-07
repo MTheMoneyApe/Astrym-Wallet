@@ -14,6 +14,7 @@ export type PrivacyIndicatorSnapshot = {
   preferenceHydrated?: boolean;
   egressBlocked?: boolean;
   privacyPreference?: 'direct' | 'nym' | null;
+  preferenceDurable?: boolean;
   diagnosticCode?: string;
 };
 
@@ -39,7 +40,11 @@ export function describeWalletPrivacy(snapshot: PrivacyIndicatorSnapshot): Priva
       egress: 'blocked',
     };
   }
-  if (snapshot.diagnosticCode === 'PRIVACY_PREFERENCE_PERSIST_FAILED') {
+  if (
+    snapshot.diagnosticCode === 'PRIVACY_PREFERENCE_PERSIST_FAILED' ||
+    (snapshot.preferenceDurable === false &&
+      (snapshot.privacyPreference === 'nym' || snapshot.privacyPreference === 'direct'))
+  ) {
     if (
       snapshot.privacyPreference === 'nym' &&
       snapshot.connected === true &&
