@@ -212,10 +212,10 @@ describe('circuit fingerprint compatibility', () => {
     const upstream = JSON.parse(readFileSync(upstreamPath, 'utf8')) as Record<string, unknown>;
     const result = compareCircuitFingerprints(packaged, upstream);
     expect(result.mismatched).toEqual([]);
-    expect(result.matched.length).toBe(16);
-    expect(result.upstreamOnly).toEqual(['keyOwnership']);
-    // Meta version may differ (0.6 packaged / 0.7 upstream) while hashes match.
-    expect(result.packagedVersion).toBe('0.6');
+    expect(result.upstreamOnly).toEqual([]);
+    expect(result.matched).toContain('keyOwnership');
+    expect(result.matched.length).toBe(17);
+    expect(result.packagedVersion).toBe('0.7');
     expect(result.upstreamVersion).toBe('0.7');
   });
 

@@ -15,8 +15,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXTENSION_ROOT = resolve(__dirname, '..');
 
-const EXPECTED_VERSION = '0.2.1';
 const EXPECTED_NAME = 'stellar-private-payments';
+const SOURCE_COMMIT = 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120';
 const MANAGED_BY = 'solanym-extension-copy-spp-assets';
 const META_NAME = 'SPP_ASSET_META.json';
 const PROFILE_FULL = 'full';
@@ -125,8 +125,11 @@ async function main() {
   if (meta.name !== EXPECTED_NAME) {
     fail(`${META_NAME}.name expected ${EXPECTED_NAME}, got ${JSON.stringify(meta.name)}`);
   }
-  if (meta.version !== EXPECTED_VERSION) {
-    fail(`${META_NAME}.version expected ${EXPECTED_VERSION}, got ${JSON.stringify(meta.version)}`);
+  if (meta.sourceCommit !== SOURCE_COMMIT) {
+    fail(
+      `${META_NAME}.sourceCommit expected ${SOURCE_COMMIT}, got ${JSON.stringify(meta.sourceCommit)}. ` +
+        'npm 0.2.1 is not this runtime.',
+    );
   }
   if (meta.profile !== PROFILE_FULL) {
     fail(`${META_NAME}.profile expected ${PROFILE_FULL}, got ${JSON.stringify(meta.profile)}`);

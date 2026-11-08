@@ -1,0 +1,51 @@
+{
+  "sourceRepository": "https://github.com/NethermindEth/stellar-private-payments",
+  "sourceCommit": "e6ce95c2a71ed6313f78bb19cfdd0de1d9663120",
+  "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+  "wasmBindgen": "0.2.128",
+  "binaryen": "131",
+  "circuitsRelease": "circuits-v0.7",
+  "circuitsArchiveSha256": "c4ad54de6cc146bd8323e502341d545e09d0cd95d21b4f60ad2388188f64a2f9",
+  "circuitsLockSha256": "35c36f4d0f7055514156b67df9995cb9550e5f380e9a84d85dddb457d17b241e",
+  "circomlib": "35e54ea21da3e8762557234298dbb553c175ea8d",
+  "packageVersionString": "0.2.1",
+  "packageVersionNote": "Upstream package.json at this commit still says 0.2.1. That string is not the npm tarball published on 2026-10-16. sourceCommit is the runtime identity.",
+  "files": {
+    "dist/stellar_private_payments_web.js": {
+      "sha256": "e93ac1520b5c1175d2203be2a6ae28265620dab1e0c7afba375f6f01dcacc139",
+      "size": 185635
+    },
+    "dist/stellar_private_payments_web_bg.wasm": {
+      "sha256": "fb3481af81383e82d53b67b32c1fc007744e85044d0449fa3c0607c2d48f84bc",
+      "size": 2446953
+    },
+    "dist/workers/storage-worker.js": {
+      "sha256": "4b14d975ef3e72c8e27519892c9dc2263c209fd258579456f59add97823331a7",
+      "size": 61
+    },
+    "dist/workers/storage-worker-module.js": {
+      "sha256": "8f5162a926478403f455dda7344e4154bd16f36a5f71c1173fd95032cf7070e1",
+      "size": 187604
+    },
+    "dist/workers/storage-worker-module_bg.wasm": {
+      "sha256": "132138109f49c966351a99965e5b612ef09cc7e83a2d78032b22011f2381d438",
+      "size": 2728814
+    },
+    "dist/workers/prover-worker.js": {
+      "sha256": "f2a5ee3e47d0637598e355b23265a71d118fb4fe3415cbd190b6270d4ba995c6",
+      "size": 165
+    },
+    "dist/workers/prover-worker-module.js": {
+      "sha256": "d52837972a027223824e3f5a3aa722bbea56253512750972273d57a4fede7006",
+      "size": 186130
+    },
+    "dist/workers/prover-worker-module_bg.wasm": {
+      "sha256": "1189ea4ff6a2506cf920b740f8157af76dc88651220a971106bb3fd249375f95",
+      "size": 2626862
+    },
+    "dist/circuits/circuits.json": {
+      "sha256": "35c36f4d0f7055514156b67df9995cb9550e5f380e9a84d85dddb457d17b241e",
+      "size": 5526
+    }
+  }
+}

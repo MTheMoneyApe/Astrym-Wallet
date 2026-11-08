@@ -15,6 +15,7 @@
  */
 import { createHash } from 'node:crypto';
 import {
+  copyFileSync,
   createReadStream,
   existsSync,
   mkdirSync,
@@ -23,9 +24,7 @@ import {
   rmSync,
   statSync,
   writeFileSync,
-  copyFileSync,
 } from 'node:fs';
-import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -35,7 +34,7 @@ const WALLET_CORE_ROOT = resolve(EXTENSION_ROOT, '../wallet-core');
 const DEST_ROOT = join(EXTENSION_ROOT, 'public', 'spp');
 
 const EXPECTED_NAME = 'stellar-private-payments';
-const EXPECTED_VERSION = '0.2.1';
+const SOURCE_COMMIT = 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120';
 const PROFILE = 'full';
 const MANAGED_BY = 'solanym-extension-copy-spp-assets';
 
@@ -56,54 +55,30 @@ function toPosix(p) {
  * @returns {string}
  */
 function resolveSdkRoot() {
-  const candidates = [];
+  const repoRoot = resolve(EXTENSION_ROOT, '../..');
+  const candidates = [
+    process.env.SPP_SDK_ROOT,
+    join(repoRoot, '.cache/spp-upstream/stellar-private-payments/sdk/web'),
+  ].filter((value) => typeof value === 'string' && value.length > 0);
 
-  const direct = join(WALLET_CORE_ROOT, 'node_modules', EXPECTED_NAME);
-  candidates.push(direct);
-
-  try {
-    const requireFromWallet = createRequire(join(WALLET_CORE_ROOT, 'package.json'));
-    const pkgJson = requireFromWallet.resolve(`${EXPECTED_NAME}/package.json`);
-    candidates.push(dirname(pkgJson));
-  } catch {
-    /* optional */
-  }
-
-  try {
-    const requireFromExt = createRequire(join(EXTENSION_ROOT, 'package.json'));
-    // May resolve via workspace → wallet-core dependency graph
-    const pkgJson = requireFromExt.resolve(`${EXPECTED_NAME}/package.json`);
-    candidates.push(dirname(pkgJson));
-  } catch {
-    /* optional — extension does not declare the SDK directly */
-  }
-
-  // pnpm virtual store symlink under wallet-core
-  try {
-    const pnpmDir = join(WALLET_CORE_ROOT, 'node_modules', '.pnpm');
-    if (existsSync(pnpmDir)) {
-      for (const entry of readdirSync(pnpmDir)) {
-        if (!entry.startsWith(`${EXPECTED_NAME}@`)) continue;
-        const nested = join(pnpmDir, entry, 'node_modules', EXPECTED_NAME);
-        candidates.push(nested);
-      }
-    }
-  } catch {
-    /* optional */
-  }
-
-  const seen = new Set();
-  for (const c of candidates) {
-    const abs = resolve(c);
-    if (seen.has(abs)) continue;
-    seen.add(abs);
+  for (const candidate of candidates) {
+    const abs = resolve(candidate);
     const pkgPath = join(abs, 'package.json');
-    if (existsSync(pkgPath)) return abs;
+    const provenancePath = join(abs, 'SPP_SOURCE_PROVENANCE.json');
+    if (!existsSync(pkgPath) || !existsSync(provenancePath)) continue;
+    const provenance = JSON.parse(readFileSync(provenancePath, 'utf8'));
+    if (provenance.sourceCommit !== SOURCE_COMMIT) {
+      fail(
+        `SPP source commit ${JSON.stringify(provenance.sourceCommit)} is not ${SOURCE_COMMIT}. ` +
+          'npm stellar-private-payments@0.2.1 is not this runtime.',
+      );
+    }
+    return abs;
   }
 
   fail(
-    `Could not resolve ${EXPECTED_NAME}@${EXPECTED_VERSION}. Tried:\n` +
-      [...seen].map((p) => `  - ${p}`).join('\n'),
+    'No built SPP runtime with SPP_SOURCE_PROVENANCE.json. ' +
+      'Run scripts/prepare-spp-runtime.sh. The npm 0.2.1 package is not accepted.',
   );
 }
 
@@ -268,8 +243,9 @@ async function main() {
   if (pkg.name !== EXPECTED_NAME) {
     fail(`Package name mismatch at ${pkgPath}: expected ${EXPECTED_NAME}, got ${pkg.name}`);
   }
-  if (pkg.version !== EXPECTED_VERSION) {
-    fail(`Package version mismatch at ${pkgPath}: expected ${EXPECTED_VERSION}, got ${pkg.version}`);
+  const provenance = JSON.parse(readFileSync(join(sdkRoot, 'SPP_SOURCE_PROVENANCE.json'), 'utf8'));
+  if (provenance.sourceCommit !== SOURCE_COMMIT) {
+    fail(`Refusing runtime whose sourceCommit is not ${SOURCE_COMMIT}`);
   }
 
   // Guard: never copy from spike vendor
@@ -326,7 +302,9 @@ async function main() {
   const meta = {
     managedBy: MANAGED_BY,
     name: EXPECTED_NAME,
-    version: EXPECTED_VERSION,
+    version: pkg.version,
+    sourceCommit: SOURCE_COMMIT,
+    runtimeNote: 'Built from the pinned Nethermind commit. The npm 0.2.1 tarball is not this runtime even if package.json version matches.',
     profile: WEB_PROFILE ? 'web-runtime' : PROFILE,
     profileReason:
       'full: Client.new requires circuitsBaseUrl + circuitLock; prover loads r1cs/graph/proving keys. Reduced (circuits.json-only) profile was not verified safe for Client.new; matches laboratory RO-1 vendor tree minus .d.ts/source-bundle/freighter/types.',
@@ -347,7 +325,8 @@ async function main() {
       {
         ok: true,
         profile: WEB_PROFILE ? 'web-runtime' : PROFILE,
-        version: EXPECTED_VERSION,
+        version: pkg.version,
+        sourceCommit: SOURCE_COMMIT,
         destination: DEST_ROOT,
         resolvedFrom: sdkRoot,
         fileCount: files.length,
