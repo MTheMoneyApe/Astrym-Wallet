@@ -3,6 +3,11 @@
  * Never holds seeds or private keys in the spp-host realm.
  */
 
+import {
+  FeeBumpTransaction,
+  Networks,
+  TransactionBuilder,
+} from '@stellar/stellar-sdk';
 import type {
   SignAuthEntryResult,
   SignMessageResult,
@@ -10,11 +15,16 @@ import type {
   SignTransactionResult,
   WalletSigner,
 } from 'stellar-private-payments';
+import { assertStellarTestnetPassphrase } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 import {
   SPP_HOST_BRIDGE_CHANNEL,
   parseSppHostSignResult,
   type SppHostSignRequest,
 } from '../shared/sppHostBridge.js';
+import {
+  assertHostAssembledTransactionFee,
+  assertHostAuthEntry,
+} from './sppHostFeeScope.js';
 
 export type SppHostRemoteSignerOptions = {
   /** Bound G… address expected for this session. */
@@ -36,6 +46,7 @@ export class SppHostRemoteSigner implements WalletSigner {
   private readonly _send: (message: SppHostSignRequest) => Promise<unknown>;
 
   constructor(options: SppHostRemoteSignerOptions) {
+    assertStellarTestnetPassphrase(options.networkPassphrase);
     this._stellarAddress = options.stellarAddress;
     this._networkPassphrase = options.networkPassphrase;
     this._send = options.send ?? defaultSend;
@@ -51,13 +62,29 @@ export class SppHostRemoteSigner implements WalletSigner {
   }
 
   async signTransaction(xdr: string, opts?: SignOptions): Promise<SignTransactionResult> {
+    this._assertHostTransaction(xdr);
     const signed = await this._sign('transaction', xdr, opts);
     return { signedTxXdr: signed.signatureBase64, signerAddress: signed.signerAddress };
   }
 
   async signAuthEntry(xdr: string, opts?: SignOptions): Promise<SignAuthEntryResult> {
+    assertHostAuthEntry(xdr, this._stellarAddress);
     const signed = await this._sign('auth_entry', xdr, opts);
     return { signedAuthEntry: signed.signatureBase64, signerAddress: signed.signerAddress };
+  }
+
+  private _assertHostTransaction(xdrInput: string): void {
+    assertStellarTestnetPassphrase(this._networkPassphrase);
+    let parsed: ReturnType<typeof TransactionBuilder.fromXDR>;
+    try {
+      parsed = TransactionBuilder.fromXDR(xdrInput, Networks.TESTNET);
+    } catch {
+      throw new Error('SPP host refused to forward an unreadable transaction');
+    }
+    if (parsed instanceof FeeBumpTransaction) {
+      throw new Error('SPP host refused a fee-bump transaction');
+    }
+    assertHostAssembledTransactionFee(parsed.fee);
   }
 
   private async _sign(
