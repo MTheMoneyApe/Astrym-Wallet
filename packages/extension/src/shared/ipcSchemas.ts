@@ -719,6 +719,7 @@ export const MessageSchemas = {
     response: z.object({
       operation: z.enum(['deposit', 'transfer', 'withdraw']),
       txHash: z.string().nullable(),
+      txHashes: z.array(z.string().min(1)).optional(),
       rpcRoutedViaNym: z.literal(true),
       confirmation: z.enum(['confirmed', 'unknown']),
     }),

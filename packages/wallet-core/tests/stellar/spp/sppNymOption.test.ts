@@ -204,6 +204,30 @@ describe('SPP option while Nym is on', () => {
     await expect(first).resolves.toMatchObject({ txHash: 'deposit-tx', confirmation: 'confirmed' });
   });
 
+  it('does not confirm only the first hash when the pool reports several', async () => {
+    const nymFetch = vi.fn(async () => new Response('{"result":"ok"}', { status: 200 }));
+    const pool: SppPrivatePool = {
+      deposit: vi.fn(async () => ({ txHash: 'first', txHashes: ['first', 'second'] })),
+      transfer: vi.fn(async () => ({ txHash: null })),
+      withdraw: vi.fn(async () => ({ txHash: null })),
+    };
+    const request = { operation: 'deposit' as const, poolContract: poolContract(), amountStroops: '10' };
+    await expect(
+      executeSppPrivatePayment({
+        gate: { mode: 'nym', connected: true, selected: true },
+        request,
+        rpcUrl: RPC,
+        nymFetch,
+        pool,
+        authorizationFingerprint: auth(request),
+      }),
+    ).rejects.toMatchObject({
+      code: 'SUBMISSION_UNKNOWN',
+      txHashes: ['first', 'second'],
+    });
+    expect(pool.deposit).toHaveBeenCalledTimes(1);
+  });
+
   it('marks missing tx hash as SUBMISSION_UNKNOWN (no invented confirmation)', async () => {
     const nymFetch = vi.fn(async () => new Response('{"result":"ok"}', { status: 200 }));
     const pool: SppPrivatePool = {

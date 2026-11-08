@@ -4,6 +4,19 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Networks } from '@stellar/stellar-sdk';
+import {
+  isSppTestnetBroadcastAuthorized,
+  resetSppBroadcastGateForTests,
+  setSppTestnetBroadcastAuthorized,
+} from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
+import {
+  mintSppSignApproval,
+  resetSppSignApprovalsForTests,
+  sppKeyDerivationMessage,
+  sppSignApprovalCount,
+  type SppSignIntent,
+} from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { NETHERMIND_PUBLIC_KDF_DOMAIN } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 
 vi.mock('webextension-polyfill', () => ({
   default: {
@@ -118,6 +131,53 @@ describe('SPP host sign sender gate', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe('UNAUTHORIZED');
     expect(signTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects signing before the signer when the broadcast fixture is off and revokes the intent', async () => {
+    setSppTestnetBroadcastAuthorized(false);
+    expect(isSppTestnetBroadcastAuthorized()).toBe(false);
+    const intent: SppSignIntent = {
+      operation: 'register_public_keys',
+      amountStroops: null,
+      recipient: null,
+      networkPassphrase: Networks.TESTNET,
+      poolContractId: null,
+      registryContractId: 'CA5MA3LDXS4TQKBQ7SY57IHO3VMYV7G3ZJH45CWCX4QVP25IDFMZWZ3E',
+      tokenContractId: null,
+      registerNoteKeyHex: '11'.repeat(32),
+      registerEncryptionKeyHex: '22'.repeat(32),
+      registerNoteKeyProofHex: 'aa',
+      registerEncryptionKeySignatureHex: 'cd'.repeat(64),
+      registerOwnerSignatureHex: 'ab'.repeat(64),
+      maxFeeStroops: '5000000',
+      minResourceFeeStroops: null,
+      account: 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6',
+      exactMessage: sppKeyDerivationMessage(NETHERMIND_PUBLIC_KDF_DOMAIN),
+    };
+    mintSppSignApproval(intent);
+    expect(sppSignApprovalCount()).toBe(1);
+    const signMessage = vi.fn();
+    const result = await handleSppHostSignRequest(
+      {
+        ...signRequest(Networks.TESTNET),
+        payload: { ...signRequest(Networks.TESTNET).payload, kind: 'message' },
+      },
+      {
+        signer: { chain: 'stellar', signTransaction, signMessage } as never,
+        keyManager: { getAccounts: async () => [] } as never,
+      },
+      HOST,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('UNAUTHORIZED');
+      expect(result.message).toMatch(/SPP_BROADCAST_AWAITING_APPROVAL/);
+    }
+    expect(signTransaction).not.toHaveBeenCalled();
+    expect(signMessage).not.toHaveBeenCalled();
+    expect(sppSignApprovalCount()).toBe(0);
+    resetSppBroadcastGateForTests();
+    resetSppSignApprovalsForTests();
   });
 
   it('rejects an omitted passphrase', async () => {

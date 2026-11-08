@@ -38,6 +38,7 @@ import {
   scValToNative,
   xdr,
 } from '@stellar/stellar-sdk';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { hashSep53Message } from './sep53.js';
 import { NETHERMIND_PUBLIC_KDF_DOMAIN } from './nethermind/nethermindPublicTestnet.js';
 import {
@@ -209,6 +210,32 @@ export function sppRegistrationMessage(
   ].join('\n');
 }
 
+/** Tag prepended to D before the encryption-key signature. Not a fee and not a message to sign raw. */
+export const SPP_REGISTRY_ENCRYPTION_KEY_TAG = 'privacy-pool/registry/encryption-key/v1';
+
+/**
+ * D = SHA256("Stellar Signed Message:\\n" || registration message).
+ * The owner signature covers D. This does not sign.
+ */
+export function sppRegistrationDigest(message: string): Uint8Array {
+  return hashSep53Message(message);
+}
+
+/**
+ * Encryption key signs SHA256(tag || D). `digest` must be the 32-byte D.
+ * This does not sign.
+ */
+export function sppEncryptionKeyChallenge(digest: Uint8Array): Uint8Array {
+  if (digest.byteLength !== 32) {
+    throw new SppSignerError('Registration digest D must be 32 bytes', 'INVALID_REQUEST');
+  }
+  const tag = new TextEncoder().encode(SPP_REGISTRY_ENCRYPTION_KEY_TAG);
+  const body = new Uint8Array(tag.length + digest.byteLength);
+  body.set(tag, 0);
+  body.set(digest, tag.length);
+  return sha256(body);
+}
+
 function assertKdfDomain(kdfDomain: string): string {
   const domain = kdfDomain.trim();
   if (domain.length === 0 || /[()\r\n]/.test(domain)) {
@@ -266,6 +293,25 @@ export function assertSppAssembledFees(input: SppAssembledFeeInput): void {
   }
 }
 
+/**
+ * Deposit, transfer, and withdraw approvals do not bind a private note or
+ * encryption commitment, and they do not split gross, pool fee, and
+ * public_amount (`ext_amount − fee`) per method. Upstream deposit sends
+ * amount+fee to the pool contract, transfer uses ext_amount 0 to the pool,
+ * and withdraw uses a negative ext_amount. The pool admin chooses the claim
+ * recipient. A positive amount or a C address is not that binding.
+ * BLOCKED: a positive amount or a C address does not prove G→output keys,
+ * commitments, pool fee, step count, quote XDR, or the full auth tree.
+ * Fail closed. Do not widen the ext_amount or recipient checks to compensate.
+ */
+export function assertSppPoolPaymentEconomicsBound(operation: SppSignOperation): void {
+  if (operation === 'register_public_keys') return;
+  throw new SppSignerError(
+    'SPP_POOL_ECONOMICS_NOT_VERIFIED: deposit, transfer, and withdraw approvals do not bind a private recipient commitment or per-method gross, pool fee, and public_amount (ext_amount - fee). Fail-closed. A sign or a C address is not that binding. The pool admin chooses the claim recipient; no Astrym fee is asserted.',
+    'INVALID_REQUEST',
+  );
+}
+
 export function mintSppSignApproval(intent: SppSignIntent, nowMs: number = Date.now()): string {
   const frozen = freezeIntent(intent);
   const id = crypto.randomUUID();
@@ -283,6 +329,24 @@ export function mintSppSignApproval(intent: SppSignIntent, nowMs: number = Date.
 /** Test-only. Production has no message that clears used approvals. */
 export function resetSppSignApprovalsForTests(): void {
   pending.length = 0;
+}
+
+/** Drop pending approvals so a disabled broadcast cannot be signed later. */
+export function revokeSppSignApprovals(account?: string): number {
+  if (account === undefined) {
+    const removed = pending.length;
+    pending.length = 0;
+    return removed;
+  }
+  const kept = pending.filter((row) => row.intent.account !== account);
+  const removed = pending.length - kept.length;
+  pending.length = 0;
+  pending.push(...kept);
+  return removed;
+}
+
+export function sppSignApprovalCount(): number {
+  return pending.length;
 }
 
 /**
@@ -905,6 +969,11 @@ function readTransactArgs(
   if (typeof record.ext_amount !== 'bigint') {
     throw new SppSignerError('transact ext_amount is not an integer');
   }
+  // Fail-closed stand-in. Upstream deposit is amount+fee to the pool (C),
+  // transfer is ext_amount 0 to the pool, and withdraw is negative. Those
+  // shapes stay rejected until assertSppPoolPaymentEconomicsBound can see a
+  // private commitment and the net/gross/fee split. Do not accept a sign or
+  // a C address in their place.
   if (record.ext_amount <= 0n) {
     throw new SppSignerError('transact ext_amount must be positive');
   }
@@ -1392,12 +1461,6 @@ function freezeIntent(intent: SppSignIntent): SppSignIntent {
           'INVALID_REQUEST',
         );
       }
-      if (intent.exactMessage !== sppKeyDerivationMessage(NETHERMIND_PUBLIC_KDF_DOMAIN)) {
-        throw new SppSignerError(
-          'Register intent derivation message does not match the pinned KDF domain',
-          'INVALID_REQUEST',
-        );
-      }
       assertKeyHex(intent.registerNoteKeyHex, 'note key');
       assertKeyHex(intent.registerEncryptionKeyHex, 'encryption key');
       if (intent.registerNoteKeyProofHex === null) {
@@ -1406,6 +1469,25 @@ function freezeIntent(intent: SppSignIntent): SppSignIntent {
       assertEvenHex(intent.registerNoteKeyProofHex, 'note_key_proof');
       assertSignatureHex(intent.registerEncryptionKeySignatureHex, 'encryption_key_signature');
       assertSignatureHex(intent.registerOwnerSignatureHex, 'owner_signature');
+      const registryId = intent.registryContractId;
+      const noteKeyHex = intent.registerNoteKeyHex;
+      const encryptionKeyHex = intent.registerEncryptionKeyHex;
+      if (!registryId || !noteKeyHex || !encryptionKeyHex) {
+        throw new SppSignerError('Register intent is missing registry or keys', 'INVALID_REQUEST');
+      }
+      const boundRegistration = sppRegistrationMessage(
+        registryId,
+        intent.account,
+        noteKeyHex,
+        encryptionKeyHex,
+      );
+      const derivation = sppKeyDerivationMessage(NETHERMIND_PUBLIC_KDF_DOMAIN);
+      if (intent.exactMessage !== derivation && intent.exactMessage !== boundRegistration) {
+        throw new SppSignerError(
+          'Register intent message is not the pinned derivation challenge or the registration challenge bound to this account and keys',
+          'INVALID_REQUEST',
+        );
+      }
       break;
     default: {
       const unexpected: never = intent.operation;

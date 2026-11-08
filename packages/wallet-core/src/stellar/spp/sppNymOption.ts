@@ -34,7 +34,11 @@ export type SppPrivatePaymentRequest = {
   recipient?: string;
 };
 
-export type SppPrivatePoolResult = { txHash: string | null };
+export type SppPrivatePoolResult = {
+  txHash: string | null;
+  /** Every hash from one SDK execute. Omitted by mocks that only set txHash. */
+  txHashes?: readonly string[];
+};
 
 export type SppPrivatePool = {
   deposit(amount: bigint): Promise<SppPrivatePoolResult>;
@@ -57,12 +61,30 @@ export type SppPrivatePaymentCode =
 
 export class SppPrivatePaymentError extends Error {
   readonly code: SppPrivatePaymentCode;
+  readonly txHashes: readonly string[];
 
-  constructor(code: SppPrivatePaymentCode, message: string, options?: { cause?: unknown }) {
+  constructor(
+    code: SppPrivatePaymentCode,
+    message: string,
+    options?: { cause?: unknown; txHashes?: readonly string[] },
+  ) {
     super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = 'SppPrivatePaymentError';
     this.code = code;
+    this.txHashes = options?.txHashes ?? [];
   }
+}
+
+function reportedPoolHashes(result: SppPrivatePoolResult): readonly string[] {
+  if (result.txHashes) return result.txHashes;
+  return result.txHash ? [result.txHash] : [];
+}
+
+function hashesCarriedBy(cause: unknown): readonly string[] {
+  if (!cause || typeof cause !== 'object' || !('txHashes' in cause)) return [];
+  const value = (cause as { txHashes?: unknown }).txHashes;
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
 }
 
 export type SppRpcFetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -244,6 +266,7 @@ export async function executeSppPrivatePayment(input: {
 }): Promise<{
   operation: SppPrivateOperation;
   txHash: string | null;
+  txHashes: readonly string[];
   rpcRoutedViaNym: true;
   confirmation: 'confirmed' | 'unknown';
 }> {
@@ -344,23 +367,31 @@ export async function executeSppPrivatePayment(input: {
     await probeSorobanRpc(input.rpcUrl, input.nymFetch);
     try {
       const result = await runPool(pool, request);
-      if (!result.txHash) {
+      const hashes = reportedPoolHashes(result);
+      if (hashes.length !== 1) {
         throw new SppPrivatePaymentError(
           'SUBMISSION_UNKNOWN',
-          'El SDK no devolvió hash. No se inventa confirmación; verifica en el explorador antes de reintentar.',
+          `El SDK devolvió ${hashes.length} hash(es). No se confirma solo el primero y no hay reintento. hashes=${hashes.join(',')}`,
+          { txHashes: hashes },
         );
       }
       completed = true;
       return {
         operation: request.operation,
-        txHash: result.txHash,
+        txHash: hashes[0] ?? null,
+        txHashes: hashes,
         rpcRoutedViaNym: true as const,
         confirmation: 'confirmed' as const,
       };
     } catch (cause) {
       if (cause instanceof SppPrivatePaymentError) throw cause;
       const message = cause instanceof Error ? cause.message : 'El pago privado SPP falló';
-      throw new SppPrivatePaymentError('EXECUTION_FAILED', message, { cause });
+      const recovered = hashesCarriedBy(cause);
+      throw new SppPrivatePaymentError(
+        'EXECUTION_FAILED',
+        recovered.length > 0 ? `${message} completedHashes=${recovered.join(',')}` : message,
+        { cause, txHashes: recovered },
+      );
     }
   };
 

@@ -20,14 +20,19 @@ import { getNethermindPublicTestnetContractConfig } from '../../../src/stellar/s
 import {
   assertSppAssembledFees,
   assertStellarTestnetPassphrase,
+  assertSppPoolPaymentEconomicsBound,
   authorizeSppSignature,
   mintSppSignApproval,
   resetSppSignApprovalsForTests,
   signDigestWithSppGate,
+  sppEncryptionKeyChallenge,
   sppKeyDerivationMessage,
+  sppRegistrationDigest,
+  sppRegistrationMessage,
   sppStaleKeyDerivationMessageV2,
   type SppSignIntent,
 } from '../../../src/stellar/spp/sppSignGate.js';
+import { hashSep53Message } from '../../../src/stellar/spp/sep53.js';
 
 const ACCOUNT = 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6';
 const OTHER = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
@@ -1150,6 +1155,74 @@ describe('SPP sign gate attack cases', () => {
     mintSppSignApproval(registered);
     expect(() => sign('transaction', registerTxWithTwoAuth(NOTE_KEY, ENC_KEY))).toThrow(/more than one Soroban authorization/);
     expect(() => sign('transaction', registerXdr(NOTE_KEY, ENC_KEY))).not.toThrow();
+  });
+
+  it('keeps upstream pool shapes rejected and blocks payment approval', () => {
+    expect(() => authorizeSppSignature({
+      kind: 'transaction',
+      input: transactXdr({ amount: 0n, recipient: POOL }),
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/ext_amount must be positive/);
+    expect(() => authorizeSppSignature({
+      kind: 'transaction',
+      input: transactXdr({ amount: -4n, recipient: ACCOUNT }),
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/ext_amount must be positive/);
+    expect(() => authorizeSppSignature({
+      kind: 'transaction',
+      input: transactXdr({ amount: 13n, recipient: POOL }),
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/recipient is not a G/);
+    expect(() => assertSppPoolPaymentEconomicsBound('deposit')).toThrow(/BLOCKED|SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => assertSppPoolPaymentEconomicsBound('transfer')).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => assertSppPoolPaymentEconomicsBound('withdraw')).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => assertSppPoolPaymentEconomicsBound('register_public_keys')).not.toThrow();
+  });
+
+  it('accepts only the bound registration challenge and keeps the proof as XDR', () => {
+    const message = sppRegistrationMessage(REGISTRY, ACCOUNT, NOTE_KEY, ENC_KEY);
+    const digest = sppRegistrationDigest(message);
+    expect(Buffer.from(digest)).toEqual(Buffer.from(hashSep53Message(message)));
+    expect(Buffer.from(sppEncryptionKeyChallenge(digest))).toHaveLength(32);
+    const swapped = sppRegistrationMessage(REGISTRY, OTHER, NOTE_KEY, ENC_KEY);
+    expect(swapped).not.toBe(message);
+    const registered = intent({
+      operation: 'register_public_keys',
+      amountStroops: null,
+      recipient: null,
+      poolContractId: null,
+      registryContractId: REGISTRY,
+      maxFeeStroops: '5000000',
+      exactMessage: message,
+      registerNoteKeyHex: NOTE_KEY,
+      registerEncryptionKeyHex: ENC_KEY,
+      registerNoteKeyProofHex: noteProofHex(),
+      registerEncryptionKeySignatureHex: ENC_SIG_HEX,
+      registerOwnerSignatureHex: OWNER_SIG_HEX,
+    });
+    expect(() => mintSppSignApproval(registered)).not.toThrow();
+    resetSppSignApprovalsForTests();
+    expect(() => mintSppSignApproval({
+      ...registered,
+      exactMessage: 'Privacy Pool Key Registration [v1]\nnot bound',
+    })).toThrow(/not the pinned derivation challenge or the registration challenge/);
+    const raw = Buffer.concat([
+      Buffer.alloc(64, 1),
+      Buffer.alloc(128, 2),
+      Buffer.alloc(64, 3),
+    ]).toString('hex');
+    expect(raw).not.toBe(noteProofHex());
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval({ ...registered, registerNoteKeyProofHex: raw });
+    expect(() => authorizeSppSignature({
+      kind: 'transaction',
+      input: registerXdr(NOTE_KEY, ENC_KEY),
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/no matching prior approval/);
   });
 
   it('does not sign a register envelope against a transfer approval', () => {
