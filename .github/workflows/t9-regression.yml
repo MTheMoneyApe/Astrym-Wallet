@@ -1,0 +1,51 @@
+name: T9 regression
+
+on:
+  pull_request:
+    branches: [astrym/testnet-mvp]
+  push:
+    branches: [astrym/testnet-mvp]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t9-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+# full-suite has no dependency on critical-gates, so a red gate job does not skip it.
+jobs:
+  critical-gates:
+    name: t9-critical-gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+      - name: Install from the lockfile
+        run: pnpm install --frozen-lockfile
+      - name: Asset prep and focal invariants
+        run: bash .github/ci/t9-check.sh focal
+
+  full-suite:
+    name: t9-full-suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+      - name: Install from the lockfile
+        run: pnpm install --frozen-lockfile
+      - name: Asset prep, typecheck, and full vitest
+        run: bash .github/ci/t9-check.sh full
