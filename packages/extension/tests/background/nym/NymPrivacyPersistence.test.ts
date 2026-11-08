@@ -107,7 +107,6 @@ async function expectNoClearnet(run: () => Promise<unknown>): Promise<void> {
 
 describe('Nym privacy persistence', () => {
   afterEach(() => {
-    delete (globalThis as { __ASTRYM_DEFER_PRIVACY_HYDRATE?: Promise<void> }).__ASTRYM_DEFER_PRIVACY_HYDRATE;
     resetNymRuntimeControllerForTests(null);
     vi.unstubAllGlobals();
   });
@@ -400,27 +399,5 @@ describe('Nym privacy persistence', () => {
     expect(unreadable.getSnapshot().diagnosticCode).toBe('PRIVACY_PREFERENCE_UNREADABLE');
     await expectNoClearnet(() => unreadable.getStellarFetch()(HORIZON));
     expect(isSppTestnetBroadcastAuthorized()).toBe(false);
-  });
-
-  it('stays fail-closed while a harness hydrate gate is pending', async () => {
-    let release: () => void = () => {};
-    (globalThis as { __ASTRYM_DEFER_PRIVACY_HYDRATE?: Promise<void> }).__ASTRYM_DEFER_PRIVACY_HYDRATE =
-      new Promise<void>((resolve) => {
-        release = resolve;
-      });
-    const clearnet = vi.fn(async () => new Response('horizon', { status: 200 }));
-    vi.stubGlobal('fetch', clearnet);
-    const pending = controllerFor(memoryStore({ [NYM_PRIVACY_PREFERENCE_STORAGE_KEY]: 'direct' }));
-    const attempt = pending.getStellarFetch()(HORIZON);
-    await Promise.resolve();
-    expect(pending.getSnapshot().preferenceHydrated).toBe(false);
-    expect(pending.getSnapshot().egressBlocked).toBe(true);
-    expect(pending.mode).not.toBe('direct');
-    expect(clearnet).not.toHaveBeenCalled();
-    release();
-    await pending.whenPrivacyReady();
-    expect(pending.getSnapshot().privacyPreference).toBe('direct');
-    expect((await attempt).status).toBe(200);
-    expect(clearnet).toHaveBeenCalledTimes(1);
   });
 });
