@@ -15,9 +15,9 @@
   --space-4: 20px;
   --radius-card: 12px;
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-display: Orbitron, "Instrument Sans", var(--font-ui);
-  --font-body: "Instrument Sans", var(--font-ui);
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-display: var(--font-ui);
+  --font-body: var(--font-ui);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 * {

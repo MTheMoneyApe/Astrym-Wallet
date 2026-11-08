@@ -807,6 +807,11 @@ export class NymRuntimeController {
   }
 
   private async hydratePrivacyPreference(): Promise<void> {
+    // Harness-only. Production never sets this. It pauses the first read so a
+    // debugger can observe the fail-closed window. It does not choose Direct.
+    const gate = (globalThis as { __ASTRYM_DEFER_PRIVACY_HYDRATE?: Promise<void> })
+      .__ASTRYM_DEFER_PRIVACY_HYDRATE;
+    if (gate && typeof gate.then === 'function') await gate;
     const generation = this._policyGeneration;
     try {
       const record = await readNymPrivacyPreference(this._privacyStore);

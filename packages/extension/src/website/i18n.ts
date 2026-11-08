@@ -53,7 +53,7 @@ function applyLanguage(language: Language): void {
   const dictionary = translations[language];
   document.documentElement.lang = language;
   document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((element) => {
-    const key = element.dataset.i18n;
+    const key = element.dataset['i18n'];
     const value = key ? dictionary[key] : undefined;
     if (value !== undefined) element.textContent = value;
   });
@@ -68,7 +68,7 @@ function applyLanguage(language: Language): void {
     : 'Astrym — Autocustodia Stellar · Nym · SPP';
 
   buttons.forEach((button) => {
-    const active = button.dataset.language === language;
+    const active = button.dataset['language'] === language;
     button.classList.toggle('is-active', active);
     button.setAttribute('aria-pressed', String(active));
   });
@@ -87,7 +87,7 @@ try {
 
 buttons.forEach((button) => {
   button.addEventListener('click', () => {
-    const language = button.dataset.language;
+    const language = button.dataset['language'];
     if (language === 'es' || language === 'en') applyLanguage(language);
   });
 });
