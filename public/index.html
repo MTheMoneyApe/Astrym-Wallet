@@ -4,54 +4,101 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#191a1c">
-  <meta name="description" content="Astrym — proyecto experimental de wallet Stellar centrado en autocustodia y privacidad de red.">
+  <meta name="description" content="Astrym — wallet experimental de autocustodia Stellar con opciones de prueba para web, navegador y Android.">
   <meta name="color-scheme" content="dark">
   <title>Astrym — Stellar · Privacy</title>
   <link rel="icon" type="image/png" href="/brand/astrym-symbol.png">
   <link rel="stylesheet" href="/styles.css">
+  <script src="/site.js" defer></script>
 </head>
 <body>
   <div class="orbit" aria-hidden="true"></div>
   <header class="top">
     <a class="brand" href="/" aria-label="Astrym"><img class="brand-logo" src="/brand/astrym-logo.png" alt="Astrym"></a>
     <nav class="top-nav" aria-label="Navegación principal">
-      <a class="ghost" href="#status">Estado del proyecto</a>
+      <a class="ghost" href="#try" data-i18n="nav_try">Probar Astrym</a>
+      <a class="ghost" href="#status" data-i18n="nav_status">Estado</a>
       <a class="ghost" href="https://github.com/MTheMoneyApe/Astrym-Wallet" target="_blank" rel="noreferrer">GitHub ↗</a>
+      <div class="language-switch" role="group" aria-label="Language">
+        <button class="language-button is-active" type="button" data-language="es" aria-pressed="true">ES</button>
+        <button class="language-button" type="button" data-language="en" aria-pressed="false">EN</button>
+      </div>
     </nav>
   </header>
   <main>
     <section class="hero">
       <img class="hero-symbol" src="/brand/astrym-symbol.png" alt="" aria-hidden="true">
       <p class="badge">STELLAR · PRIVACY · SELF-CUSTODY</p>
-      <h1>Privacidad con ingeniería cuidadosa.</h1>
-      <p class="lede">Astrym es un proyecto experimental de wallet de autocustodia, construido con Stellar como base y con investigación activa en transporte de red orientado a la privacidad.</p>
-      <div class="status-line"><span class="status-dot"></span> EN DESARROLLO ACTIVO</div>
+      <h1 data-i18n="hero_title">Privacidad con ingeniería cuidadosa.</h1>
+      <p class="lede" data-i18n="hero_lede">Astrym es una wallet experimental de autocustodia construida sobre Stellar. Puedes explorar las distintas superficies de prueba y consultar el estado real del desarrollo.</p>
+      <div class="status-line"><span class="status-dot"></span><span data-i18n="hero_status">EN DESARROLLO ACTIVO</span></div>
       <div class="cta">
-        <a class="btn primary" href="https://github.com/MTheMoneyApe/Astrym-Wallet" target="_blank" rel="noreferrer">Explorar el código ↗</a>
-        <a class="btn gold" href="#status">Ver estado del proyecto</a>
+        <a class="btn primary" href="#try" data-i18n="hero_try">Probar las versiones ↘</a>
+        <a class="btn gold" href="https://github.com/MTheMoneyApe/Astrym-Wallet" target="_blank" rel="noreferrer" data-i18n="hero_code">Explorar el código ↗</a>
       </div>
     </section>
 
-    <section id="status">
-      <p class="kicker">01 · ESTADO HONESTO</p>
-      <h2>Investigación, implementación y validación</h2>
-      <div class="status-board">
-        <article class="status-card">
-          <h3>Stellar first</h3>
-          <p>La arquitectura actual prioriza Stellar y el desarrollo controlado sobre Testnet.</p>
+    <section id="try">
+      <p class="kicker" data-i18n="try_kicker">01 · PRUEBA ASTRYM</p>
+      <h2 data-i18n="try_title">Elige cómo quieres probarlo</h2>
+      <p class="section-lede" data-i18n="try_lede">Son tres superficies distintas. La webapp y la PWA usan el preview experimental; la extensión se compila localmente desde el repositorio.</p>
+      <div class="try-grid">
+        <article class="try-card">
+          <div class="try-number">01 / WEB</div>
+          <h3 data-i18n="web_title">Astrym Webapp</h3>
+          <p data-i18n="web_body">Abre la wallet en una pestaña del navegador, en formato de aplicación completa. No necesitas instalar una extensión.</p>
+          <a class="btn primary" href="https://astrym-wallet-ng3398glw-astrym.vercel.app/webapp.html" target="_blank" rel="noreferrer" data-i18n="web_cta">Probar Webapp ↗</a>
+          <span class="try-note" data-i18n="web_note">Preview experimental · Stellar Testnet</span>
         </article>
-        <article class="status-card status-card--wip">
-          <h3>Privacidad de red</h3>
-          <p>La integración de transporte privado se está validando por separado. No se presenta como anonimato garantizado ni como protección universal del tráfico.</p>
+        <article class="try-card">
+          <div class="try-number">02 / BROWSER</div>
+          <h3 data-i18n="extension_title">Extensión de navegador</h3>
+          <p data-i18n="extension_body">Prepara la extensión MV3 para Chrome o Chromium. Descarga el código, instala dependencias y genera el paquete localmente.</p>
+          <ol class="mini-steps">
+            <li data-i18n="extension_step1">Descarga o clona el repositorio.</li>
+            <li data-i18n="extension_step2">Ejecuta <code>pnpm install</code>.</li>
+            <li data-i18n="extension_step3">Ejecuta <code>pnpm --filter @solanym/extension build</code>.</li>
+            <li data-i18n="extension_step4">Carga <code>packages/extension/dist</code> en <code>chrome://extensions</code> con el modo desarrollador.</li>
+          </ol>
+          <a class="btn gold" href="https://github.com/MTheMoneyApe/Astrym-Wallet#setup" target="_blank" rel="noreferrer" data-i18n="extension_cta">Código e instrucciones ↗</a>
+          <span class="try-note" data-i18n="extension_note">No hay todavía un instalador público de Chrome Web Store.</span>
         </article>
-        <article class="status-card status-card--next">
-          <h3>Pagos privados</h3>
-          <p>El runtime, los artefactos criptográficos y el flujo extremo a extremo siguen sujetos a validación reproducible antes de anunciar disponibilidad.</p>
+        <article class="try-card">
+          <div class="try-number">03 / ANDROID</div>
+          <h3 data-i18n="android_title">Android · PWA</h3>
+          <p data-i18n="android_body">Abre la Webapp en Chrome para Android y añádela a la pantalla de inicio. Se instala como PWA; no es un APK nativo.</p>
+          <ol class="mini-steps">
+            <li data-i18n="android_step1">Abre la Webapp desde tu móvil.</li>
+            <li data-i18n="android_step2">Abre el menú ⋮ de Chrome.</li>
+            <li data-i18n="android_step3">Selecciona «Instalar aplicación» o «Añadir a pantalla de inicio».</li>
+          </ol>
+          <a class="btn primary" href="https://astrym-wallet-ng3398glw-astrym.vercel.app/webapp.html" target="_blank" rel="noreferrer" data-i18n="android_cta">Abrir PWA en Android ↗</a>
+          <span class="try-note" data-i18n="android_note">Preview experimental · requiere navegador compatible.</span>
         </article>
       </div>
-      <p class="status-disclaimer">Astrym sigue siendo software experimental. Esta página es informativa: no ofrece acceso a una wallet operativa, no solicita claves y no habilita transacciones. No debe utilizarse con fondos reales.</p>
+      <p class="status-disclaimer" data-i18n="try_warning">Aviso: utiliza únicamente una wallet desechable de Stellar Testnet. No introduzcas frases semilla con fondos reales. Estas versiones son experimentales y no están certificadas para producción.</p>
+    </section>
+
+    <section id="status">
+      <p class="kicker" data-i18n="status_kicker">02 · ESTADO HONESTO</p>
+      <h2 data-i18n="status_title">Investigación, implementación y validación</h2>
+      <div class="status-board">
+        <article class="status-card">
+          <h3 data-i18n="stellar_title">Stellar first</h3>
+          <p data-i18n="stellar_body">La arquitectura actual prioriza Stellar y el desarrollo controlado sobre Testnet.</p>
+        </article>
+        <article class="status-card status-card--wip">
+          <h3 data-i18n="privacy_title">Privacidad de red</h3>
+          <p data-i18n="privacy_body">La integración de transporte privado se valida por separado. No se presenta como anonimato garantizado ni como protección universal del tráfico.</p>
+        </article>
+        <article class="status-card status-card--next">
+          <h3 data-i18n="payments_title">Pagos privados</h3>
+          <p data-i18n="payments_body">El runtime, los artefactos criptográficos y el flujo extremo a extremo siguen sujetos a validación reproducible antes de anunciar disponibilidad.</p>
+        </article>
+      </div>
+      <p class="status-disclaimer" data-i18n="status_disclaimer">Astrym sigue siendo software experimental. Esta página es informativa: no solicita claves ni habilita transacciones. No debe utilizarse con fondos reales.</p>
     </section>
   </main>
-  <footer><span>© ASTRYM</span><span>Experimental software · Not for production use</span></footer>
+  <footer><span>© ASTRYM</span><span data-i18n="footer_note">Experimental software · Solo Stellar Testnet</span></footer>
 </body>
 </html>
