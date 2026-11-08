@@ -1,29 +1,56 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#11110f">
-  <meta name="description" content="Astrym is an independent Stellar wallet project in active development.">
-  <title>Astrym — Stellar wallet, in development</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#191a1c">
+  <meta name="description" content="Astrym — proyecto experimental de wallet Stellar centrado en autocustodia y privacidad de red.">
+  <meta name="color-scheme" content="dark">
+  <title>Astrym — Stellar · Privacy</title>
+  <link rel="icon" href="https://raw.githubusercontent.com/MTheMoneyApe/Astrym-Wallet/astrym/t2-nym-persistent/packages/extension/public/icons/favicon-32.png">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <main class="shell">
-    <nav aria-label="Main navigation"><a class="brand" href="/" aria-label="Astrym home"><span class="mark">A</span><span>ASTRYM</span></a><a class="repo" href="https://github.com/MTheMoneyApe/Astrym-Wallet" target="_blank" rel="noreferrer">GitHub ↗</a></nav>
+  <div class="orbit" aria-hidden="true"></div>
+  <header class="top">
+    <a class="brand" href="/" aria-label="Astrym"><img src="https://raw.githubusercontent.com/MTheMoneyApe/Astrym-Wallet/astrym/t2-nym-persistent/packages/extension/public/brand/astrym-logo.png" alt="Astrym" class="mark"></a>
+    <nav class="top-nav" aria-label="Navegación principal">
+      <a class="ghost" href="#status">Estado del proyecto</a>
+      <a class="ghost" href="https://github.com/MTheMoneyApe/Astrym-Wallet" target="_blank" rel="noreferrer">GitHub ↗</a>
+    </nav>
+  </header>
+  <main>
     <section class="hero">
-      <p class="eyebrow">INDEPENDENT WALLET PROJECT · STELLAR</p>
-      <h1>Privacy deserves<br><em>careful engineering.</em></h1>
-      <p class="lead">Astrym is an experimental, self-custody wallet project exploring Stellar and privacy-preserving network transport.</p>
-      <div class="status"><span class="dot"></span><span>In active development</span></div>
-      <a class="cta" href="https://github.com/MTheMoneyApe/Astrym-Wallet" target="_blank" rel="noreferrer">Explore the source <span>↗</span></a>
+      <p class="badge">STELLAR · PRIVACY · SELF-CUSTODY</p>
+      <h1>Privacidad con ingeniería cuidadosa.</h1>
+      <p class="lede">Astrym es un proyecto experimental de wallet de autocustodia, construido con Stellar como base y con investigación activa en transporte de red orientado a la privacidad.</p>
+      <div class="status-line"><span class="status-dot"></span> EN DESARROLLO ACTIVO</div>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/MTheMoneyApe/Astrym-Wallet" target="_blank" rel="noreferrer">Explorar el código ↗</a>
+        <a class="btn gold" href="#status">Ver estado del proyecto</a>
+      </div>
     </section>
-    <section class="details">
-      <article><span class="number">01</span><h2>Stellar first</h2><p>Current engineering work is focused on a Stellar-first wallet architecture and Testnet development.</p></article>
-      <article><span class="number">02</span><h2>Privacy by design</h2><p>Network privacy integrations are being developed and validated separately from wallet functionality.</p></article>
-      <article><span class="number">03</span><h2>Evidence over claims</h2><p>Features will be described as available only after reproducible builds, security review, and end-to-end validation.</p></article>
+
+    <section id="status">
+      <p class="kicker">01 · ESTADO HONESTO</p>
+      <h2>Investigación, implementación y validación</h2>
+      <div class="status-board">
+        <article class="status-card">
+          <h3>Stellar first</h3>
+          <p>La arquitectura actual prioriza Stellar y el desarrollo controlado sobre Testnet.</p>
+        </article>
+        <article class="status-card status-card--wip">
+          <h3>Privacidad de red</h3>
+          <p>La integración de transporte privado se está validando por separado. No se presenta como anonimato garantizado ni como protección universal del tráfico.</p>
+        </article>
+        <article class="status-card status-card--next">
+          <h3>Pagos privados</h3>
+          <p>El runtime, los artefactos criptográficos y el flujo extremo a extremo siguen sujetos a validación reproducible antes de anunciar disponibilidad.</p>
+        </article>
+      </div>
+      <p class="status-disclaimer">Astrym sigue siendo software experimental. Esta página es informativa: no ofrece acceso a una wallet operativa, no solicita claves y no habilita transacciones. No debe utilizarse con fondos reales.</p>
     </section>
-    <footer><span>© Astrym</span><span>Experimental software · Not available for production use</span></footer>
   </main>
+  <footer><span>© ASTRYM</span><span>Experimental software · Not for production use</span></footer>
 </body>
 </html>
