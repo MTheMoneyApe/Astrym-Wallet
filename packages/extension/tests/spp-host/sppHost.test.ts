@@ -98,6 +98,22 @@ describe('resolveSppAssetUrls', () => {
 });
 
 describe('sdkLoad inspection (mocked module)', () => {
+  it('accepts wasm-bindgen classes, which are functions with static methods', () => {
+    class Client {
+      static new(): void { /* host entry */ }
+    }
+    class Storage {
+      static open(): void { /* host entry */ }
+    }
+    const inspection = inspectSppSdkFacade({
+      default: async () => undefined,
+      Client,
+      Storage,
+    });
+    expect(inspection.hasClientNew).toBe(true);
+    expect(inspection.hasStorageOpen).toBe(true);
+  });
+
   it('detects default init without invoking it', () => {
     const defaultInit = vi.fn(async () => undefined);
     const inspection = inspectSppSdkFacade({

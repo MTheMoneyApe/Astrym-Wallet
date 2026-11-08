@@ -1,8 +1,10 @@
 /**
- * Fase 1 — Copy stellar-private-payments@0.2.1 runtime assets into
+ * Copy the SPP runtime built by scripts/prepare-spp-runtime.sh into
  * packages/extension/public/spp/ for Vite → dist/spp/ packaging.
  *
- * Source: packages/wallet-core/node_modules/stellar-private-payments only.
+ * The npm tarball stellar-private-payments@0.2.1 is not this runtime.
+ * If SPP_SOURCE_PROVENANCE.json is missing, this script runs the prepare
+ * script once, then copies. It does not fall back to node_modules.
  * Never reads mv3-spike/vendor or prepare-vendor.mjs.
  *
  * Profile: full — Client.new requires circuitsBaseUrl + circuitLock; prover
@@ -25,6 +27,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -54,31 +57,70 @@ function toPosix(p) {
  * Resolve SDK package root robustly (Windows + CI / pnpm layouts).
  * @returns {string}
  */
-function resolveSdkRoot() {
-  const repoRoot = resolve(EXTENSION_ROOT, '../..');
-  const candidates = [
+function repoRoot() {
+  return resolve(EXTENSION_ROOT, '../..');
+}
+
+function candidateRoots() {
+  const buildRoot = process.env.SPP_BUILD_ROOT;
+  return [
     process.env.SPP_SDK_ROOT,
-    join(repoRoot, '.cache/spp-upstream/stellar-private-payments/sdk/web'),
+    buildRoot ? join(buildRoot, 'stellar-private-payments/sdk/web') : '',
+    join(repoRoot(), '.cache/spp-upstream/stellar-private-payments/sdk/web'),
   ].filter((value) => typeof value === 'string' && value.length > 0);
+}
 
-  for (const candidate of candidates) {
-    const abs = resolve(candidate);
-    const pkgPath = join(abs, 'package.json');
-    const provenancePath = join(abs, 'SPP_SOURCE_PROVENANCE.json');
-    if (!existsSync(pkgPath) || !existsSync(provenancePath)) continue;
-    const provenance = JSON.parse(readFileSync(provenancePath, 'utf8'));
-    if (provenance.sourceCommit !== SOURCE_COMMIT) {
-      fail(
-        `SPP source commit ${JSON.stringify(provenance.sourceCommit)} is not ${SOURCE_COMMIT}. ` +
-          'npm stellar-private-payments@0.2.1 is not this runtime.',
-      );
-    }
-    return abs;
+function acceptProvenance(candidate) {
+  const abs = resolve(candidate);
+  const pkgPath = join(abs, 'package.json');
+  const provenancePath = join(abs, 'SPP_SOURCE_PROVENANCE.json');
+  if (!existsSync(pkgPath) || !existsSync(provenancePath)) return null;
+  const provenance = JSON.parse(readFileSync(provenancePath, 'utf8'));
+  if (provenance.sourceCommit !== SOURCE_COMMIT) {
+    fail(
+      `SPP source commit ${JSON.stringify(provenance.sourceCommit)} is not ${SOURCE_COMMIT}. ` +
+        'npm stellar-private-payments@0.2.1 is not this runtime.',
+    );
   }
+  return abs;
+}
 
+function findBuiltSdk() {
+  for (const candidate of candidateRoots()) {
+    const accepted = acceptProvenance(candidate);
+    if (accepted) return accepted;
+  }
+  return null;
+}
+
+function prepareRuntime() {
+  const script = join(repoRoot(), 'scripts/prepare-spp-runtime.sh');
+  if (!existsSync(script)) {
+    fail(`Missing ${script}. npm stellar-private-payments@0.2.1 is not accepted.`);
+  }
+  console.log('[copy-spp-assets] no provenance yet; running scripts/prepare-spp-runtime.sh');
+  const result = spawnSync('bash', [script], {
+    cwd: repoRoot(),
+    stdio: 'inherit',
+    env: process.env,
+  });
+  if (result.status !== 0) {
+    fail(
+      `prepare-spp-runtime.sh exited ${String(result.status)}. ` +
+        'npm stellar-private-payments@0.2.1 is not accepted.',
+    );
+  }
+}
+
+function resolveSdkRoot() {
+  const existing = findBuiltSdk();
+  if (existing) return existing;
+  prepareRuntime();
+  const built = findBuiltSdk();
+  if (built) return built;
   fail(
-    'No built SPP runtime with SPP_SOURCE_PROVENANCE.json. ' +
-      'Run scripts/prepare-spp-runtime.sh. The npm 0.2.1 package is not accepted.',
+    'prepare-spp-runtime.sh finished without SPP_SOURCE_PROVENANCE.json for ' +
+      `${SOURCE_COMMIT}. npm stellar-private-payments@0.2.1 is not accepted.`,
   );
 }
 
