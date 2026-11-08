@@ -21,9 +21,13 @@
     <div class="orbit" aria-hidden="true"></div>
     <header class="top">
       <img src="./brand/astrym-logo.png" alt="Astrym" class="mark" />
-      <nav class="top-nav" aria-label="Principal">
-        <a class="ghost" href="#status">Estado</a>
-        <a class="ghost" href="./webapp.html">Abrir wallet</a>
+      <nav class="top-nav" aria-label="Navegación principal">
+        <a class="ghost" href="#status" data-i18n="nav_status">Estado</a>
+        <a class="ghost" href="./webapp.html" data-i18n="nav_wallet">Abrir wallet</a>
+        <div class="language-switch" role="group" aria-label="Language">
+          <button class="language-button is-active" type="button" data-language="es" aria-pressed="true">ES</button>
+          <button class="language-button" type="button" data-language="en" aria-pressed="false">EN</button>
+        </div>
       </nav>
     </header>
 
@@ -32,144 +36,112 @@
         <p class="badge">HACKMERIDIAN 2026 · LISBON · STELLAR × NYM</p>
         <img src="./brand/astrym-logo.png" alt="" class="hero-logo" />
         <h1>ASTRYM</h1>
-        <p class="lede">
-          Billetera Stellar de autocustodia. Conecta Nym MixFetch cuando quieras ocultar
-          tu tráfico de red, y usa Stellar Private Payments (SPP) sobre el pool público
-          Nethermind Testnet cuando el mixnet esté verificado.
-        </p>
+        <p class="lede" data-i18n="hero_lede">Billetera Stellar de autocustodia. Conecta Nym MixFetch cuando quieras ocultar tu tráfico de red, y usa Stellar Private Payments (SPP) sobre el pool público Nethermind Testnet cuando el mixnet esté verificado.</p>
         <div class="cta">
-          <a class="btn primary" href="./webapp.html">Abrir Astrym Webapp</a>
-          <button class="btn gold" type="button" id="install-pwa">Instalar PWA (Android / iOS)</button>
+          <a class="btn primary" href="./webapp.html" data-i18n="hero_open">Abrir Astrym Webapp</a>
+          <button class="btn gold" type="button" id="install-pwa" data-i18n="hero_install">Instalar PWA (Android / iOS)</button>
         </div>
-        <p class="hero-note">
-          Extensión de escritorio, webapp y móvil son superficies distintas: el popup MV3
-          no muestra el modo Android; la PWA vive aquí.
-        </p>
+        <p class="hero-note" data-i18n="hero_note">Extensión de escritorio, webapp y móvil son superficies distintas: el popup MV3 no muestra el modo Android; la PWA vive aquí.</p>
       </section>
 
       <section id="product">
-        <p class="kicker">01 · PRODUCTO</p>
-        <h2>Qué hace Astrym hoy</h2>
+        <p class="kicker" data-i18n="product_kicker">01 · PRODUCTO</p>
+        <h2 data-i18n="product_title">Qué hace Astrym hoy</h2>
         <div class="grid">
           <article>
-            <h3>Autocustodia</h3>
-            <p>Frase de 24 palabras y claves en el dispositivo. Astrym no custodia tu cuenta.</p>
+            <h3 data-i18n="custody_title">Autocustodia</h3>
+            <p data-i18n="custody_body">Frase de 24 palabras y claves en el dispositivo. Astrym no custodia tu cuenta.</p>
           </article>
           <article>
-            <h3>Stellar (Testnet / Mainnet lecturas)</h3>
-            <p>Saldos, envíos públicos y Friendbot Testnet con el cliente Stellar endurecido.</p>
+            <h3 data-i18n="stellar_title">Stellar (Testnet / Mainnet lecturas)</h3>
+            <p data-i18n="stellar_body">Saldos, envíos públicos y Friendbot Testnet con el cliente Stellar endurecido.</p>
           </article>
           <article>
-            <h3>Nym MixFetch (opcional)</h3>
-            <p>Horizon y Soroban pueden salir por el mixnet. Si el modo Nym está activo y falla, Astrym se detiene: sin fallback silencioso a clearnet.</p>
+            <h3 data-i18n="nym_title">Nym MixFetch (opcional)</h3>
+            <p data-i18n="nym_body">Horizon y Soroban pueden salir por el mixnet. Si el modo Nym está activo y falla, Astrym se detiene: sin fallback silencioso a clearnet.</p>
           </article>
           <article>
-            <h3>SPP privado (Testnet)</h3>
-            <p>
-              Depósito, transferencia y retiro contra el pool Nethermind
-              <code class="inline-code">CAMWBUWH…WG24U</code> cuando Nym + write_pool_ready están verificados.
-            </p>
+            <h3 data-i18n="spp_title">SPP privado (Testnet)</h3>
+            <p data-i18n="spp_body">Depósito, transferencia y retiro contra el pool Nethermind cuando Nym + write_pool_ready están verificados.</p>
+            <p><code class="inline-code">CAMWBUWH…WG24U</code></p>
           </article>
         </div>
       </section>
 
       <section id="status">
-        <p class="kicker">02 · ESTADO HONESTO</p>
-        <h2>Implementado · En curso · Futuro</h2>
+        <p class="kicker" data-i18n="status_kicker">02 · ESTADO HONESTO</p>
+        <h2 data-i18n="status_title">Implementado · En curso · Futuro</h2>
         <div class="status-board">
           <article class="status-card status-card--done">
-            <h3>Implementado</h3>
+            <h3 data-i18n="done_title">Implementado</h3>
             <ul>
-              <li>Vault local, onboarding y firma Stellar</li>
-              <li>MixFetch 1.4.2 con gateway/NR verificados</li>
-              <li>HTTP smoke + Horizon-over-Nym (Ankr remap documentado)</li>
-              <li>SPP SDK 0.2.1, WASM, 16 proving keys, PrivatePool + write_pool_ready</li>
-              <li>Host SPP embebido en webapp (sin depender de popups bloqueados)</li>
+              <li data-i18n="done_1">Vault local, onboarding y firma Stellar</li>
+              <li data-i18n="done_2">MixFetch 1.4.2 con gateway/NR verificados</li>
+              <li data-i18n="done_3">HTTP smoke + Horizon-over-Nym (Ankr remap documentado)</li>
+              <li data-i18n="done_4">SPP SDK 0.2.1, WASM, 16 proving keys, PrivatePool + write_pool_ready</li>
+              <li data-i18n="done_5">Host SPP embebido en webapp (sin depender de popups bloqueados)</li>
             </ul>
           </article>
           <article class="status-card status-card--wip">
-            <h3>En curso</h3>
+            <h3 data-i18n="wip_title">En curso</h3>
             <ul>
-              <li>Registro on-chain de claves + discovery de destinatarios</li>
-              <li>Pago privado Testnet extremo a extremo (requiere aprobación explícita antes de broadcast)</li>
-              <li>UX de notas / saldo privado y reconciliación</li>
+              <li data-i18n="wip_1">Registro on-chain de claves + discovery de destinatarios</li>
+              <li data-i18n="wip_2">Pago privado Testnet extremo a extremo (requiere aprobación explícita antes de broadcast)</li>
+              <li data-i18n="wip_3">UX de notas / saldo privado y reconciliación</li>
             </ul>
           </article>
           <article class="status-card status-card--next">
-            <h3>Futuro</h3>
+            <h3 data-i18n="next_title">Futuro</h3>
             <ul>
-              <li>Auditorías de seguridad independientes</li>
-              <li>Claims de anonimato / producción Mainnet SPP</li>
-              <li>Pools propios o políticas ASP adicionales</li>
+              <li data-i18n="next_1">Auditorías de seguridad independientes</li>
+              <li data-i18n="next_2">Claims de anonimato / producción Mainnet SPP</li>
+              <li data-i18n="next_3">Pools propios o políticas ASP adicionales</li>
             </ul>
           </article>
         </div>
-        <p class="status-disclaimer">
-          Astrym no afirma anonimato criptográfico, auditorías completadas ni readiness de producción.
-          Nym reduce la visibilidad de red; SPP aporta notas privadas en Stellar Testnet cuando el stack está listo.
-        </p>
+        <p class="status-disclaimer" data-i18n="status_disclaimer">Astrym no afirma anonimato criptográfico, auditorías completadas ni readiness de producción. Nym reduce la visibilidad de red; SPP aporta notas privadas en Stellar Testnet cuando el stack está listo.</p>
       </section>
 
       <section id="workflow">
-        <p class="kicker">03 · FLUJO</p>
-        <h2>Technical Workflow</h2>
+        <p class="kicker" data-i18n="workflow_kicker">03 · FLUJO</p>
+        <h2 data-i18n="workflow_title">Flujo técnico</h2>
         <ol class="steps">
-          <li>
-            <span>01 Local Wallet</span>
-            <p>Bóveda cifrada, cuenta Stellar y firma local en extensión o webapp.</p>
-          </li>
-          <li>
-            <span>02 Nym Mixnet</span>
-            <p>MixFetch en offscreen (extensión) o bridge in-page (Android / navegador).</p>
-          </li>
-          <li>
-            <span>03 Stellar Data Access &amp; Private Payments</span>
-            <p>Horizon/Soroban por Nym cuando está activo; SPP solo con prepare.phase = ready y gate de broadcast.</p>
-          </li>
+          <li><span>01 Local Wallet</span><p data-i18n="workflow_1">Bóveda cifrada, cuenta Stellar y firma local en extensión o webapp.</p></li>
+          <li><span>02 Nym Mixnet</span><p data-i18n="workflow_2">MixFetch en offscreen (extensión) o bridge in-page (Android / navegador).</p></li>
+          <li><span>03 Stellar Data Access &amp; Private Payments</span><p data-i18n="workflow_3">Horizon/Soroban por Nym cuando está activo; SPP solo con prepare.phase = ready y gate de broadcast.</p></li>
         </ol>
       </section>
 
       <section id="surfaces">
-        <p class="kicker">04 · SUPERFICIES</p>
-        <h2>Cómo usar Astrym</h2>
+        <p class="kicker" data-i18n="surfaces_kicker">04 · SUPERFICIES</p>
+        <h2 data-i18n="surfaces_title">Cómo usar Astrym</h2>
         <div class="grid">
-          <article>
-            <h3>Extensión de escritorio</h3>
-            <p>Popup 400×600 centrado en la wallet. Sin barra Android. Ideal para Chrome/Chromium.</p>
-          </article>
-          <article>
-            <h3>Webapp / PWA</h3>
-            <p>Misma wallet a pantalla completa, responsive, instalable. CTA de instalación solo aquí.</p>
-          </article>
-          <article class="wide">
-            <h3>SPP Host</h3>
-            <p>
-              Laboratorio de sesión SPP (<a href="./spp-host.html">spp-host.html</a>).
-              En la webapp se embebe en proceso; no abras runtimes duplicados.
-            </p>
-          </article>
+          <article><h3 data-i18n="extension_title">Extensión de escritorio</h3><p data-i18n="extension_body">Popup 400×600 centrado en la wallet. Sin barra Android. Ideal para Chrome/Chromium.</p></article>
+          <article><h3 data-i18n="webapp_title">Webapp / PWA</h3><p data-i18n="webapp_body">Misma wallet a pantalla completa, responsive, instalable. CTA de instalación solo aquí.</p></article>
+          <article class="wide"><h3 data-i18n="host_title">SPP Host</h3><p><span data-i18n="host_body">Laboratorio de sesión SPP</span> (<a href="./spp-host.html">spp-host.html</a>). <span data-i18n="host_note">En la webapp se embebe en proceso; no abras runtimes duplicados.</span></p></article>
         </div>
       </section>
 
       <section id="founder">
-        <p class="kicker">05 · FOUNDER</p>
-        <h2>Founder</h2>
+        <p class="kicker" data-i18n="founder_kicker">05 · FUNDADOR</p>
+        <h2 data-i18n="founder_title">Fundador</h2>
         <p class="founder">@MTheMoneyApe — Founder &amp; Vibecoder</p>
       </section>
     </main>
 
     <footer>
       <span>Astrym · self-custody · optional Nym · SPP Testnet</span>
-      <a href="./webapp.html">Abrir webapp</a>
+      <a href="./webapp.html" data-i18n="footer_wallet">Abrir webapp</a>
     </footer>
 
     <dialog id="install-modal">
       <form method="dialog">
-        <h3>Instalar en Android / iOS</h3>
-        <p>Pulsa el menú ⋮ del navegador → Añadir a pantalla de inicio / Instalar app</p>
-        <button class="btn primary" value="close">Entendido</button>
+        <h3 data-i18n="install_title">Instalar en Android / iOS</h3>
+        <p data-i18n="install_body">Pulsa el menú ⋮ del navegador → Añadir a pantalla de inicio / Instalar app</p>
+        <button class="btn primary" value="close" data-i18n="install_close">Entendido</button>
       </form>
     </dialog>
+    <script type="module" src="/src/website/i18n.ts"></script>
     <script type="module" src="/src/website/installPrompt.ts"></script>
   </body>
 </html>
