@@ -89,11 +89,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          fetch-depth: 0
           ref: 215d5dc2d94a600c401e8fb1ded0dda669cde0f9
           path: t9-head
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          fetch-depth: 0
           ref: 2dedcc4f68be57558fd0042d0df25ac26f45f23c
           path: t9-baseline
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
