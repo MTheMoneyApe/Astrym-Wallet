@@ -12,8 +12,8 @@
 
 set -u
 
-ROOT="$(git rev-parse --show-toplevel)"
-cd "$ROOT"
+ROOT="$(git rev-parse --show-toplevel)" || exit 1
+cd "$ROOT" || exit 1
 
 unset SOLANYM_TESTNET_LIVE \
   SOLANYM_TESTNET_LIVE_FUND \
@@ -58,13 +58,13 @@ append_required() {
 
 prepare_assets() {
   note "asset preparation"
-  pushd packages/extension >/dev/null
+  pushd packages/extension >/dev/null || exit 1
   run node scripts/copy-nym-mixfetch-assets.mjs
   run node scripts/copy-spp-assets.mjs
-  popd >/dev/null
-  pushd packages/wallet-core/tests/stellar/spp/harness/mv3-spike >/dev/null
+  popd >/dev/null || exit 1
+  pushd packages/wallet-core/tests/stellar/spp/harness/mv3-spike >/dev/null || exit 1
   run node prepare-vendor.mjs
-  popd >/dev/null
+  popd >/dev/null || exit 1
 }
 
 focal_tests() {
@@ -102,8 +102,8 @@ focal_tests() {
   )
 
   local ext_list core_list line
-  ext_list="$(mktemp)"
-  core_list="$(mktemp)"
+  ext_list="$(mktemp)" || exit 1
+  core_list="$(mktemp)" || exit 1
   append_required packages/extension "$ext_list" "${ext_required[@]}"
   append_required packages/extension "$ext_list" "${ext_privacy[@]}"
   append_required packages/wallet-core "$core_list" "${core_required[@]}"
