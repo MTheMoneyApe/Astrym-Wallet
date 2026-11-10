@@ -1,0 +1,52 @@
+name: SPP webapp build
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vercel-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require a clean image without jq or rustup
+        run: |
+          if command -v jq >/dev/null 2>&1; then
+            sudo apt-get remove -y jq
+          fi
+          if command -v rustup >/dev/null 2>&1 || command -v jq >/dev/null 2>&1; then
+            echo "the build image still has jq or rustup on PATH" >&2
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/spp-logs"
+          pnpm install --frozen-lockfile 2>&1 | tee "$RUNNER_TEMP/spp-logs/install.txt"
+
+      - name: Build
+        run: |
+          set -o pipefail
+          pnpm build:webapp 2>&1 | tee "$RUNNER_TEMP/spp-logs/build-webapp.txt"
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spp-webapp-build-log
+          path: ${{ runner.temp }}/spp-logs
+          if-no-files-found: ignore
