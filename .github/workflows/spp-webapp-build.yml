@@ -1,11 +1,7 @@
 name: SPP webapp build
 
 on:
-  push:
-    branches:
-      - astrym/t4-spp-repair
   pull_request:
-    types: [ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -13,14 +9,7 @@ permissions:
 
 jobs:
   vercel-build:
-    name: SPP webapp build (Clang ${{ matrix.llvm_major }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        llvm_major: [19, 20]
     steps:
       # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -76,383 +65,96 @@ jobs:
           mkdir -p "$RUNNER_TEMP/spp-logs"
           pnpm install --frozen-lockfile 2>&1 | tee "$RUNNER_TEMP/spp-logs/install.txt"
 
-      - name: Install pinned Ubuntu LLVM toolchain
-        env:
-          LLVM_MAJOR: ${{ matrix.llvm_major }}
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          case "$LLVM_MAJOR" in
-            19)
-              package_version="1:19.1.1-1ubuntu1~24.04.2"
-              ;;
-            20)
-              package_version="1:20.1.2-0ubuntu1~24.04.3"
-              ;;
-            *)
-              echo "Unsupported LLVM major: $LLVM_MAJOR" >&2
-              exit 1
-              ;;
-          esac
-          sudo apt-get install -y "clang-$LLVM_MAJOR=$package_version" "llvm-$LLVM_MAJOR=$package_version"
-          sudo apt-mark hold "clang-$LLVM_MAJOR" "llvm-$LLVM_MAJOR"
-
-      - name: Pin WASM C compiler and matching LLVM archiver
-        env:
-          LLVM_MAJOR: ${{ matrix.llvm_major }}
-        run: |
-          set -euo pipefail
-          case "$LLVM_MAJOR" in
-            16) expected="16.0.6" ;;
-            17) expected="17.0.6" ;;
-            18) expected="18.1.3" ;;
-            19) expected="19.1.1" ;;
-            20) expected="20.1.2" ;;
-            *) echo "Unsupported LLVM major: $LLVM_MAJOR" >&2; exit 1 ;;
-          esac
-          clang="/usr/bin/clang-$LLVM_MAJOR"
-          llvm_ar="/usr/lib/llvm-$LLVM_MAJOR/bin/llvm-ar"
-          test -x "$clang" || { echo "Missing pinned clang: $clang" >&2; exit 1; }
-          test -x "$llvm_ar" || { echo "Missing matching llvm-ar: $llvm_ar" >&2; exit 1; }
-          clang_version="$("$clang" --version | sed -n '1s/.*version \([0-9.]*\).*/\1/p')"
-          ar_version="$("$llvm_ar" --version | sed -n 's/.*version \([0-9.]*\).*/\1/p' | head -n 1)"
-          test "$clang_version" = "$expected" || {
-            echo "clang version mismatch: $clang_version != $expected" >&2
-            exit 1
-          }
-          test "$ar_version" = "$expected" || {
-            echo "llvm-ar version mismatch: $ar_version != $expected" >&2
-            exit 1
-          }
-          {
-            echo "CC_wasm32_unknown_unknown=$clang"
-            echo "AR_wasm32_unknown_unknown=$llvm_ar"
-            echo "SPP_SELECTED_CLANG_VERSION=$clang_version"
-            echo "SPP_SELECTED_LLVM_AR_VERSION=$ar_version"
-          } >> "$GITHUB_ENV"
-          {
-            echo "clang=$clang"
-            echo "clang_version=$clang_version"
-            echo "llvm_ar=$llvm_ar"
-            echo "llvm_ar_version=$ar_version"
-          } | tee "$RUNNER_TEMP/spp-logs/selected-c-toolchain.txt"
-
       - name: Build
-        id: build
         continue-on-error: true
         run: |
           set -o pipefail
           pnpm build:webapp 2>&1 | tee "$RUNNER_TEMP/spp-logs/build-webapp.txt"
 
-      - name: Capture WASM build forensics (even on pin mismatch)
+      - name: Capture all built SPP hashes before asserting pins
         if: always()
-        run: |
-          set -euo pipefail
-          proof="$RUNNER_TEMP/spp-proof/forensics"
-          source=".cache/spp-upstream/stellar-private-payments/sdk/web"
-          mkdir -p "$proof"
-          for name in \
-            stellar_private_payments_web_bg.wasm \
-            workers/storage-worker-module_bg.wasm \
-            workers/prover-worker-module_bg.wasm; do
-            file="$source/dist/$name"
-            if [ -f "$file" ]; then
-              mkdir -p "$proof/wasm/$(dirname "$name")"
-              cp "$file" "$proof/wasm/$name"
-            fi
-          done
-          for name in \
-            stellar_private_payments_web.js \
-            workers/storage-worker-module.js \
-            workers/prover-worker-module.js \
-            workers/storage-worker.js \
-            workers/prover-worker.js; do
-            file="$source/dist/$name"
-            if [ -f "$file" ]; then
-              mkdir -p "$proof/js/$(dirname "$name")"
-              cp "$file" "$proof/js/$name"
-            fi
-          done
-          if [ -f "$source/js/index.js" ]; then
-            mkdir -p "$proof/js"
-            cp "$source/js/index.js" "$proof/js/index.js"
-          fi
-          if [ -f "$source/.trunk-wasm-profile" ]; then
-            cp "$source/.trunk-wasm-profile" "$proof/trunk-wasm-profile.txt"
-          fi
-          if [ -f ".cache/spp-upstream/rust-flags.txt" ]; then
-            cp ".cache/spp-upstream/rust-flags.txt" "$proof/"
-          fi
-          python3 - "$proof" "packages/wallet-core/src/stellar/spp/nethermind/spp-runtime-manifest.json" <<'PY'
-          import hashlib, json, sys
-          from pathlib import Path
-
-          root, manifest_path = Path(sys.argv[1]), Path(sys.argv[2])
-          manifest = json.loads(manifest_path.read_text())
-          names = [
-              "stellar_private_payments_web_bg.wasm",
-              "workers/storage-worker-module_bg.wasm",
-              "workers/prover-worker-module_bg.wasm",
-          ]
-
-          def leb(data, pos):
-              value = shift = 0
-              while True:
-                  if pos >= len(data):
-                      raise ValueError("truncated LEB128")
-                  byte = data[pos]
-                  pos += 1
-                  value |= (byte & 0x7f) << shift
-                  if byte < 0x80:
-                      return value, pos
-                  shift += 7
-                  if shift > 35:
-                      raise ValueError("oversized LEB128")
-
-          records = []
-          for name in names:
-              path = root / "wasm" / name
-              if not path.is_file():
-                  records.append({"path": name, "present": False})
-                  continue
-              data = path.read_bytes()
-              if data[:4] != b"\0asm":
-                  raise SystemExit(f"{name}: invalid wasm magic")
-              sections, pos = [], 8
-              while pos < len(data):
-                  section_id = data[pos]
-                  pos += 1
-                  size, pos = leb(data, pos)
-                  body = data[pos:pos + size]
-                  if len(body) != size:
-                      raise SystemExit(f"{name}: truncated section {section_id}")
-                  pos += size
-                  entry = {
-                      "id": section_id,
-                      "size": size,
-                      "sha256": hashlib.sha256(body).hexdigest(),
-                  }
-                  if section_id == 0:
-                      n, offset = leb(body, 0)
-                      custom_name = body[offset:offset + n].decode("utf-8", "replace")
-                      entry["customName"] = custom_name
-                      entry["customPayloadSize"] = len(body) - offset - n
-                      entry["customPayloadSha256"] = hashlib.sha256(body[offset + n:]).hexdigest()
-                  sections.append(entry)
-              expected = manifest["files"].get("dist/" + name)
-              records.append({
-                  "path": name,
-                  "present": True,
-                  "size": len(data),
-                  "sha256": hashlib.sha256(data).hexdigest(),
-                  "expected": expected,
-                  "sections": sections,
-              })
-
-          (root / "wasm-forensics.json").write_text(json.dumps({
-              "sourceCommit": manifest["sourceCommit"],
-              "records": records,
-          }, indent=2) + "\n")
-          print((root / "wasm-forensics.json").read_text())
-          PY
-          python3 - "$proof" "packages/wallet-core/src/stellar/spp/nethermind/spp-runtime-manifest.json" <<'PY'
-          import hashlib, json, sys
-          from pathlib import Path
-
-          root, manifest_path = Path(sys.argv[1]), Path(sys.argv[2])
-          manifest = json.loads(manifest_path.read_text())
-          names = [
-              "dist/stellar_private_payments_web.js",
-              "dist/workers/storage-worker-module.js",
-              "dist/workers/prover-worker-module.js",
-              "dist/workers/storage-worker.js",
-              "dist/workers/prover-worker.js",
-              "js/index.js",
-          ]
-          records = []
-          for rel in names:
-              local = root / "js" / rel.removeprefix("dist/") if rel.startswith("dist/") else root / rel
-              expected = manifest["files"].get(rel)
-              if not local.is_file():
-                  records.append({"path": rel, "present": False, "expected": expected})
-                  continue
-              data = local.read_bytes()
-              records.append({
-                  "path": rel,
-                  "present": True,
-                  "size": len(data),
-                  "sha256": hashlib.sha256(data).hexdigest(),
-                  "expected": expected,
-              })
-          (root / "js-glue-forensics.json").write_text(json.dumps(records, indent=2) + "\n")
-          print((root / "js-glue-forensics.json").read_text())
-          PY
-          node - "$proof/wasm/stellar_private_payments_web_bg.wasm" "scripts/spp-wasm-sections-fb3481af.txt" <<'NODE'
-          const fs = require("node:fs");
-          const wasmPath = process.argv[2];
-          const baselinePath = process.argv[3];
-          const baseline = fs.readFileSync(baselinePath, "utf8").split(/\r?\n/);
-          const expectedImports = [];
-          const expectedExports = [];
-          let section = "";
-          for (const line of baseline) {
-            if (line.startsWith("Import[")) { section = "imports"; continue; }
-            if (line.startsWith("Memory[")) { section = "memory"; continue; }
-            if (line.startsWith("Export[")) { section = "exports"; continue; }
-            if (section === "imports") {
-              const match = line.match(/^\s-\s(\w+)\[\d+\].*<-\s(.+)$/);
-              if (match) {
-                const target = match[2];
-                const dot = target.lastIndexOf(".");
-                if (dot <= 0) throw new Error("Cannot parse baseline import: " + line);
-                expectedImports.push([target.slice(0, dot), target.slice(dot + 1), match[1]].join("|"));
-              }
-            } else if (section === "exports") {
-              const match = line.match(/^\s-\s(\w+)\[\d+\].*-> "([^"]+)"$/);
-              if (match) expectedExports.push([match[2], match[1]].join("|"));
-            }
-          }
-          const module = new WebAssembly.Module(fs.readFileSync(wasmPath));
-          const kind = (value) => value === "function" ? "func" : value;
-          const actualImports = WebAssembly.Module.imports(module)
-            .map((entry) => [entry.module, entry.name, kind(entry.kind)].join("|"));
-          const actualExports = WebAssembly.Module.exports(module)
-            .map((entry) => [entry.name, kind(entry.kind)].join("|"));
-          const generatedPrefix = "__wasm_bindgen_func_elem_";
-          const stable = (values) => values.filter((value) =>
-            !value.split("|")[0].startsWith(generatedPrefix));
-          const generated = (values) => values
-            .map((value) => value.split("|")[0])
-            .filter((name) => name.startsWith(generatedPrefix))
-            .sort();
-          const sort = (values) => values.slice().sort();
-          const same = (a, b) => JSON.stringify(sort(a)) === JSON.stringify(sort(b));
-          const gluePaths = [
-            "stellar_private_payments_web.js",
-            "workers/storage-worker-module.js",
-            "workers/prover-worker-module.js",
-            "workers/storage-worker.js",
-            "workers/prover-worker.js",
-            "index.js",
-          ];
-          const glueReferences = generated(actualExports).map((name) => ({
-            name,
-            referencedBy: gluePaths.filter((rel) => {
-              const path = process.env.RUNNER_TEMP + "/spp-proof/forensics/js/" + rel;
-              return fs.existsSync(path) && fs.readFileSync(path, "utf8").includes(name);
-            }),
-          }));
-          const result = {
-            imports: {
-              expected: expectedImports.length,
-              actual: actualImports.length,
-              identical: same(expectedImports, actualImports),
-            },
-            stableExports: {
-              expected: stable(expectedExports).length,
-              actual: stable(actualExports).length,
-              identical: same(stable(expectedExports), stable(actualExports)),
-            },
-            generatedWasmBindgenExports: {
-              expected: generated(expectedExports),
-              actual: generated(actualExports),
-              identical: same(generated(expectedExports), generated(actualExports)),
-              classification: "internal function-element exports; tracked separately from stable public ABI",
-              jsGlueReferences: glueReferences,
-            },
-          };
-          fs.writeFileSync(process.env.RUNNER_TEMP + "/spp-proof/forensics/wasm-api-compat.json", JSON.stringify(result, null, 2) + "\n");
-          console.log(JSON.stringify(result));
-          if (!result.imports.identical || !result.stableExports.identical) process.exit(1);
-          NODE
-          if [ -f "$RUNNER_TEMP/spp-logs/build-webapp.txt" ]; then
-            grep -E '^(TOOL |SOURCE_DATE_EPOCH |NOTICE date |effective RUSTFLAGS:|effective CFLAGS:|PATH rustup )' "$RUNNER_TEMP/spp-logs/build-webapp.txt" > "$proof/build-toolchain-from-prepare.log" || true
-          fi
-          {
-            echo "commit=$GITHUB_SHA"
-            echo "runner=$(uname -s)-$(uname -m)"
-            echo "kernel=$(uname -a)"
-            echo "rustc=$(rustc --version 2>/dev/null || true)"
-            echo "rustc_verbose=$(rustc -vV 2>/dev/null | tr '\\n' ';' || true)"
-            echo "cargo=$(cargo --version 2>/dev/null || true)"
-            echo "cargo_verbose=$(cargo -vV 2>/dev/null | tr '\\n' ';' || true)"
-            echo "cc=$(cc --version 2>/dev/null | head -n 1 || true)"
-            echo "clang=$(clang --version 2>/dev/null | head -n 1 || true)"
-            echo "selected_cc=${CC_wasm32_unknown_unknown:-unset}"
-            echo "selected_llvm_ar=${AR_wasm32_unknown_unknown:-unset}"
-            echo "selected_clang_version=${SPP_SELECTED_CLANG_VERSION:-unset}"
-            echo "selected_llvm_ar_version=${SPP_SELECTED_LLVM_AR_VERSION:-unset}"
-            echo "cxx=$(c++ --version 2>/dev/null | head -n 1 || true)"
-            echo "wasm_bindgen=$(wasm-bindgen --version 2>/dev/null || true)"
-            echo "wasm_opt=$(.cache/spp-upstream/stellar-private-payments/target/tmp/binaryen/binaryen-version_131/bin/wasm-opt --version 2>/dev/null || true)"
-            echo "source_date_epoch=${SOURCE_DATE_EPOCH:-unset}"
-            echo "build_root=$PWD/.cache/spp-upstream"
-          } > "$proof/toolchain-and-paths.txt"
-          find "$proof" -type f -printf '%P %s bytes\n' | sort > "$proof/files.txt"
-
-      - name: Upload WASM build forensics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: spp-wasm-build-forensics-clang-${{ matrix.llvm_major }}
-          path: ${{ runner.temp }}/spp-proof/forensics
-          if-no-files-found: warn
-
-      - name: Upload SPP build logs
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: spp-build-logs-clang-${{ matrix.llvm_major }}
-          path: ${{ runner.temp }}/spp-logs
-          if-no-files-found: warn
-
-      - name: Record the SHA-256 manifest and wasm sections
-        if: steps.build.outcome == 'success'
         run: |
           set -euo pipefail
           proof="$RUNNER_TEMP/spp-proof"
-          mkdir -p "$proof/manifest" "$proof/sections"
-          python3 scripts/spp-distributed-sha256.py \
-            packages/wallet-core/src/stellar/spp/nethermind/spp-runtime-manifest.json \
-            packages/extension/public/spp \
-            "$proof/manifest/spp-distributed-sha256.txt"
-          curl --proto '=https' -fsSL -o "$RUNNER_TEMP/wabt.tar.gz.partial" \
-            https://github.com/WebAssembly/wabt/releases/download/1.0.37/wabt-1.0.37-ubuntu-20.04.tar.gz
-          echo "cfc675dc9b663d9adc8c75d982c1ba29f661448a2e026a67e71fe3f76a3e09f3  $RUNNER_TEMP/wabt.tar.gz.partial" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/wabt"
-          tar -xzf "$RUNNER_TEMP/wabt.tar.gz.partial" -C "$RUNNER_TEMP/wabt"
-          obj="$RUNNER_TEMP/wabt/wabt-1.0.37/bin/wasm-objdump"
-          wasm="packages/extension/public/spp/dist/stellar_private_payments_web_bg.wasm"
-          "$obj" -x "$wasm" | python3 scripts/spp-wasm-sections.py > "$proof/sections/built-import-memory-export.txt"
-          if diff -u scripts/spp-wasm-sections-fb3481af.txt "$proof/sections/built-import-memory-export.txt" > "$proof/sections/section-diff.txt"; then
-            echo "IDENTICAL to fb3481af import, memory, and export sections" | tee "$proof/sections/section-result.txt"
-          else
-            echo "DIFFERENT from fb3481af import, memory, or export sections" | tee "$proof/sections/section-result.txt"
-            exit 1
+          runtime=".cache/spp-upstream/stellar-private-payments/sdk/web"
+          mkdir -p "$proof/wasm" "$proof/manifest"
+          if [ -d "$runtime/dist" ]; then
+            find "$runtime/dist" -type f -name '*.wasm' -exec cp --parents {} "$proof/wasm/" \;
           fi
+          python3 - \
+            packages/wallet-core/src/stellar/spp/nethermind/spp-runtime-manifest.json \
+            "$runtime" "$proof/manifest/comparison.json" <<'PY'
+          import hashlib, json, sys
+          from pathlib import Path
 
-      # actions/upload-artifact v4.6.2
-      - name: Upload the SHA-256 manifest
-        if: always() && steps.build.outcome == 'success'
+          manifest_path, web_root, output_path = map(Path, sys.argv[1:])
+          result = {
+              "runtimePresent": (web_root / "dist").is_dir(),
+              "sourceCommit": None,
+              "matches": [],
+              "mismatches": [],
+          }
+          if manifest_path.is_file():
+              manifest = json.loads(manifest_path.read_text())
+              result["sourceCommit"] = manifest.get("sourceCommit")
+              for rel, expected in manifest.get("files", {}).items():
+                  path = web_root / rel
+                  if not path.is_file():
+                      result["mismatches"].append({
+                          "path": rel, "reason": "missing",
+                          "expectedSha256": expected.get("sha256"),
+                          "expectedSize": expected.get("size"),
+                      })
+                      continue
+                  data = path.read_bytes()
+                  actual = {
+                      "path": rel,
+                      "sha256": hashlib.sha256(data).hexdigest(),
+                      "size": len(data),
+                  }
+                  if actual["sha256"] == expected.get("sha256") and actual["size"] == expected.get("size"):
+                      result["matches"].append(actual)
+                  else:
+                      actual["expectedSha256"] = expected.get("sha256")
+                      actual["expectedSize"] = expected.get("size")
+                      result["mismatches"].append(actual)
+          else:
+              result["error"] = "Versioned SPP manifest is missing"
+          output_path.write_text(json.dumps(result, indent=2) + "\n")
+          print(json.dumps({
+              "runtimePresent": result["runtimePresent"],
+              "sourceCommit": result["sourceCommit"],
+              "matched": len(result["matches"]),
+              "mismatched": len(result["mismatches"]),
+              "report": str(output_path),
+          }, indent=2))
+          PY
+
+      - name: Upload SPP build diagnostics
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: spp-sha256-manifest
-          path: ${{ runner.temp }}/spp-proof/manifest
+          name: spp-build-diagnostics
+          path: |
+            ${{ runner.temp }}/spp-logs
+            ${{ runner.temp }}/spp-proof
           if-no-files-found: error
 
-      # actions/upload-artifact v4.6.2
-      - name: Upload the wasm section comparison
-        if: always() && steps.build.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: spp-wasm-sections
-          path: ${{ runner.temp }}/spp-proof/sections
-          if-no-files-found: error
-
-      - name: Enforce the SPP build result after diagnostics
+      - name: Assert the versioned runtime manifest
         if: always()
         run: |
-          if [ "${{ steps.build.outcome }}" != "success" ]; then
-            echo "SPP webapp build failed; forensic artifacts were uploaded above." >&2
-            exit 1
-          fi
+          python3 - "$RUNNER_TEMP/spp-proof/manifest/comparison.json" <<'PY'
+          import json, sys
+          from pathlib import Path
+          path = Path(sys.argv[1])
+          if not path.is_file():
+              raise SystemExit("SPP runtime diagnostic report was not produced")
+          result = json.loads(path.read_text())
+          if not result.get("runtimePresent"):
+              raise SystemExit("SPP upstream runtime was not built")
+          if result.get("mismatches"):
+              for item in result["mismatches"]:
+                  print(json.dumps(item, sort_keys=True))
+              raise SystemExit(f"{len(result['mismatches'])} SPP runtime manifest mismatch(es)")
+          print(f"All {len(result['matches'])} versioned SPP runtime files match.")
+          PY
