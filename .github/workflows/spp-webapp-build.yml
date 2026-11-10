@@ -90,8 +90,8 @@ jobs:
           llvm_ar="/usr/lib/llvm-$LLVM_MAJOR/bin/llvm-ar"
           test -x "$clang" || { echo "Missing pinned clang: $clang" >&2; exit 1; }
           test -x "$llvm_ar" || { echo "Missing matching llvm-ar: $llvm_ar" >&2; exit 1; }
-          clang_version="$("$clang" --version | sed -n '1s/.*version \\([0-9.]*\\).*/\\1/p')"
-          ar_version="$("$llvm_ar" --version | sed -n 's/.*version \\([0-9.]*\\).*/\\1/p' | head -n 1)"
+          clang_version="$("$clang" --version | sed -n '1s/.*version \([0-9.]*\).*/\1/p')"
+          ar_version="$("$llvm_ar" --version | sed -n 's/.*version \([0-9.]*\).*/\1/p' | head -n 1)"
           test "$clang_version" = "$expected" || {
             echo "clang version mismatch: $clang_version != $expected" >&2
             exit 1
