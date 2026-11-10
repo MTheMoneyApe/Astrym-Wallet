@@ -12,7 +12,11 @@
 
 set -u
 
-ROOT="$(git rev-parse --show-toplevel)" || exit 1
+if [ -n "${T9_ROOT:-}" ]; then
+  ROOT="$T9_ROOT"
+else
+  ROOT="$(git rev-parse --show-toplevel)" || exit 1
+fi
 cd "$ROOT" || exit 1
 
 unset SOLANYM_TESTNET_LIVE \
