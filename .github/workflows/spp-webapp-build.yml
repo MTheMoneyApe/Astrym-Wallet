@@ -66,6 +66,7 @@ jobs:
           pnpm install --frozen-lockfile 2>&1 | tee "$RUNNER_TEMP/spp-logs/install.txt"
 
       - name: Build
+        id: spp_build
         continue-on-error: true
         run: |
           set -o pipefail
@@ -159,7 +160,14 @@ jobs:
 
       - name: Assert the versioned runtime manifest
         if: always()
+        env:
+          SPP_BUILD_OUTCOME: ${{ steps.spp_build.outcome }}
         run: |
+          set -euo pipefail
+          if [ "$SPP_BUILD_OUTCOME" != "success" ]; then
+            echo "SPP webapp Build step concluded: $SPP_BUILD_OUTCOME" >&2
+            exit 1
+          fi
           python3 - "$RUNNER_TEMP/spp-proof/manifest/comparison.json" <<'PY'
           import json, sys
           from pathlib import Path
