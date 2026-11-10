@@ -172,7 +172,7 @@ jobs:
           const fs = require("node:fs");
           const wasmPath = process.argv[2];
           const baselinePath = process.argv[3];
-          const baseline = fs.readFileSync(baselinePath, "utf8").split(/\\r?\\n/);
+          const baseline = fs.readFileSync(baselinePath, "utf8").split(/\r?\n/);
           const expectedImports = [];
           const expectedExports = [];
           let section = "";
@@ -181,7 +181,7 @@ jobs:
             if (line.startsWith("Memory[")) { section = "memory"; continue; }
             if (line.startsWith("Export[")) { section = "exports"; continue; }
             if (section === "imports") {
-              const match = line.match(/^\\s-\\s(\\w+)\\[\\d+\\].*<-\\s(.+)$/);
+              const match = line.match(/^\s-\s(\w+)\[\d+\].*<-\s(.+)$/);
               if (match) {
                 const target = match[2];
                 const dot = target.lastIndexOf(".");
@@ -189,7 +189,7 @@ jobs:
                 expectedImports.push([target.slice(0, dot), target.slice(dot + 1), match[1]].join("|"));
               }
             } else if (section === "exports") {
-              const match = line.match(/^\\s-\\s(\\w+)\\[\\d+\\].*-> "([^"]+)"$/);
+              const match = line.match(/^\s-\s(\w+)\[\d+\].*-> "([^"]+)"$/);
               if (match) expectedExports.push([match[2], match[1]].join("|"));
             }
           }
@@ -205,13 +205,12 @@ jobs:
             imports: { expected: expectedImports.length, actual: actualImports.length, identical: same(expectedImports, actualImports) },
             exports: { expected: expectedExports.length, actual: actualExports.length, identical: same(expectedExports, actualExports) },
           };
-          fs.writeFileSync(process.env.RUNNER_TEMP + "/spp-proof/forensics/wasm-api-compat.json", JSON.stringify(result, null, 2) + "\\n");
+          fs.writeFileSync(process.env.RUNNER_TEMP + "/spp-proof/forensics/wasm-api-compat.json", JSON.stringify(result, null, 2) + "\n");
           console.log(JSON.stringify(result));
           if (!result.imports.identical || !result.exports.identical) process.exit(1);
           NODE
           if [ -f "$RUNNER_TEMP/spp-logs/build-webapp.txt" ]; then
-            grep -E '^(TOOL |SOURCE_DATE_EPOCH |NOTICE date |effective RUSTFLAGS:|effective CFLAGS:|PATH rustup )' \\
-              "$RUNNER_TEMP/spp-logs/build-webapp.txt" > "$proof/build-toolchain-from-prepare.log" || true
+            grep -E '^(TOOL |SOURCE_DATE_EPOCH |NOTICE date |effective RUSTFLAGS:|effective CFLAGS:|PATH rustup )' "$RUNNER_TEMP/spp-logs/build-webapp.txt" > "$proof/build-toolchain-from-prepare.log" || true
           fi
           {
             echo "commit=$GITHUB_SHA"
