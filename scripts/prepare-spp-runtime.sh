@@ -306,7 +306,7 @@ manifest = json.loads(manifest_path.read_text())
 if manifest["sourceCommit"] != commit:
     raise SystemExit("manifest sourceCommit drifted")
 for rel, expect in manifest["files"].items():
-    path = web / "dist" / rel.removeprefix("dist/")
+    path = web / rel
     data = path.read_bytes()
     got = hashlib.sha256(data).hexdigest()
     if got != expect["sha256"] or len(data) != expect["size"]:

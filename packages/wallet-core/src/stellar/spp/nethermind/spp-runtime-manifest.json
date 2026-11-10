@@ -220,16 +220,16 @@
       "size": 10034824
     },
     "dist/stellar_private_payments_web_bg.wasm": {
-      "sha256": "fb3481af81383e82d53b67b32c1fc007744e85044d0449fa3c0607c2d48f84bc",
-      "size": 2446953
+      "sha256": "bc71e665a818a8b5aff8e7394c22a293e0d71cbad023e217de0889dcbf0aec93",
+      "size": 2445778
     },
     "dist/stellar_private_payments_web.js": {
       "sha256": "e93ac1520b5c1175d2203be2a6ae28265620dab1e0c7afba375f6f01dcacc139",
       "size": 185635
     },
     "dist/workers/prover-worker-module_bg.wasm": {
-      "sha256": "1189ea4ff6a2506cf920b740f8157af76dc88651220a971106bb3fd249375f95",
-      "size": 2626862
+      "sha256": "c0077ecb464e8b13d94b903e1b2f1d1501e51f32705c5b8511978f142862729d",
+      "size": 2625168
     },
     "dist/workers/prover-worker-module.js": {
       "sha256": "d52837972a027223824e3f5a3aa722bbea56253512750972273d57a4fede7006",
@@ -240,8 +240,8 @@
       "size": 165
     },
     "dist/workers/storage-worker-module_bg.wasm": {
-      "sha256": "132138109f49c966351a99965e5b612ef09cc7e83a2d78032b22011f2381d438",
-      "size": 2728814
+      "sha256": "54810347ec3ab85faef35a9228f8279582a408ee1c37e193c5dd4d4bfc3eecad",
+      "size": 2727472
     },
     "dist/workers/storage-worker-module.js": {
       "sha256": "8f5162a926478403f455dda7344e4154bd16f36a5f71c1173fd95032cf7070e1",
