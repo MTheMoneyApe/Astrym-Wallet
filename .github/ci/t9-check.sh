@@ -56,20 +56,6 @@ append_required() {
   done
 }
 
-append_optional() {
-  local root="$1"
-  local dest="$2"
-  shift 2
-  local rel
-  for rel in "$@"; do
-    if [ -f "${root}/${rel}" ]; then
-      printf '%s\n' "$rel" >> "$dest"
-    else
-      echo "ABSENT ${root}/${rel}" >&2
-    fi
-  done
-}
-
 prepare_assets() {
   note "asset preparation"
   pushd packages/extension >/dev/null
@@ -119,7 +105,7 @@ focal_tests() {
   ext_list="$(mktemp)"
   core_list="$(mktemp)"
   append_required packages/extension "$ext_list" "${ext_required[@]}"
-  append_optional packages/extension "$ext_list" "${ext_privacy[@]}"
+  append_required packages/extension "$ext_list" "${ext_privacy[@]}"
   append_required packages/wallet-core "$core_list" "${core_required[@]}"
 
   local -a ext_files=()
