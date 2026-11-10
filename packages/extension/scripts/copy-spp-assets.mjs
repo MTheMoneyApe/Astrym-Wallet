@@ -23,6 +23,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -34,7 +35,13 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXTENSION_ROOT = resolve(__dirname, '..');
 const WALLET_CORE_ROOT = resolve(EXTENSION_ROOT, '../wallet-core');
-const DEST_ROOT = join(EXTENSION_ROOT, 'public', 'spp');
+const MANIFEST_PATH = join(
+  WALLET_CORE_ROOT,
+  'src/stellar/spp/nethermind/spp-runtime-manifest.json',
+);
+const DEST_ROOT = process.env.SPP_ASSET_DEST
+  ? resolve(process.env.SPP_ASSET_DEST)
+  : join(EXTENSION_ROOT, 'public', 'spp');
 
 const EXPECTED_NAME = 'stellar-private-payments';
 const SOURCE_COMMIT = 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120';
@@ -70,6 +77,33 @@ function candidateRoots() {
   ].filter((value) => typeof value === 'string' && value.length > 0);
 }
 
+function assertVersionedPins(sdkRoot) {
+  const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8'));
+  if (manifest.sourceCommit !== SOURCE_COMMIT) {
+    fail(`Versioned manifest sourceCommit is not ${SOURCE_COMMIT}`);
+  }
+  const problems = [];
+  for (const [rel, expect] of Object.entries(manifest.files ?? {})) {
+    const file = join(sdkRoot, ...rel.split('/'));
+    if (!existsSync(file)) {
+      problems.push(`missing ${rel}; expected sha256 ${expect.sha256} from the versioned manifest`);
+      continue;
+    }
+    const data = readFileSync(file);
+    const sha256 = createHash('sha256').update(data).digest('hex');
+    if (sha256 !== expect.sha256 || data.length !== expect.size) {
+      problems.push(
+        `mismatch ${rel}: got ${sha256} ${data.length} expected ${expect.sha256} ${expect.size} from the versioned manifest`,
+      );
+    }
+  }
+  if (problems.length > 0) {
+    fail(
+      `Refusing cache. npm stellar-private-payments@0.2.1 is not this runtime.\n${problems.join('\n')}`,
+    );
+  }
+}
+
 function acceptProvenance(candidate) {
   const abs = resolve(candidate);
   const pkgPath = join(abs, 'package.json');
@@ -82,6 +116,7 @@ function acceptProvenance(candidate) {
         'npm stellar-private-payments@0.2.1 is not this runtime.',
     );
   }
+  assertVersionedPins(abs);
   return abs;
 }
 
@@ -301,13 +336,12 @@ async function main() {
 
   assertDestinationSafeToReplace(DEST_ROOT);
 
-  if (existsSync(DEST_ROOT)) {
-    rmSync(DEST_ROOT, { recursive: true, force: true });
-  }
-  mkdirSync(DEST_ROOT, { recursive: true });
+  const staging = `${DEST_ROOT}.staging-${process.pid}`;
+  rmSync(staging, { recursive: true, force: true });
+  mkdirSync(staging, { recursive: true });
 
-  const jsFiles = await copyTreeFiltered(sdkRoot, DEST_ROOT, 'js');
-  const distFiles = await copyTreeFiltered(sdkRoot, DEST_ROOT, 'dist');
+  const jsFiles = await copyTreeFiltered(sdkRoot, staging, 'js');
+  const distFiles = await copyTreeFiltered(sdkRoot, staging, 'dist');
   const files = [...jsFiles, ...distFiles].sort((a, b) => a.path.localeCompare(b.path));
 
   const byPath = new Map(files.map((f) => [f.path, f]));
@@ -360,7 +394,16 @@ async function main() {
     files,
   };
 
-  writeFileSync(join(DEST_ROOT, META_NAME), JSON.stringify(meta, null, 2) + '\n', 'utf8');
+  writeFileSync(join(staging, META_NAME), JSON.stringify(meta, null, 2) + '\n', 'utf8');
+  const backup = `${DEST_ROOT}.bak-${process.pid}`;
+  if (existsSync(DEST_ROOT)) renameSync(DEST_ROOT, backup);
+  try {
+    renameSync(staging, DEST_ROOT);
+  } catch (cause) {
+    if (existsSync(backup) && !existsSync(DEST_ROOT)) renameSync(backup, DEST_ROOT);
+    throw cause;
+  }
+  if (existsSync(backup)) rmSync(backup, { recursive: true, force: true });
 
   console.log(
     JSON.stringify(

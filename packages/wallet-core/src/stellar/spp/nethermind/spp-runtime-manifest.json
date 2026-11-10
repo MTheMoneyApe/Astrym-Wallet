@@ -11,41 +11,249 @@
   "packageVersionString": "0.2.1",
   "packageVersionNote": "Upstream package.json at this commit still says 0.2.1. That string is not the npm tarball published on 2026-10-16. sourceCommit is the runtime identity.",
   "files": {
-    "dist/stellar_private_payments_web.js": {
-      "sha256": "e93ac1520b5c1175d2203be2a6ae28265620dab1e0c7afba375f6f01dcacc139",
-      "size": 185635
+    "dist/circuits/circuits.json": {
+      "sha256": "35c36f4d0f7055514156b67df9995cb9550e5f380e9a84d85dddb457d17b241e",
+      "size": 5526
+    },
+    "dist/circuits/keyOwnership_proving_key.bin": {
+      "sha256": "9c0482fad1ccf26cfde666d92ac7079bbbd232cd0e2a8e21c21dced5086a7331",
+      "size": 47568
+    },
+    "dist/circuits/keyOwnership.graph.bin": {
+      "sha256": "4910fa3a4231317d4c887ed2ce5c944eff04b50facd30e26fb53c98eb55e8898",
+      "size": 8065
+    },
+    "dist/circuits/keyOwnership.r1cs": {
+      "sha256": "c45779148590de2cffdc9e36d305816e35d444a26ab9ad4d3e80578b7d614e91",
+      "size": 113136
+    },
+    "dist/circuits/policy_tx_2_2_A_gvk_T_proving_key.bin": {
+      "sha256": "60f548ad439a530c1ce0bcc5c8f837c5add328ba2e91839f3b12e6ac69009212",
+      "size": 7776208
+    },
+    "dist/circuits/policy_tx_2_2_A_gvk_T.graph.bin": {
+      "sha256": "3d7969c6f12820003e66136769b9aaeabe4b6b2a353c78c747c424b2d960a1e4",
+      "size": 1052945
+    },
+    "dist/circuits/policy_tx_2_2_A_gvk_T.r1cs": {
+      "sha256": "fc8fde0994dd4a770710f818b642c5d4794b13611fd2cf79d61129581c00f658",
+      "size": 13174532
+    },
+    "dist/circuits/policy_tx_2_2_A_gvk_V_proving_key.bin": {
+      "sha256": "92cb086168bb387a8ed997b4afe88382c23f9dd5c13d10d6061f66788fd7caf1",
+      "size": 5226832
+    },
+    "dist/circuits/policy_tx_2_2_A_gvk_V.graph.bin": {
+      "sha256": "8258cef14df52ce281485dfa7bd73dfbf3e9500dca071e4b8ab176d55f851931",
+      "size": 744704
+    },
+    "dist/circuits/policy_tx_2_2_A_gvk_V.r1cs": {
+      "sha256": "530f5d6e3499e6b843ae354482907cb6ca7ab1237bf18e54d09c884d50be3f16",
+      "size": 10389124
+    },
+    "dist/circuits/policy_tx_2_2_A_proving_key.bin": {
+      "sha256": "54a78cb3f85d13b0c1d4ca52f2750e8ad124a993c6434e2db8d77ccd77f23a63",
+      "size": 3725552
+    },
+    "dist/circuits/policy_tx_2_2_A.graph.bin": {
+      "sha256": "c57c80450210b897109ab81996cfcdc31fa41617800812d2f9ac9d2cfd25ab11",
+      "size": 380570
+    },
+    "dist/circuits/policy_tx_2_2_A.r1cs": {
+      "sha256": "70d7438fb0665c3e45445686261b982455962baa721cbea4265e74adb68c721b",
+      "size": 7601964
+    },
+    "dist/circuits/policy_tx_2_2_AB_gvk_T_proving_key.bin": {
+      "sha256": "dc28c20d03cd86fa74cef7ec48d7930409dc1750367de5059467bee2dee77930",
+      "size": 10502608
+    },
+    "dist/circuits/policy_tx_2_2_AB_gvk_T.graph.bin": {
+      "sha256": "a3802f69d70a61b7623ac0196dcfc85fbe80eb5328f8ea4308b3479d9bed10e8",
+      "size": 1466313
+    },
+    "dist/circuits/policy_tx_2_2_AB_gvk_T.r1cs": {
+      "sha256": "2036fe1bed4a5bdf136de3d17bd8aeb679cc7f9c553ec22f22d07ccacd3f5412",
+      "size": 20464652
+    },
+    "dist/circuits/policy_tx_2_2_AB_gvk_V_proving_key.bin": {
+      "sha256": "d8b9478c23d4881fa10c6817753d591cde975dbda17ffaff37b857805887c602",
+      "size": 9001808
+    },
+    "dist/circuits/policy_tx_2_2_AB_gvk_V.graph.bin": {
+      "sha256": "fc74c75d4db6f6a70f0bc881b2b3d47f614d61e5f493d867a9a27d91d578b808",
+      "size": 1156173
+    },
+    "dist/circuits/policy_tx_2_2_AB_gvk_V.r1cs": {
+      "sha256": "ef1e8745d13a565495782e89d26c92dfd6ab5748d43e49feb0ebe1b32239f28a",
+      "size": 17679244
+    },
+    "dist/circuits/policy_tx_2_2_AB_proving_key.bin": {
+      "sha256": "82b38d34f2f85e613a985347a28e312c94e126e89ffba1cb9acd6b4808af8999",
+      "size": 7500528
+    },
+    "dist/circuits/policy_tx_2_2_AB.graph.bin": {
+      "sha256": "07a7a87c040fcbb57fc3661ed3c39238d7f15e5e405609ea469cc5b40b748aff",
+      "size": 799000
+    },
+    "dist/circuits/policy_tx_2_2_AB.r1cs": {
+      "sha256": "115f3ed13f4669584c57c3884c0cb89d29207b256386446d30e0124a5fcf2df6",
+      "size": 14892084
+    },
+    "dist/circuits/policy_tx_2_2_B_gvk_T_proving_key.bin": {
+      "sha256": "bf118df2dd7185694ea8c15ebabd9fce12e4609e128232c6e5d763e0def21270",
+      "size": 9724688
+    },
+    "dist/circuits/policy_tx_2_2_B_gvk_T.graph.bin": {
+      "sha256": "ceea1207bcff4b940a180bc03366193865441de6af7452e109bda90d860a711f",
+      "size": 1355611
+    },
+    "dist/circuits/policy_tx_2_2_B_gvk_T.r1cs": {
+      "sha256": "8514637dad5c1e8ba52734ecfdfa94f14ff8af3cc6cb69222a52a97a009043d7",
+      "size": 18226540
+    },
+    "dist/circuits/policy_tx_2_2_B_gvk_V_proving_key.bin": {
+      "sha256": "ee0db70b74178fbb5a8fd7605f010516efc0e0e36fbca0f7fddcca96f8f1767b",
+      "size": 8223888
+    },
+    "dist/circuits/policy_tx_2_2_B_gvk_V.graph.bin": {
+      "sha256": "c7a22ea94155d557d50ce14546349d0da42cf57023afa8d958042c89f952eeb2",
+      "size": 1045475
+    },
+    "dist/circuits/policy_tx_2_2_B_gvk_V.r1cs": {
+      "sha256": "e50cd5d7d0ae93562fb6d0f846a2d91645a6232fe6180197f3e0661d10345b55",
+      "size": 15441132
+    },
+    "dist/circuits/policy_tx_2_2_B_proving_key.bin": {
+      "sha256": "16721797e783b728d82276ac2a333d18a7479ded69af5241556d20e0130e4244",
+      "size": 5674032
+    },
+    "dist/circuits/policy_tx_2_2_B.graph.bin": {
+      "sha256": "d4dc29962f760ce9ed5ddbab3619e3c0502daa02d6b8a608d77df330cff6a397",
+      "size": 688307
+    },
+    "dist/circuits/policy_tx_2_2_B.r1cs": {
+      "sha256": "3cd79e47a124b99d3ec698dcf63938fe5bb51a05ff13b7b3d98a854336bbaa7c",
+      "size": 12653972
+    },
+    "dist/circuits/policy_tx_2_2_gvk_T_proving_key.bin": {
+      "sha256": "b67a17d2dcc73c55c08e5be8c2ae75336bbe514a4a4585861ea4581c4618dd5c",
+      "size": 5949712
+    },
+    "dist/circuits/policy_tx_2_2_gvk_T.graph.bin": {
+      "sha256": "8404605cae44f43fcc8339ca2bc71ee2d83f05568867303384b78e63ccdd7bdc",
+      "size": 943574
+    },
+    "dist/circuits/policy_tx_2_2_gvk_T.r1cs": {
+      "sha256": "14a747ef5b6c10455b01b5c7fdd751dd1e63b855b404106c4e72a89cfe2f96c9",
+      "size": 10936420
+    },
+    "dist/circuits/policy_tx_2_2_gvk_V_proving_key.bin": {
+      "sha256": "6cbdf1cf4cbf30da2da251338539cc0d3441b86ea60212e1712ae2d939b5e3f4",
+      "size": 4448912
+    },
+    "dist/circuits/policy_tx_2_2_gvk_V.graph.bin": {
+      "sha256": "88b7bfe0af6c2c77d0b69fcf4e9cf34511edc52e26a4a35435cb056c656f8f41",
+      "size": 635335
+    },
+    "dist/circuits/policy_tx_2_2_gvk_V.r1cs": {
+      "sha256": "9e70b2abd247db0b0c21ba4d1da2f65d05e8f56274d9e23cb519d6bf521b5ba6",
+      "size": 8151012
+    },
+    "dist/circuits/policy_tx_2_2_proving_key.bin": {
+      "sha256": "aed4f1091c3901e90c595c2386a489835e5ab1bc05f0d66a107437e062b5235e",
+      "size": 2423344
+    },
+    "dist/circuits/policy_tx_2_2.graph.bin": {
+      "sha256": "d590a22ef504713a0d258f4704d3845d6dfa4964595416d82a74f965c52d1add",
+      "size": 270736
+    },
+    "dist/circuits/policy_tx_2_2.r1cs": {
+      "sha256": "ba68665e343afa2873924f568a1508fc3cac08a71cbae208b868feb00abf8e38",
+      "size": 5363852
+    },
+    "dist/circuits/selectiveDisclosure_1_proving_key.bin": {
+      "sha256": "960046f0032bef8a36c43566942cef1d690b6b44adae597813bd8dfda9341819",
+      "size": 1129360
+    },
+    "dist/circuits/selectiveDisclosure_1.graph.bin": {
+      "sha256": "a23ec1dc377c83978c8c0a6dfca4b5a7bc6b70bef8703da58b2dfbda3786197b",
+      "size": 108361
+    },
+    "dist/circuits/selectiveDisclosure_1.r1cs": {
+      "sha256": "e23fd530f4902423d22de4a1acbd4dd6ab370c5d0b63219de9b9d79b2b059ecd",
+      "size": 2508652
+    },
+    "dist/circuits/selectiveDisclosure_2_proving_key.bin": {
+      "sha256": "34afc61c840b68ea27a5045e09985109b568c11ea3cc7d67d84fa8d9c952bf49",
+      "size": 2258064
+    },
+    "dist/circuits/selectiveDisclosure_2.graph.bin": {
+      "sha256": "f5922a9d66a2f235c830efae8f37dbecc3f295cf821affed51d92d98041f09e3",
+      "size": 235873
+    },
+    "dist/circuits/selectiveDisclosure_2.r1cs": {
+      "sha256": "988e82bf67cc9de9638f1de76c3f9083b1674e31f8a2ab09ac1fe49cd6084605",
+      "size": 5017212
+    },
+    "dist/circuits/selectiveDisclosure_3_proving_key.bin": {
+      "sha256": "ae627605db21f7e0833d3dcaba3412451d89d7355bc8339d44b1d939dca3d526",
+      "size": 3124784
+    },
+    "dist/circuits/selectiveDisclosure_3.graph.bin": {
+      "sha256": "0d302c3b0bd2df04a43c586a4737121d9eafc0b72b59f3f424d52188b8eebdc1",
+      "size": 366501
+    },
+    "dist/circuits/selectiveDisclosure_3.r1cs": {
+      "sha256": "86279afd520bab980f1544c26cec5a123a0cdd04d28947d3a41ce93c796d36f1",
+      "size": 7525936
+    },
+    "dist/circuits/selectiveDisclosure_4_proving_key.bin": {
+      "sha256": "ffa8beb90ef565d16110244c0b3c9284721218b19900ff37d41294e1312cb90d",
+      "size": 4515952
+    },
+    "dist/circuits/selectiveDisclosure_4.graph.bin": {
+      "sha256": "1905662f263d08205fb24da8d8fce5dc7cddc67842e30de8259de54edda40fec",
+      "size": 496828
+    },
+    "dist/circuits/selectiveDisclosure_4.r1cs": {
+      "sha256": "e8841669c28ca28acaa1d8a27e945e9ca1c87baff07dd181de4ee74393b2e63b",
+      "size": 10034824
     },
     "dist/stellar_private_payments_web_bg.wasm": {
       "sha256": "fb3481af81383e82d53b67b32c1fc007744e85044d0449fa3c0607c2d48f84bc",
       "size": 2446953
     },
-    "dist/workers/storage-worker.js": {
-      "sha256": "4b14d975ef3e72c8e27519892c9dc2263c209fd258579456f59add97823331a7",
-      "size": 61
-    },
-    "dist/workers/storage-worker-module.js": {
-      "sha256": "8f5162a926478403f455dda7344e4154bd16f36a5f71c1173fd95032cf7070e1",
-      "size": 187604
-    },
-    "dist/workers/storage-worker-module_bg.wasm": {
-      "sha256": "132138109f49c966351a99965e5b612ef09cc7e83a2d78032b22011f2381d438",
-      "size": 2728814
-    },
-    "dist/workers/prover-worker.js": {
-      "sha256": "f2a5ee3e47d0637598e355b23265a71d118fb4fe3415cbd190b6270d4ba995c6",
-      "size": 165
-    },
-    "dist/workers/prover-worker-module.js": {
-      "sha256": "d52837972a027223824e3f5a3aa722bbea56253512750972273d57a4fede7006",
-      "size": 186130
+    "dist/stellar_private_payments_web.js": {
+      "sha256": "e93ac1520b5c1175d2203be2a6ae28265620dab1e0c7afba375f6f01dcacc139",
+      "size": 185635
     },
     "dist/workers/prover-worker-module_bg.wasm": {
       "sha256": "1189ea4ff6a2506cf920b740f8157af76dc88651220a971106bb3fd249375f95",
       "size": 2626862
     },
-    "dist/circuits/circuits.json": {
-      "sha256": "35c36f4d0f7055514156b67df9995cb9550e5f380e9a84d85dddb457d17b241e",
-      "size": 5526
+    "dist/workers/prover-worker-module.js": {
+      "sha256": "d52837972a027223824e3f5a3aa722bbea56253512750972273d57a4fede7006",
+      "size": 186130
+    },
+    "dist/workers/prover-worker.js": {
+      "sha256": "f2a5ee3e47d0637598e355b23265a71d118fb4fe3415cbd190b6270d4ba995c6",
+      "size": 165
+    },
+    "dist/workers/storage-worker-module_bg.wasm": {
+      "sha256": "132138109f49c966351a99965e5b612ef09cc7e83a2d78032b22011f2381d438",
+      "size": 2728814
+    },
+    "dist/workers/storage-worker-module.js": {
+      "sha256": "8f5162a926478403f455dda7344e4154bd16f36a5f71c1173fd95032cf7070e1",
+      "size": 187604
+    },
+    "dist/workers/storage-worker.js": {
+      "sha256": "4b14d975ef3e72c8e27519892c9dc2263c209fd258579456f59add97823331a7",
+      "size": 61
+    },
+    "js/index.js": {
+      "sha256": "c149a8eff5345f7685b40e84deeb94ce49aec5080bbf022b754b57e78af1d3e1",
+      "size": 9336
     }
   }
 }

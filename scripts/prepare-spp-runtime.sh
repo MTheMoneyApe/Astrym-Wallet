@@ -85,6 +85,14 @@ if [ "$(git -C "$SRC" rev-parse HEAD 2>/dev/null || true)" != "$SOURCE_COMMIT" ]
   git -C "$SRC" checkout --detach FETCH_HEAD
 fi
 [ "$(git -C "$SRC" rev-parse HEAD)" = "$SOURCE_COMMIT" ] || die "upstream HEAD is not $SOURCE_COMMIT"
+if [ -n "$(git -C "$SRC" status --porcelain --untracked-files=no)" ]; then
+  git -C "$SRC" status --porcelain --untracked-files=no >&2
+  die "upstream worktree has tracked changes; refusing to build or reuse it"
+fi
+if [ "${SPP_PREPARE_STOP_AFTER:-}" = "worktree" ]; then
+  log "prepare-spp-runtime: worktree clean at $SOURCE_COMMIT"
+  exit 0
+fi
 
 python3 - "$SRC" "$REPO_ROOT" "$CIRCUITS_LOCK_SHA256" <<'PY'
 import hashlib, sys
@@ -132,6 +140,10 @@ print("laid out circuit artifacts")
 PY
 
 log "COMMAND: sh deployments/scripts/circuit-artifacts.sh verify"
+if ! command -v jq >/dev/null 2>&1; then
+  export PATH="$REPO_ROOT/scripts/bin:$PATH"
+  log "jq is absent; using the node shim for circuit-artifacts.sh verify"
+fi
 ( cd "$SRC" && sh deployments/scripts/circuit-artifacts.sh verify )
 
 LOCK="$(tr -d '[:space:]' < "$SRC/circuits/circomlib.lock")"
