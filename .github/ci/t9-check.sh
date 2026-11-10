@@ -23,17 +23,27 @@ unset SOLANYM_TESTNET_LIVE \
 
 MODE="${1:-all}"
 status=0
+LOG_DIR="${T9_LOG_DIR:-${ROOT}/t9-logs}"
+mkdir -p "$LOG_DIR" || exit 1
 
 note() {
   printf '\n== t9 %s ==\n' "$*"
 }
 
 run() {
+  local name="$1"
+  shift
+  local log="${LOG_DIR}/${name}.log"
+  {
+    echo "COMMAND: $*"
+    echo "CWD: $(pwd)"
+    echo "UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >"$log"
   note "$*"
   set +e
-  "$@"
-  local code=$?
-  set +e
+  "$@" 2>&1 | tee -a "$log"
+  local code=${PIPESTATUS[0]}
+  printf '%s\n' "$code" >"${LOG_DIR}/${name}.exit"
   echo "exit=${code}"
   if [ "$code" -ne 0 ]; then
     status=1
@@ -59,11 +69,11 @@ append_required() {
 prepare_assets() {
   note "asset preparation"
   pushd packages/extension >/dev/null || exit 1
-  run node scripts/copy-nym-mixfetch-assets.mjs
-  run node scripts/copy-spp-assets.mjs
+  run asset-copy-nym node scripts/copy-nym-mixfetch-assets.mjs
+  run asset-copy-spp node scripts/copy-spp-assets.mjs
   popd >/dev/null || exit 1
   pushd packages/wallet-core/tests/stellar/spp/harness/mv3-spike >/dev/null || exit 1
-  run node prepare-vendor.mjs
+  run asset-prepare-vendor node prepare-vendor.mjs
   popd >/dev/null || exit 1
 }
 
@@ -119,18 +129,18 @@ focal_tests() {
   rm -f "$ext_list" "$core_list"
 
   if [ "${#ext_files[@]}" -gt 0 ]; then
-    run pnpm --filter @solanym/extension exec vitest run "${ext_files[@]}"
+    run test-focal-extension pnpm --filter @solanym/extension exec vitest run --reporter=json --outputFile="${LOG_DIR}/test-focal-extension.json" "${ext_files[@]}"
   fi
   if [ "${#core_files[@]}" -gt 0 ]; then
-    run pnpm --filter @solanym/wallet-core exec vitest run "${core_files[@]}"
+    run test-focal-wallet-core pnpm --filter @solanym/wallet-core exec vitest run --reporter=json --outputFile="${LOG_DIR}/test-focal-wallet-core.json" "${core_files[@]}"
   fi
 }
 
 full_suite() {
-  run pnpm --filter @solanym/extension typecheck
-  run pnpm --filter @solanym/wallet-core typecheck
-  run pnpm --filter @solanym/extension test
-  run pnpm --filter @solanym/wallet-core test
+  run typecheck-extension pnpm --filter @solanym/extension typecheck
+  run typecheck-wallet-core pnpm --filter @solanym/wallet-core typecheck
+  run test-full-extension pnpm --filter @solanym/extension exec vitest run --reporter=json --outputFile="${LOG_DIR}/test-full-extension.json"
+  run test-full-wallet-core pnpm --filter @solanym/wallet-core exec vitest run --reporter=json --outputFile="${LOG_DIR}/test-full-wallet-core.json"
 }
 
 note "toolchain node=$(node -v) pnpm=$(pnpm -v) npm=$(npm -v) head=$(git rev-parse HEAD)"
