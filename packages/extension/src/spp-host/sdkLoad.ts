@@ -33,6 +33,14 @@ function isFunction(value: unknown): value is (...args: never[]) => unknown {
   return typeof value === 'function';
 }
 
+/** wasm-bindgen exports classes as functions. Tests also pass plain `{ new }` objects. */
+function readStaticMethod(value: unknown, name: string): boolean {
+  if (isFunction(value) || (value !== null && typeof value === 'object')) {
+    return isFunction((value as Record<string, unknown>)[name]);
+  }
+  return false;
+}
+
 /**
  * Inspect a loaded facade module without invoking SDK entry points.
  */
@@ -50,14 +58,14 @@ export function inspectSppSdkFacade(module: Record<string, unknown>): SppSdkFaca
     notes.push('default export present — use as initWasm via (url) => default({ module_or_path: url })');
   }
 
-  const Client = module['Client'] as { new?: unknown } | undefined;
-  const hasClient = Client !== null && typeof Client === 'object';
-  const hasClientNew = hasClient && isFunction(Client.new);
+  const Client = module['Client'];
+  const hasClient = readStaticMethod(Client, 'new') || (Client !== null && typeof Client === 'object');
+  const hasClientNew = readStaticMethod(Client, 'new');
   if (!hasClientNew) notes.push('Client.new missing or not a function');
 
-  const Storage = module['Storage'] as { open?: unknown } | undefined;
-  const hasStorage = Storage !== null && typeof Storage === 'object';
-  const hasStorageOpen = hasStorage && isFunction(Storage.open);
+  const Storage = module['Storage'];
+  const hasStorage = readStaticMethod(Storage, 'open') || (Storage !== null && typeof Storage === 'object');
+  const hasStorageOpen = readStaticMethod(Storage, 'open');
   if (!hasStorageOpen) notes.push('Storage.open missing or not a function');
 
   if ('initWasm' in module) {

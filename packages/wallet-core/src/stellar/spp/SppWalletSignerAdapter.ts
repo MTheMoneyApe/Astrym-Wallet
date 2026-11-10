@@ -37,6 +37,7 @@ import {
 } from './signatureGate.js';
 import {
   SppSignerError,
+  assertSppSignatureStillPermitted,
   assertStellarTestnetPassphrase,
   authorizeSppSignature,
   type SppDigestSigner,
@@ -69,6 +70,7 @@ export class SppWalletSignerAdapter implements WalletSigner {
   private readonly _networkPassphrase: string;
   private readonly _gate: SignatureAuthorizationGate;
   private readonly _digestSigner: SppDigestSigner | null;
+  private _permissionEpoch = 0;
 
   constructor(options: SppWalletSignerAdapterOptions) {
     if (options.signer.chain !== 'stellar') {
@@ -107,6 +109,7 @@ export class SppWalletSignerAdapter implements WalletSigner {
       boundAccount: this._stellarAddress,
       networkPassphrase: this._networkPassphrase,
     });
+    this._permissionEpoch = authorization.permissionEpoch;
     return this._withAuthorization('message', authorization.digest, async (assertBeforeSign) => {
       assertBeforeSign();
       const signature = await this._signDigest(authorization.digest, 'message');
@@ -130,6 +133,7 @@ export class SppWalletSignerAdapter implements WalletSigner {
       boundAccount: this._stellarAddress,
       networkPassphrase: this._networkPassphrase,
     });
+    this._permissionEpoch = authorization.permissionEpoch;
     return this._withAuthorization('transaction', authorization.digest, async (assertBeforeSign) => {
       assertBeforeSign();
       const signature = await this._signDigest(authorization.digest, 'transaction');
@@ -165,6 +169,7 @@ export class SppWalletSignerAdapter implements WalletSigner {
       boundAccount: this._stellarAddress,
       networkPassphrase: this._networkPassphrase,
     });
+    this._permissionEpoch = authorization.permissionEpoch;
     return this._withAuthorization('auth_entry', authorization.digest, async (assertBeforeSign) => {
       assertBeforeSign();
       const signature = await this._signDigest(authorization.digest, 'auth_entry');
@@ -202,6 +207,7 @@ export class SppWalletSignerAdapter implements WalletSigner {
       await this._assertBoundAccount();
       const assertBeforeSign = (): void => {
         this._gate.assertActive(lease, context);
+        assertSppSignatureStillPermitted(this._permissionEpoch);
       };
       return await fn(assertBeforeSign);
     } finally {
@@ -228,13 +234,14 @@ export class SppWalletSignerAdapter implements WalletSigner {
   }
 
   private async _signDigest(digest: Uint8Array, kind: SignatureKind): Promise<Uint8Array> {
-    if (this._digestSigner) {
-      return this._digestSigner.signDigest(digest);
-    }
-    if (kind === 'message') {
-      return this._signer.signMessage(digest, this._accountIndex);
-    }
-    return this._signer.signTransaction(digest, this._accountIndex);
+    assertSppSignatureStillPermitted(this._permissionEpoch);
+    const signature = this._digestSigner
+      ? await this._digestSigner.signDigest(digest)
+      : kind === 'message'
+        ? await this._signer.signMessage(digest, this._accountIndex)
+        : await this._signer.signTransaction(digest, this._accountIndex);
+    assertSppSignatureStillPermitted(this._permissionEpoch);
+    return signature;
   }
 
   private _assertOptionalAddress(address: string | undefined): void {

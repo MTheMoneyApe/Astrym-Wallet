@@ -196,7 +196,10 @@ describe('constructUninitializedSppSession', () => {
     const publishes: Array<{ state: string | null; generation: number }> = [];
     const controller = new SppHostController({
       getURL: fakeGetURL,
-      readText: async () => JSON.stringify({ version: '0.2.1' }),
+      readText: async () => JSON.stringify({
+        version: '0.2.1',
+        sourceCommit: 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120',
+      }),
       importModule: async () =>
         ({
           default: defaultInit,
@@ -234,7 +237,10 @@ describe('constructUninitializedSppSession', () => {
   it('constructAndAttach rejects invalid prep and double construct', async () => {
     const controller = new SppHostController({
       getURL: fakeGetURL,
-      readText: async () => JSON.stringify({ version: '0.2.1' }),
+      readText: async () => JSON.stringify({
+        version: '0.2.1',
+        sourceCommit: 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120',
+      }),
       importModule: async () =>
         ({
           default: vi.fn(async () => undefined),

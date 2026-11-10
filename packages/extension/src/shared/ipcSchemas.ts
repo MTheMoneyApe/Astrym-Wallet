@@ -7,6 +7,8 @@
 export const IpcErrorSchema = z.object({
   name: z.string(),
   message: z.string(),
+  code: z.string().optional(),
+  txHashes: z.array(z.string()).optional(),
 });
 
 export const BaseRequestEnvelopeSchema = z.object({
@@ -719,6 +721,7 @@ export const MessageSchemas = {
     response: z.object({
       operation: z.enum(['deposit', 'transfer', 'withdraw']),
       txHash: z.string().nullable(),
+      txHashes: z.array(z.string().min(1)).optional(),
       rpcRoutedViaNym: z.literal(true),
       confirmation: z.enum(['confirmed', 'unknown']),
     }),
@@ -757,7 +760,9 @@ export const MessageSchemas = {
       /** 32-byte encryption public key the user is registering, hex. */
       encryptionKeyHex: z.string().regex(/^[0-9a-fA-F]{64}$/),
       /** Present only when the registry call includes note_key_proof. */
-      noteKeyProofHex: z.string().regex(/^(?:[0-9a-fA-F]{2})+$/).optional(),
+      noteKeyProofHex: z.string().regex(/^(?:[0-9a-fA-F]{2})+$/),
+      encryptionKeySignatureHex: z.string().regex(/^[0-9a-fA-F]{128}$/),
+      ownerSignatureHex: z.string().regex(/^[0-9a-fA-F]{128}$/),
     }),
     response: z.object({
       txHash: z.string().nullable(),

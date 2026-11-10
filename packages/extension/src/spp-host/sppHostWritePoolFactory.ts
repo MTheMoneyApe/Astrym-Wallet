@@ -32,21 +32,68 @@ export type SdkPrivatePool = {
   withdraw(amount: bigint, recipient?: string | null): Promise<{ hashes: string[]; status: string }>;
 };
 
-function mapExecuteResult(result: { hashes: string[]; status: string }): SppPrivatePoolResult {
-  if (result.status && result.status !== 'ok') {
-    throw new Error(`SPP pool execute status=${result.status}`);
+/** Completed hashes from one SDK call, including steps finished before a later failure. */
+export class SppPoolExecuteError extends Error {
+  readonly status: string;
+  readonly txHashes: readonly string[];
+
+  constructor(status: string, txHashes: readonly string[], message: string) {
+    super(message);
+    this.name = 'SppPoolExecuteError';
+    this.status = status;
+    this.txHashes = txHashes;
   }
-  const hash = result.hashes?.[0] ?? null;
-  // Never invent a hash. Null means SDK returned ok without a hash (caller must not treat as confirmed).
-  return { txHash: hash };
+}
+
+function collectHashes(hashes: unknown): string[] {
+  if (!Array.isArray(hashes)) {
+    throw new SppPoolExecuteError('failed', [], 'SPP execute hashes is not an array');
+  }
+  const out: string[] = [];
+  for (const item of hashes) {
+    if (typeof item !== 'string' || item.length === 0) {
+      throw new SppPoolExecuteError(
+        'failed',
+        out,
+        'SPP execute returned an empty or non-string hash',
+      );
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+/**
+ * Keep every hash the SDK reported. A non-ok status still carries the steps
+ * that already completed. This does not retry, sign again, or raise a fee.
+ */
+export function mapSdkPoolExecuteResult(result: {
+  hashes?: unknown;
+  status?: string;
+  message?: string | null;
+}): SppPrivatePoolResult {
+  const txHashes = collectHashes(result.hashes ?? []);
+  const status = result.status && result.status.length > 0 ? result.status : 'ok';
+  if (status !== 'ok') {
+    const detail = result.message ? ` ${result.message}` : '';
+    throw new SppPoolExecuteError(
+      status,
+      txHashes,
+      `SPP pool execute status=${status} completedHashes=${txHashes.join(',')}${detail}`,
+    );
+  }
+  return {
+    txHash: txHashes.length === 1 ? txHashes[0]! : null,
+    txHashes,
+  };
 }
 
 export function adaptSdkPrivatePool(pool: SdkPrivatePool): SppPrivatePool {
   return {
-    deposit: async (amount) => mapExecuteResult(await pool.deposit(amount)),
-    transfer: async (recipient, amount) => mapExecuteResult(await pool.transfer(recipient, amount)),
+    deposit: async (amount) => mapSdkPoolExecuteResult(await pool.deposit(amount)),
+    transfer: async (recipient, amount) => mapSdkPoolExecuteResult(await pool.transfer(recipient, amount)),
     withdraw: async (amount, recipient) =>
-      mapExecuteResult(await pool.withdraw(amount, recipient ?? undefined)),
+      mapSdkPoolExecuteResult(await pool.withdraw(amount, recipient ?? undefined)),
   };
 }
 

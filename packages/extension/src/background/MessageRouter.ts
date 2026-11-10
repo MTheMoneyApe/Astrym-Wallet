@@ -142,7 +142,11 @@ export class MessageRouter {
         type: envelope.type,
         error: {
           name: e.name || 'Error',
-          message: e.message || 'Unknown error occurred during processing'
+          message: e.message || 'Unknown error occurred during processing',
+          ...(typeof e.code === 'string' ? { code: e.code } : {}),
+          ...(Array.isArray(e.txHashes)
+            ? { txHashes: e.txHashes.filter((item: unknown) => typeof item === 'string') }
+            : {}),
         }
       };
     }

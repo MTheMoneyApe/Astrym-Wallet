@@ -61,6 +61,8 @@ export function SppAccountPanel({
   const [noteKeyHex, setNoteKeyHex] = useState('');
   const [encryptionKeyHex, setEncryptionKeyHex] = useState('');
   const [noteKeyProofHex, setNoteKeyProofHex] = useState('');
+  const [encryptionKeySignatureHex, setEncryptionKeySignatureHex] = useState('');
+  const [ownerSignatureHex, setOwnerSignatureHex] = useState('');
   const contractConfig = getNethermindPublicTestnetContractConfig();
   const derivationMessage = sppKeyDerivationMessage(contractConfig.kdf_domain);
 
@@ -120,17 +122,22 @@ export function SppAccountPanel({
       setError('note_key y encryption_key deben ser 32 bytes en hex.');
       return;
     }
-    if (noteKeyProofHex.trim().length > 0 && !/^(?:[0-9a-fA-F]{2})+$/.test(noteKeyProofHex.trim())) {
-      setError('note_key_proof debe ser hex de longitud par.');
+    if (!/^(?:[0-9a-fA-F]{2})+$/.test(noteKeyProofHex) || noteKeyProofHex.length === 0) {
+      setError('El registro actual exige note_key_proof. Una clave v2 no se reutiliza.');
+      return;
+    }
+    if (!/^[0-9a-fA-F]{128}$/.test(encryptionKeySignatureHex) || !/^[0-9a-fA-F]{128}$/.test(ownerSignatureHex)) {
+      setError('Las firmas de registro deben ser 64 bytes en hex. No migran una firma v2.');
       return;
     }
     setBusy('register');
-    const proof = noteKeyProofHex.trim();
     void sendIpcMessage('SPP_REGISTER_PUBLIC_KEYS', {
       acknowledgeBroadcast: true,
       noteKeyHex,
       encryptionKeyHex,
-      ...(proof.length > 0 ? { noteKeyProofHex: proof } : {}),
+      noteKeyProofHex,
+      encryptionKeySignatureHex,
+      ownerSignatureHex,
     })
       .then((result) => {
         setRegisterNote(
@@ -240,7 +247,7 @@ export function SppAccountPanel({
             />
           </label>
           <label>
-            note_key_proof (hex, vacío si el SDK no lo envía)
+            note_key_proof (XDR hex del Groth16 actual)
             <input
               className="input-field"
               data-testid="spp-register-note-key-proof"
@@ -248,8 +255,27 @@ export function SppAccountPanel({
               onChange={(event) => setNoteKeyProofHex(event.target.value.trim())}
             />
           </label>
+          <label>
+            encryption_key_signature (hex, 64 bytes)
+            <input
+              className="input-field"
+              data-testid="spp-register-encryption-signature"
+              value={encryptionKeySignatureHex}
+              onChange={(event) => setEncryptionKeySignatureHex(event.target.value.trim())}
+            />
+          </label>
+          <label>
+            owner_signature (hex, 64 bytes)
+            <input
+              className="input-field"
+              data-testid="spp-register-owner-signature"
+              value={ownerSignatureHex}
+              onChange={(event) => setOwnerSignatureHex(event.target.value.trim())}
+            />
+          </label>
           <span className="text-secondary">
-            El segundo clic envía el acuse y esas claves. Otra clave o otro mensaje no se firma.
+            El mensaje v3 crea una clave nueva. Una firma v2 no se reutiliza ni se migra.
+            El segundo clic envía el acuse y esas claves.
           </span>
         </div>
       ) : null}

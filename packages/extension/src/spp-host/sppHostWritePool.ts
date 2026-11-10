@@ -19,6 +19,7 @@ import type {
   SppPrivatePoolResult,
 } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import { assertSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
+import { assertSppPoolPaymentEconomicsBound } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
 import { runWithSppHostFeeScope } from './sppHostFeeScope.js';
 import {
@@ -118,14 +119,19 @@ export function noteSppHostReadonlySessionReady(): void {
   publish('session_ready_readonly', 'RO session ready; write PrivatePool not bound yet');
 }
 
-function mapPoolResult(result: SppPrivatePoolResult): { txHash: string | null } {
-  return { txHash: result.txHash };
+function mapPoolResult(result: SppPrivatePoolResult): SppPrivatePoolResult {
+  const txHashes = hashesOf(result);
+  return {
+    txHash: txHashes.length === 1 ? (txHashes[0] ?? null) : null,
+    txHashes: [...txHashes],
+  };
 }
 
 function failureResult(
   id: string,
   code: Extract<SppHostExecuteResult, { ok: false }>['code'],
   message: string,
+  txHashes: readonly string[] = [],
 ): SppHostExecuteResult {
   return {
     channel: SPP_HOST_BRIDGE_CHANNEL,
@@ -134,7 +140,20 @@ function failureResult(
     ok: false,
     code,
     message: message.slice(0, 500),
+    ...(txHashes.length > 0 ? { txHashes: [...txHashes] } : {}),
   };
+}
+
+function hashesOf(result: SppPrivatePoolResult): readonly string[] {
+  if (result.txHashes) return result.txHashes;
+  return result.txHash ? [result.txHash] : [];
+}
+
+function hashesFromCause(cause: unknown): readonly string[] {
+  if (!cause || typeof cause !== 'object' || !('txHashes' in cause)) return [];
+  const value = (cause as { txHashes?: unknown }).txHashes;
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
 }
 
 function abortSequenceInFlight(begun: SequenceInFlight | null): void {
@@ -285,6 +304,17 @@ export async function executeSppHostWritePool(
   }
 
   try {
+    assertSppPoolPaymentEconomicsBound(operation);
+  } catch (cause) {
+    abortSequenceInFlight(sequenceBegun);
+    return failureResult(
+      id,
+      'INVALID_REQUEST',
+      cause instanceof Error ? cause.message : 'SPP_POOL_ECONOMICS_NOT_VERIFIED',
+    );
+  }
+
+  try {
     const run = async (): Promise<SppPrivatePoolResult> => {
       switch (operation) {
         case 'deposit':
@@ -328,9 +358,19 @@ export async function executeSppHostWritePool(
       () => withSppHostNymFetchProxy(payload.rpcUrl, run),
     );
     const mapped = mapPoolResult(result);
+    const hashes = hashesOf(mapped);
+    if (hashes.length !== 1) {
+      abortSequenceInFlight(sequenceBegun);
+      return failureResult(
+        id,
+        'EXECUTION_FAILED',
+        `SPP execute returned ${hashes.length} hash(es); not confirming one and not retrying. hashes=${hashes.join(',')}`,
+        hashes,
+      );
+    }
 
     if (sequenceBegun) {
-      confirmOrAbortSequence(sequenceBegun, mapped.txHash, payload.nextFreshSequence);
+      confirmOrAbortSequence(sequenceBegun, hashes[0] ?? null, payload.nextFreshSequence);
     }
 
     return {
@@ -339,7 +379,8 @@ export async function executeSppHostWritePool(
       id,
       ok: true,
       operation,
-      txHash: mapped.txHash,
+      txHash: hashes[0] ?? null,
+      txHashes: [...hashes],
       rpcRoutedViaNym: true,
     };
   } catch (cause) {
@@ -348,7 +389,8 @@ export async function executeSppHostWritePool(
       cause && typeof cause === 'object' && (cause as { code?: string }).code === 'INVALID_REQUEST'
         ? 'INVALID_REQUEST'
         : 'EXECUTION_FAILED';
+    const recovered = hashesFromCause(cause);
     const message = cause instanceof Error ? cause.message : 'WASM/private pool execution failed';
-    return failureResult(id, code, message);
+    return failureResult(id, code, message, recovered);
   }
 }

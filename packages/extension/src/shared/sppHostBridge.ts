@@ -65,6 +65,7 @@ export const SppHostExecuteSuccessSchema = z.object({
   ok: z.literal(true),
   operation: z.enum(['deposit', 'transfer', 'withdraw']),
   txHash: z.string().nullable(),
+  txHashes: z.array(z.string().min(1)).optional(),
   rpcRoutedViaNym: z.literal(true),
 });
 
@@ -84,6 +85,7 @@ export const SppHostExecuteFailureSchema = z.object({
     'UNAUTHORIZED',
   ]),
   message: z.string().min(1).max(500),
+  txHashes: z.array(z.string().min(1)).optional(),
 });
 
 export const SppHostExecuteResultSchema = z.union([

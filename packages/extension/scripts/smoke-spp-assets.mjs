@@ -15,11 +15,14 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXTENSION_ROOT = resolve(__dirname, '..');
 
-const EXPECTED_VERSION = '0.2.1';
 const EXPECTED_NAME = 'stellar-private-payments';
+const SOURCE_COMMIT = 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120';
 const MANAGED_BY = 'solanym-extension-copy-spp-assets';
 const META_NAME = 'SPP_ASSET_META.json';
 const PROFILE_FULL = 'full';
+const MANIFEST_PATH = process.env.SPP_SMOKE_MANIFEST
+  ? resolve(process.env.SPP_SMOKE_MANIFEST)
+  : resolve(EXTENSION_ROOT, '../wallet-core/src/stellar/spp/nethermind/spp-runtime-manifest.json');
 
 const REQUIRED_PATHS = Object.freeze([
   'js/index.js',
@@ -80,11 +83,14 @@ function sha256File(filePath) {
  * @param {string[]} argv
  */
 function resolveSmokeRoot(argv) {
+  if (argv.includes('--public')) {
+    fail('public/ is not the packaged dist. Smoke dist/spp or pass --dist-webapp.');
+  }
   if (process.env.SPP_SMOKE_ROOT) {
     return resolve(process.env.SPP_SMOKE_ROOT);
   }
-  if (argv.includes('--public')) {
-    return join(EXTENSION_ROOT, 'public', 'spp');
+  if (argv.includes('--dist-webapp')) {
+    return join(EXTENSION_ROOT, 'dist-webapp', 'spp');
   }
   return join(EXTENSION_ROOT, 'dist', 'spp');
 }
@@ -125,8 +131,11 @@ async function main() {
   if (meta.name !== EXPECTED_NAME) {
     fail(`${META_NAME}.name expected ${EXPECTED_NAME}, got ${JSON.stringify(meta.name)}`);
   }
-  if (meta.version !== EXPECTED_VERSION) {
-    fail(`${META_NAME}.version expected ${EXPECTED_VERSION}, got ${JSON.stringify(meta.version)}`);
+  if (meta.sourceCommit !== SOURCE_COMMIT) {
+    fail(
+      `${META_NAME}.sourceCommit expected ${SOURCE_COMMIT}, got ${JSON.stringify(meta.sourceCommit)}. ` +
+        'npm 0.2.1 is not this runtime.',
+    );
   }
   if (meta.profile !== PROFILE_FULL) {
     fail(`${META_NAME}.profile expected ${PROFILE_FULL}, got ${JSON.stringify(meta.profile)}`);
@@ -190,6 +199,24 @@ async function main() {
     const digest = await sha256File(full);
     if (digest !== entry.sha256) {
       fail(`SHA-256 mismatch for ${rel}: disk=${digest} meta=${entry.sha256}`);
+    }
+  }
+
+  const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8'));
+  if (manifest.sourceCommit !== SOURCE_COMMIT) {
+    fail(`Versioned manifest sourceCommit is not ${SOURCE_COMMIT}`);
+  }
+  for (const [rel, expect] of Object.entries(manifest.files ?? {})) {
+    const full = join(root, ...rel.split('/'));
+    if (!existsSync(full)) {
+      fail(`Pinned asset missing from dist: ${rel}; expected sha256 ${expect.sha256}`);
+    }
+    const dataSize = statSync(full).size;
+    const digest = await sha256File(full);
+    if (digest !== expect.sha256 || dataSize !== expect.size) {
+      fail(
+        `Pinned asset mismatch in dist: ${rel}: got ${digest} ${dataSize} expected ${expect.sha256} ${expect.size}`,
+      );
     }
   }
 

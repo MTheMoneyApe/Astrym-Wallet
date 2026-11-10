@@ -42,6 +42,7 @@ import {
   noteSppHostReadonlySessionReady,
 } from './sppHostWritePool.js';
 import { initializeSppHostWritePool } from './sppHostWritePoolFactory.js';
+import { NETHERMIND_PUBLIC_TESTNET_SOURCE_COMMIT } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import type { Client } from 'stellar-private-payments';
 import {
   SppStorageLabPrep,
@@ -504,11 +505,13 @@ export class SppHostController {
 
       try {
         const metaRaw = await readText(assets.metaUrl);
-        const meta = JSON.parse(metaRaw) as { version?: string; name?: string };
-        if (meta.version !== '0.2.1') {
-          throw new Error(`Unexpected SPP asset version: ${String(meta.version)}`);
+        const meta = JSON.parse(metaRaw) as { version?: string; sourceCommit?: string };
+        if (meta.sourceCommit !== NETHERMIND_PUBLIC_TESTNET_SOURCE_COMMIT) {
+          throw new Error(
+            `SPP runtime sourceCommit ${String(meta.sourceCommit)} is not ${NETHERMIND_PUBLIC_TESTNET_SOURCE_COMMIT}. npm 0.2.1 is not this deployment.`,
+          );
         }
-        this._metaVersion = meta.version;
+        this._metaVersion = meta.sourceCommit;
       } catch (metaErr) {
         throw new Error(`SPP_ASSET_META.json: ${sanitizeError(metaErr)}`);
       }

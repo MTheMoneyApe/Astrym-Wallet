@@ -10,7 +10,10 @@ import { createContextualSignatureGate } from '@solanym/wallet-core/src/stellar/
 import {
   SppSignerError,
   assertStellarTestnetPassphrase,
+  revokeSppSignApprovals,
 } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { isSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
+import { STELLAR_SOROBAN_TESTNET_RPC } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import {
   SPP_HOST_BRIDGE_CHANNEL,
   type SppHostNymFetchRequest,
@@ -31,8 +34,68 @@ export type SppHostBridgeHandlerDeps = {
   networkPassphrase?: string;
 };
 
-function sameOrigin(url: string, rpcUrl: string): boolean {
-  return new URL(url).origin === new URL(rpcUrl).origin;
+const SOROBAN_READ_METHODS = new Set([
+  'getHealth',
+  'getLatestLedger',
+  'getLedgerEntries',
+  'getEvents',
+  'getTransaction',
+  'simulateTransaction',
+]);
+
+type SorobanRpcClass = 'read' | 'send' | 'unknown' | 'mixed';
+
+/** Reads stay on the allow-list. Anything else, including an unreadable body, is not fetched. */
+function classifySorobanBody(body: string | undefined): SorobanRpcClass {
+  if (!body) return 'unknown';
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return 'unknown';
+  }
+  const batch = Array.isArray(parsed) ? parsed : [parsed];
+  if (batch.length === 0) return 'unknown';
+  let sawRead = false;
+  let sawSend = false;
+  let sawOther = false;
+  for (const entry of batch) {
+    if (!entry || typeof entry !== 'object') {
+      sawOther = true;
+      continue;
+    }
+    const method = (entry as { method?: unknown }).method;
+    if (typeof method !== 'string') {
+      sawOther = true;
+    } else if (method === 'sendTransaction') {
+      sawSend = true;
+    } else if (SOROBAN_READ_METHODS.has(method)) {
+      sawRead = true;
+    } else {
+      sawOther = true;
+    }
+  }
+  const kinds = Number(sawRead) + Number(sawSend) + Number(sawOther);
+  if (kinds > 1) return 'mixed';
+  if (sawSend) return 'send';
+  if (sawRead) return 'read';
+  return 'unknown';
+}
+
+function isTrustedSorobanEndpoint(value: string): boolean {
+  let given: URL;
+  let trusted: URL;
+  try {
+    given = new URL(value);
+    trusted = new URL(STELLAR_SOROBAN_TESTNET_RPC);
+  } catch {
+    return false;
+  }
+  return given.origin === trusted.origin
+    && given.pathname === trusted.pathname
+    && given.search === ''
+    && given.username === ''
+    && given.password === '';
 }
 
 /**
@@ -104,6 +167,18 @@ export async function handleSppHostSignRequest(
         ok: false,
         code: 'UNAUTHORIZED',
         message: 'Only the Stellar Testnet passphrase is allowed.',
+      };
+    }
+
+    if (!isSppTestnetBroadcastAuthorized()) {
+      const revoked = revokeSppSignApprovals();
+      return {
+        channel: SPP_HOST_BRIDGE_CHANNEL,
+        type: 'SPP_HOST_SIGN_RESULT',
+        id: request.id,
+        ok: false,
+        code: 'UNAUTHORIZED',
+        message: `SPP_BROADCAST_AWAITING_APPROVAL: ${request.payload.kind} signing is disabled (${revoked} approval(s) revoked).`,
       };
     }
 
@@ -219,14 +294,27 @@ export async function handleSppHostNymFetchRequest(
 
   const { rpcUrl, url, method, headers, body } = request.payload;
   try {
-    if (!sameOrigin(url, rpcUrl)) {
+    if (!isTrustedSorobanEndpoint(url) || !isTrustedSorobanEndpoint(rpcUrl)) {
       return {
         channel: SPP_HOST_BRIDGE_CHANNEL,
         type: 'SPP_HOST_NYM_FETCH_RESULT',
         id: request.id,
         ok: false,
         code: 'ORIGIN_BLOCKED',
-        message: `Blocked non-Soroban origin for SPP RPC proxy: ${new URL(url).origin}`,
+        message: 'SPP RPC proxy only calls the configured Testnet Soroban endpoint.',
+      };
+    }
+
+    const rpcClass = classifySorobanBody(body);
+    if (rpcClass !== 'read') {
+      if (rpcClass === 'send' || rpcClass === 'mixed') revokeSppSignApprovals();
+      return {
+        channel: SPP_HOST_BRIDGE_CHANNEL,
+        type: 'SPP_HOST_NYM_FETCH_RESULT',
+        id: request.id,
+        ok: false,
+        code: 'UNAUTHORIZED',
+        message: `SPP RPC ${rpcClass} is not a configured read. Not fetched.`,
       };
     }
 
@@ -238,7 +326,7 @@ export async function handleSppHostNymFetchRequest(
     if (body !== undefined && method.toUpperCase() !== 'GET' && method.toUpperCase() !== 'HEAD') {
       init.body = body;
     }
-    const response = await nymFetch(url, init);
+    const response = await nymFetch(STELLAR_SOROBAN_TESTNET_RPC, init);
     const responseHeaders: Record<string, string> = {};
     response.headers.forEach((value, key) => {
       responseHeaders[key.toLowerCase()] = value;

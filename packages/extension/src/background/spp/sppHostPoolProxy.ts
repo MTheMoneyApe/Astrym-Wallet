@@ -84,9 +84,15 @@ async function executeViaHost(
     );
   }
   if (!result.ok) {
-    throw new SppPrivatePaymentError(result.code, result.message);
+    throw new SppPrivatePaymentError(result.code, result.message, {
+      txHashes: result.txHashes ?? [],
+    });
   }
-  return { txHash: result.txHash };
+  const txHashes = result.txHashes ?? (result.txHash ? [result.txHash] : []);
+  return {
+    txHash: txHashes.length === 1 ? (txHashes[0] ?? null) : null,
+    txHashes,
+  };
 }
 
 /**

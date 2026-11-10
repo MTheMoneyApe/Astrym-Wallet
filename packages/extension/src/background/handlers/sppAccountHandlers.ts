@@ -3,13 +3,14 @@
  * Proxies to spp-host over the bridge; never invents success.
  */
 
-import { Networks } from '@stellar/stellar-sdk';
 import browser from 'webextension-polyfill';
 import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
 import {
+  bindSppRegistrationBeforeMint,
   mintSppSignApproval,
-  sppKeyDerivationMessage,
+  revokeSppSignApprovals,
 } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { isSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
 import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import type { ValidatedRequestPayload, ValidatedResponsePayload } from '../../shared/ipcTypes.js';
@@ -114,31 +115,40 @@ export function createSppRegisterPublicKeysHandler(deps: {
     const address = deps.resolveAccount
       ? await deps.resolveAccount()
       : (await resolveActiveStellarAddress(requiredKeyManager(deps.keyManager))).address;
+    if (!isSppTestnetBroadcastAuthorized()) {
+      revokeSppSignApprovals(address);
+      throw Object.assign(
+        new Error('SPP_BROADCAST_AWAITING_APPROVAL: registration is disabled. No approval was minted.'),
+        { name: 'UNAUTHORIZED', code: 'BROADCAST_AWAITING_APPROVAL' },
+      );
+    }
     const config = getNethermindPublicTestnetContractConfig();
-    mintSppSignApproval({
-      operation: 'register_public_keys',
-      amountStroops: null,
-      recipient: null,
-      networkPassphrase: Networks.TESTNET,
-      poolContractId: null,
-      registryContractId: config.public_key_registry,
-      tokenContractId: null,
-      registerNoteKeyHex: payload.noteKeyHex,
-      registerEncryptionKeyHex: payload.encryptionKeyHex,
-      registerNoteKeyProofHex: payload.noteKeyProofHex ?? null,
-      maxFeeStroops: maxFeeStroopsForOperation('register_public_keys'),
-      minResourceFeeStroops: null,
-      account: address,
-      exactMessage: sppKeyDerivationMessage(config.kdf_domain),
-    });
-    const nym = requireNymAndWritePool();
-    const result = await querySppHostAccount({ ...nym, action: 'register_public_keys' });
-    if (!result.ok) mapHostFailure(result);
-    return {
-      txHash: result.registerTxHash ?? null,
-      rpcRoutedViaNym: true as const,
-      confirmation: result.registerTxHash ? ('confirmed' as const) : ('unknown' as const),
-    };
+    let minted = false;
+    try {
+      const intent = bindSppRegistrationBeforeMint({
+        account: address,
+        registryContractId: config.public_key_registry,
+        noteKeyHex: payload.noteKeyHex,
+        encryptionKeyHex: payload.encryptionKeyHex,
+        noteKeyProofHex: payload.noteKeyProofHex,
+        encryptionKeySignatureHex: payload.encryptionKeySignatureHex,
+        ownerSignatureHex: payload.ownerSignatureHex,
+        maxFeeStroops: maxFeeStroopsForOperation('register_public_keys'),
+      });
+      mintSppSignApproval(intent);
+      minted = true;
+      const nym = requireNymAndWritePool();
+      const result = await querySppHostAccount({ ...nym, action: 'register_public_keys' });
+      if (!result.ok) mapHostFailure(result);
+      return {
+        txHash: result.registerTxHash ?? null,
+        rpcRoutedViaNym: true as const,
+        confirmation: result.registerTxHash ? ('confirmed' as const) : ('unknown' as const),
+      };
+    } catch (cause) {
+      if (minted) revokeSppSignApprovals(address);
+      throw cause;
+    }
   };
 }
 

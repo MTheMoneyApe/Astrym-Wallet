@@ -55,7 +55,7 @@ export function beginPrivatePaymentExecution(
   fingerprint: string,
   now = Date.now(),
   state: GuardState = globalGuard,
-): { release: (opts?: { completed?: boolean }) => void } {
+): { release: (opts?: { completed?: boolean; reconcile?: boolean }) => void } {
   for (const [key, at] of state.recent) {
     if (now - at > RECENT_TTL_MS) state.recent.delete(key);
   }
@@ -72,7 +72,7 @@ export function beginPrivatePaymentExecution(
   return {
     release: (opts) => {
       state.inFlight.delete(fingerprint);
-      if (opts?.completed) state.recent.set(fingerprint, Date.now());
+      if (opts?.completed || opts?.reconcile) state.recent.set(fingerprint, Date.now());
     },
   };
 }

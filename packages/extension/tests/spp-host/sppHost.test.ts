@@ -65,7 +65,10 @@ async function probedController(
       if (overrides?.importFails) throw new Error('Failed to fetch dynamically imported module');
       return mock.module;
     },
-    readText: async () => JSON.stringify({ version: '0.2.1' }),
+    readText: async () => JSON.stringify({
+      version: '0.2.1',
+      sourceCommit: 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120',
+    }),
   });
   await controller.probe();
   return { controller, mock };
@@ -95,6 +98,22 @@ describe('resolveSppAssetUrls', () => {
 });
 
 describe('sdkLoad inspection (mocked module)', () => {
+  it('accepts wasm-bindgen classes, which are functions with static methods', () => {
+    class Client {
+      static new(): void { /* host entry */ }
+    }
+    class Storage {
+      static open(): void { /* host entry */ }
+    }
+    const inspection = inspectSppSdkFacade({
+      default: async () => undefined,
+      Client,
+      Storage,
+    });
+    expect(inspection.hasClientNew).toBe(true);
+    expect(inspection.hasStorageOpen).toBe(true);
+  });
+
   it('detects default init without invoking it', () => {
     const defaultInit = vi.fn(async () => undefined);
     const inspection = inspectSppSdkFacade({
@@ -117,12 +136,27 @@ describe('sdkLoad inspection (mocked module)', () => {
 });
 
 describe('SppHostController probe (mocked)', () => {
+  it('refuses an npm 0.2.1 manifest that has no upstream source commit', async () => {
+    const controller = new SppHostController({
+      getURL: fakeGetURL,
+      importModule: async () => mockFacadeModule().module,
+      readText: async () => JSON.stringify({ version: '0.2.1' }),
+    });
+    const snap = await controller.probe();
+    expect(snap.phase).toBe('error');
+    expect(snap.errorMessage).toMatch(/sourceCommit/);
+    expect(snap.errorMessage).toMatch(/npm 0.2.1 is not this deployment/);
+  });
+
   it('stays uninitialized and wasm not-started until probe()', () => {
     const importModule = vi.fn(async () => mockFacadeModule().module);
     const controller = new SppHostController({
       getURL: fakeGetURL,
       importModule,
-      readText: async () => JSON.stringify({ version: '0.2.1' }),
+      readText: async () => JSON.stringify({
+      version: '0.2.1',
+      sourceCommit: 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120',
+    }),
     });
     expect(controller.phase).toBe('uninitialized');
     expect(controller.wasmPhase).toBe('not-started');
@@ -144,7 +178,10 @@ describe('SppHostController initializeWasm (mocked — not real WASM)', () => {
     const controller = new SppHostController({
       getURL: fakeGetURL,
       importModule: async () => mockFacadeModule().module,
-      readText: async () => JSON.stringify({ version: '0.2.1' }),
+      readText: async () => JSON.stringify({
+      version: '0.2.1',
+      sourceCommit: 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120',
+    }),
     });
     const snap = await controller.initializeWasm();
     expect(snap.wasmPhase).toBe('error');
@@ -244,7 +281,10 @@ describe('SppHostController Storage lab (Fase 5D — mocked openFn only)', () =>
     const controller = new SppHostController({
       getURL: fakeGetURL,
       importModule: async () => mock.module,
-      readText: async () => JSON.stringify({ version: '0.2.1' }),
+      readText: async () => JSON.stringify({
+      version: '0.2.1',
+      sourceCommit: 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120',
+    }),
       storageLabExecutionAuthorized: authorized,
     });
     await controller.probe();
@@ -259,7 +299,10 @@ describe('SppHostController Storage lab (Fase 5D — mocked openFn only)', () =>
     const controller = new SppHostController({
       getURL: fakeGetURL,
       importModule: async () => mock.module,
-      readText: async () => JSON.stringify({ version: '0.2.1' }),
+      readText: async () => JSON.stringify({
+      version: '0.2.1',
+      sourceCommit: 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120',
+    }),
     });
     const snap = controller.snapshot();
     expect(snap.storageLabPhase).toBe('not-run');
@@ -344,7 +387,10 @@ describe('SppHostController Storage lab (Fase 5D — mocked openFn only)', () =>
     const controller = new SppHostController({
       getURL: fakeGetURL,
       importModule: async () => mock.module,
-      readText: async () => JSON.stringify({ version: '0.2.1' }),
+      readText: async () => JSON.stringify({
+      version: '0.2.1',
+      sourceCommit: 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120',
+    }),
       storageLabExecutionAuthorized: true,
     });
     await controller.probe();
@@ -368,7 +414,10 @@ describe('SppHostController Storage lab (Fase 5D — mocked openFn only)', () =>
     const controller = new SppHostController({
       getURL: fakeGetURL,
       importModule: async () => mock.module,
-      readText: async () => JSON.stringify({ version: '0.2.1' }),
+      readText: async () => JSON.stringify({
+      version: '0.2.1',
+      sourceCommit: 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120',
+    }),
       storageLabExecutionAuthorized: true,
     });
     await controller.probe();
@@ -411,7 +460,10 @@ describe('SppHostController Storage lab (Fase 5D — mocked openFn only)', () =>
     const controller = new SppHostController({
       getURL: fakeGetURL,
       importModule: async () => mock.module,
-      readText: async () => JSON.stringify({ version: '0.2.1' }),
+      readText: async () => JSON.stringify({
+      version: '0.2.1',
+      sourceCommit: 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120',
+    }),
       storageLabExecutionAuthorized: true,
     });
     await controller.probe();
@@ -449,7 +501,10 @@ describe('SppHostController Storage lab (Fase 5D — mocked openFn only)', () =>
     const controller = new SppHostController({
       getURL: fakeGetURL,
       importModule: async () => mock.module,
-      readText: async () => JSON.stringify({ version: '0.2.1' }),
+      readText: async () => JSON.stringify({
+      version: '0.2.1',
+      sourceCommit: 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120',
+    }),
       storageLabExecutionAuthorized: true,
       storageOpenWatchdogMs: 20,
     });
@@ -498,7 +553,10 @@ describe('SppHostController Storage lab (Fase 5D — mocked openFn only)', () =>
         await gate;
         return mock.module;
       },
-      readText: async () => JSON.stringify({ version: '0.2.1' }),
+      readText: async () => JSON.stringify({
+      version: '0.2.1',
+      sourceCommit: 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120',
+    }),
     });
     const probePromise = controller.probe();
     expect(controller.phase).toBe('loading');

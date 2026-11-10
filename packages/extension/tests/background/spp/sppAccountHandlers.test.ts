@@ -101,6 +101,9 @@ describe('sppAccountHandlers IPC', () => {
         acknowledgeBroadcast: true,
         noteKeyHex: 'ab'.repeat(32),
         encryptionKeyHex: 'cd'.repeat(32),
+        noteKeyProofHex: 'ee'.repeat(16),
+        encryptionKeySignatureHex: '11'.repeat(64),
+        ownerSignatureHex: '22'.repeat(64),
       }, trusted as never),
     ).rejects.toMatchObject({
       name: 'UNAUTHORIZED',
@@ -123,6 +126,9 @@ describe('sppAccountHandlers IPC', () => {
         acknowledgeBroadcast: true,
         noteKeyHex: 'ab'.repeat(32),
         encryptionKeyHex: 'cd'.repeat(32),
+        noteKeyProofHex: 'ee'.repeat(16),
+        encryptionKeySignatureHex: '11'.repeat(64),
+        ownerSignatureHex: '22'.repeat(64),
       }, undefined),
     ).rejects.toMatchObject({ name: 'UNAUTHORIZED' });
     expect(queryMock).not.toHaveBeenCalled();

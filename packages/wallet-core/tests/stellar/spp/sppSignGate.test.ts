@@ -20,22 +20,35 @@ import { getNethermindPublicTestnetContractConfig } from '../../../src/stellar/s
 import {
   assertSppAssembledFees,
   assertStellarTestnetPassphrase,
+  assertSppPoolPaymentEconomicsBound,
   authorizeSppSignature,
+  bindSppRegistrationBeforeMint,
   mintSppSignApproval,
   resetSppSignApprovalsForTests,
+  setSppPaymentIdentityChecksForTests,
   signDigestWithSppGate,
+  sppSignApprovalCount,
+  sppEncryptionKeyChallenge,
   sppKeyDerivationMessage,
+  sppRegistrationDigest,
+  sppRegistrationMessage,
+  sppStaleKeyDerivationMessageV2,
   type SppSignIntent,
 } from '../../../src/stellar/spp/sppSignGate.js';
+import { hashSep53Message } from '../../../src/stellar/spp/sep53.js';
+import {
+  resetSppBroadcastGateForTests,
+  setSppTestnetBroadcastAuthorized,
+} from '../../../src/stellar/spp/sppBroadcastGate.js';
 
 const ACCOUNT = 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6';
 const OTHER = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
-const POOL = 'CAMWBUWHYXEGBM3Q7M5DBGW7LLJL3I4QGANQEZFEWLRNTOJMTT2WG24U';
+const POOL = 'CCSI25UI6P42ZZWFPHAJ44BIYFLZV2QLMJ3BBT3XHDKNM5RRHXOLB5TW';
 const OTHER_POOL = 'CBTA5THUFNLDMFSH54YSHZJPAACLIBTT66ANWX2EPMP5F7ORPI24MXBQ';
-const REGISTRY = 'CARXHKOPSGMUMFRDI72KNCRENVOTCJIGXPCPYOW42APDY2NEYF7CLKIL';
+const REGISTRY = 'CA5MA3LDXS4TQKBQ7SY57IHO3VMYV7G3ZJH45CWCX4QVP25IDFMZWZ3E';
 const NOTE_KEY = '11'.repeat(32);
 const ENC_KEY = '22'.repeat(32);
-const XLM_POOL = 'CAMWBUWHYXEGBM3Q7M5DBGW7LLJL3I4QGANQEZFEWLRNTOJMTT2WG24U';
+const XLM_POOL = 'CCSI25UI6P42ZZWFPHAJ44BIYFLZV2QLMJ3BBT3XHDKNM5RRHXOLB5TW';
 
 function intent(overrides: Partial<SppSignIntent> = {}): SppSignIntent {
   return {
@@ -49,6 +62,8 @@ function intent(overrides: Partial<SppSignIntent> = {}): SppSignIntent {
     registerNoteKeyHex: null,
     registerEncryptionKeyHex: null,
     registerNoteKeyProofHex: null,
+    registerEncryptionKeySignatureHex: null,
+    registerOwnerSignatureHex: null,
     maxFeeStroops: '8000000',
     minResourceFeeStroops: null,
     account: ACCOUNT,
@@ -153,27 +168,7 @@ function authXdr(args: {
   ).toXDR('base64');
 }
 
-function registerXdr(noteKeyHex: string, encryptionKeyHex: string, proofHex?: string): string {
-  const entries = [
-    new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('encryption_key'),
-      val: xdr.ScVal.scvBytes(Buffer.from(encryptionKeyHex, 'hex')),
-    }),
-    new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('note_key'),
-      val: xdr.ScVal.scvBytes(Buffer.from(noteKeyHex, 'hex')),
-    }),
-    new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('owner'),
-      val: Address.fromString(ACCOUNT).toScVal(),
-    }),
-  ];
-  if (proofHex) {
-    entries.push(new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('note_key_proof'),
-      val: xdr.ScVal.scvBytes(Buffer.from(proofHex, 'hex')),
-    }));
-  }
+function legacyRegisterXdr(noteKeyHex: string, encryptionKeyHex: string): string {
   return new TransactionBuilder(new Account(ACCOUNT, '10'), {
     fee: '100',
     networkPassphrase: Networks.TESTNET,
@@ -181,28 +176,87 @@ function registerXdr(noteKeyHex: string, encryptionKeyHex: string, proofHex?: st
     .addOperation(Operation.invokeContractFunction({
       contract: REGISTRY,
       function: 'register',
-      args: [xdr.ScVal.scvMap(entries)],
+      args: [registerArgs(noteKeyHex, encryptionKeyHex)[0]!],
     }))
     .setTimeout(30)
     .build()
     .toXDR();
 }
 
-function registerAccountArgs(noteKeyHex: string, encryptionKeyHex: string): xdr.ScVal[] {
-  return [xdr.ScVal.scvMap([
+function registerXdr(noteKeyHex: string, encryptionKeyHex: string): string {
+  return new TransactionBuilder(new Account(ACCOUNT, '10'), {
+    fee: '100',
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(Operation.invokeContractFunction({
+      contract: REGISTRY,
+      function: 'register',
+      args: registerArgs(noteKeyHex, encryptionKeyHex),
+    }))
+    .setTimeout(30)
+    .build()
+    .toXDR();
+}
+
+const OWNER_SIG_HEX = 'ab'.repeat(64);
+const ENC_SIG_HEX = 'cd'.repeat(64);
+
+function ownershipProof(): xdr.ScVal {
+  return xdr.ScVal.scvMap([
     new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('encryption_key'),
-      val: xdr.ScVal.scvBytes(Buffer.from(encryptionKeyHex, 'hex')),
+      key: xdr.ScVal.scvSymbol('encryption_key_signature'),
+      val: xdr.ScVal.scvBytes(Buffer.from(ENC_SIG_HEX, 'hex')),
     }),
     new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('note_key'),
-      val: xdr.ScVal.scvBytes(Buffer.from(noteKeyHex, 'hex')),
+      key: xdr.ScVal.scvSymbol('note_key_proof'),
+      val: noteProofVal(),
     }),
     new xdr.ScMapEntry({
-      key: xdr.ScVal.scvSymbol('owner'),
-      val: Address.fromString(ACCOUNT).toScVal(),
+      key: xdr.ScVal.scvSymbol('owner_signature'),
+      val: xdr.ScVal.scvBytes(Buffer.from(OWNER_SIG_HEX, 'hex')),
     }),
-  ])];
+  ]);
+}
+
+function noteProofVal(): xdr.ScVal {
+  return xdr.ScVal.scvMap([
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('a'),
+      val: xdr.ScVal.scvBytes(Buffer.alloc(64, 1)),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('b'),
+      val: xdr.ScVal.scvBytes(Buffer.alloc(128, 2)),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('c'),
+      val: xdr.ScVal.scvBytes(Buffer.alloc(64, 3)),
+    }),
+  ]);
+}
+
+function noteProofHex(): string {
+  return Buffer.from(noteProofVal().toXDR()).toString('hex');
+}
+
+function registerArgs(noteKeyHex: string, encryptionKeyHex: string): xdr.ScVal[] {
+  return [
+    xdr.ScVal.scvMap([
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('encryption_key'),
+        val: xdr.ScVal.scvBytes(Buffer.from(encryptionKeyHex, 'hex')),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('note_key'),
+        val: xdr.ScVal.scvBytes(Buffer.from(noteKeyHex, 'hex')),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('owner'),
+        val: Address.fromString(ACCOUNT).toScVal(),
+      }),
+    ]),
+    ownershipProof(),
+  ];
 }
 
 function registerInvocation(noteKeyHex: string, encryptionKeyHex: string): xdr.SorobanAuthorizedInvocation {
@@ -211,7 +265,7 @@ function registerInvocation(noteKeyHex: string, encryptionKeyHex: string): xdr.S
       new xdr.InvokeContractArgs({
         contractAddress: Address.fromString(REGISTRY).toScAddress(),
         functionName: 'register',
-        args: registerAccountArgs(noteKeyHex, encryptionKeyHex),
+        args: registerArgs(noteKeyHex, encryptionKeyHex),
       }),
     ),
     subInvocations: [],
@@ -242,7 +296,7 @@ function registerTxWithTwoAuth(noteKeyHex: string, encryptionKeyHex: string): st
     .addOperation(Operation.invokeContractFunction({
       contract: REGISTRY,
       function: 'register',
-      args: registerAccountArgs(noteKeyHex, encryptionKeyHex),
+      args: registerArgs(noteKeyHex, encryptionKeyHex),
       auth: [entry(), entry()],
     }))
     .setTimeout(30)
@@ -547,6 +601,57 @@ const digestSigner = {
 describe('SPP sign gate attack cases', () => {
   beforeEach(() => {
     resetSppSignApprovalsForTests();
+    resetSppBroadcastGateForTests();
+    setSppTestnetBroadcastAuthorized(true);
+    setSppPaymentIdentityChecksForTests(true);
+  });
+
+  it('binds Registration v1 before mint and refuses it while the gate is off', () => {
+    const owner = Keypair.random();
+    const encryption = Keypair.random();
+    const note = 'ab'.repeat(32);
+    const encHex = Buffer.from(encryption.rawPublicKey()).toString('hex');
+    const message = sppRegistrationMessage(REGISTRY, owner.publicKey(), note, encHex);
+    const digest = sppRegistrationDigest(message);
+    const ownerSig = Buffer.from(owner.sign(digest)).toString('hex');
+    const encSig = Buffer.from(encryption.sign(sppEncryptionKeyChallenge(digest))).toString('hex');
+    const input = {
+      account: owner.publicKey(),
+      registryContractId: REGISTRY,
+      noteKeyHex: note,
+      encryptionKeyHex: encHex,
+      noteKeyProofHex: 'cd'.repeat(8),
+      encryptionKeySignatureHex: encSig,
+      ownerSignatureHex: ownerSig,
+      maxFeeStroops: '5000000',
+    };
+    const bound = bindSppRegistrationBeforeMint(input);
+    expect(bound.exactMessage).toBe(message);
+    expect(() => mintSppSignApproval(bound)).not.toThrow();
+    expect(() => bindSppRegistrationBeforeMint({
+      ...input,
+      ownerSignatureHex: '00'.repeat(64),
+    })).toThrow(/Registration/);
+    setSppTestnetBroadcastAuthorized(false);
+    expect(() => bindSppRegistrationBeforeMint(input)).toThrow(/SPP_BROADCAST_AWAITING_APPROVAL/);
+  });
+
+  it('does not mint a payment unless the identity-check flag is on', () => {
+    setSppPaymentIdentityChecksForTests(false);
+    expect(() => mintSppSignApproval(intent())).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(sppSignApprovalCount()).toBe(0);
+  });
+
+  it('refuses authorize while the broadcast gate is off', () => {
+    setSppTestnetBroadcastAuthorized(false);
+    mintSppSignApproval(intent());
+    expect(() => authorizeSppSignature({
+      kind: 'transaction',
+      input: transactXdr(),
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/SPP_BROADCAST_AWAITING_APPROVAL/);
+    expect(sppSignApprovalCount()).toBe(0);
   });
 
   it('allowlists Testnet and rejects Public and Futurenet', () => {
@@ -603,6 +708,20 @@ describe('SPP sign gate attack cases', () => {
   });
 
   it('enforces tx.fee and simulated minResourceFee against the real ceiling', () => {
+    expect(() => assertSppAssembledFees({
+      operation: 'deposit',
+      approvedMaxFeeStroops: '15000000',
+      txFeeStroops: '13418332',
+      requireTxFee: true,
+    })).not.toThrow();
+
+    expect(() => assertSppAssembledFees({
+      operation: 'withdraw',
+      approvedMaxFeeStroops: '15000000',
+      txFeeStroops: '15000001',
+      requireTxFee: true,
+    })).toThrow(/tx\.fee/);
+
     expect(() => assertSppAssembledFees({
       operation: 'deposit',
       approvedMaxFeeStroops: '8000000',
@@ -666,23 +785,14 @@ describe('SPP sign gate attack cases', () => {
   it('rejects replay of a used approval, including a disposable digest signer', async () => {
     mintSppSignApproval(intent());
     const xdrInput = transactXdr();
-    const first = await signDigestWithSppGate({
-      kind: 'transaction',
-      input: xdrInput,
-      boundAccount: ACCOUNT,
-      networkPassphrase: Networks.TESTNET,
-      signer: digestSigner,
-    });
-    expect(first.signature).toHaveLength(64);
-
+    setSppTestnetBroadcastAuthorized(true);
     await expect(signDigestWithSppGate({
       kind: 'transaction',
       input: xdrInput,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
       signer: digestSigner,
-    })).rejects.toThrow(/already used/);
-
+    })).rejects.toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     await expect(signDigestWithSppGate({
       kind: 'transaction',
       input: xdrInput,
@@ -705,9 +815,12 @@ describe('SPP sign gate attack cases', () => {
       exactMessage: message,
       registerNoteKeyHex: NOTE_KEY,
       registerEncryptionKeyHex: ENC_KEY,
-      registerNoteKeyProofHex: null,
+      registerNoteKeyProofHex: noteProofHex(),
+      registerEncryptionKeySignatureHex: ENC_SIG_HEX,
+      registerOwnerSignatureHex: OWNER_SIG_HEX,
     });
     mintSppSignApproval(approved);
+    setSppTestnetBroadcastAuthorized(true);
     const signed = await signDigestWithSppGate({
       kind: 'message',
       input: message,
@@ -744,14 +857,29 @@ describe('SPP sign gate attack cases', () => {
       networkPassphrase: Networks.TESTNET,
     })).toThrow(/no matching prior approval/);
 
+    expect(() => mintSppSignApproval(intent({
+      operation: 'register_public_keys',
+      amountStroops: null,
+      recipient: null,
+      poolContractId: null,
+      registryContractId: config.public_key_registry,
+      maxFeeStroops: '5000000',
+      exactMessage: sppStaleKeyDerivationMessageV2(config.kdf_domain),
+      registerNoteKeyHex: NOTE_KEY,
+      registerEncryptionKeyHex: ENC_KEY,
+      registerNoteKeyProofHex: noteProofHex(),
+      registerEncryptionKeySignatureHex: ENC_SIG_HEX,
+      registerOwnerSignatureHex: OWNER_SIG_HEX,
+    }))).toThrow(/stale v2/);
+
     resetSppSignApprovalsForTests();
     mintSppSignApproval(approved);
     expect(() => authorizeSppSignature({
       kind: 'transaction',
-      input: registerXdr(NOTE_KEY, ENC_KEY, 'abcd'),
+      input: legacyRegisterXdr(NOTE_KEY, ENC_KEY),
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).toThrow(/no matching prior approval/);
+    })).toThrow(/Account and KeyOwnershipProof/);
   });
 
   it('requires the configured pool token and a token.transfer sub-invocation on deposit auth', () => {
@@ -791,7 +919,7 @@ describe('SPP sign gate attack cases', () => {
       input: depositAuthXdr(token),
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
@@ -818,7 +946,7 @@ describe('SPP sign gate attack cases', () => {
       input: depositTxXdr('token', token),
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
@@ -848,25 +976,25 @@ describe('SPP sign gate attack cases', () => {
       input: treeA.auth,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => authorizeSppSignature({
       kind: 'transaction',
       input: treeB.tx,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).toThrow(/authorization identity/);
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => authorizeSppSignature({
       kind: 'transaction',
       input: treeA.tx,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => authorizeSppSignature({
       kind: 'auth_entry',
       input: treeA.auth,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).toThrow(/already used/);
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
@@ -875,19 +1003,19 @@ describe('SPP sign gate attack cases', () => {
       input: treeB.tx,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => authorizeSppSignature({
       kind: 'auth_entry',
       input: treeA.auth,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).toThrow(/authorization identity/);
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => authorizeSppSignature({
       kind: 'auth_entry',
       input: treeB.auth,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
@@ -905,12 +1033,12 @@ describe('SPP sign gate attack cases', () => {
         networkPassphrase: Networks.TESTNET,
       })),
     ]);
-    expect(raced.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    expect(raced.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(raced.filter((result) => result.status === 'fulfilled')).toHaveLength(0);
+    expect(raced.filter((result) => result.status === 'rejected')).toHaveLength(2);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
-    await Promise.all([
+    const racedAgain = await Promise.allSettled([
       Promise.resolve().then(() => authorizeSppSignature({
         kind: 'transaction',
         input: treeA.tx,
@@ -924,6 +1052,7 @@ describe('SPP sign gate attack cases', () => {
         networkPassphrase: Networks.TESTNET,
       })),
     ]);
+    expect(racedAgain.filter((result) => result.status === 'rejected')).toHaveLength(2);
 
     const extOnly = depositPair(token, 1, 8);
     resetSppSignApprovalsForTests();
@@ -933,13 +1062,13 @@ describe('SPP sign gate attack cases', () => {
       input: treeA.auth,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => authorizeSppSignature({
       kind: 'transaction',
       input: extOnly.tx,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).toThrow(/authorization identity/);
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
   });
 
   it('binds auth and transaction to one address nonce and expiration', async () => {
@@ -965,31 +1094,31 @@ describe('SPP sign gate attack cases', () => {
     });
 
     mintSppSignApproval(deposit);
-    expect(() => sign('auth_entry', matched.auth)).not.toThrow();
-    expect(() => sign('transaction', otherNonce.tx)).toThrow(/authorization identity/);
-    expect(() => sign('transaction', otherExpiration.tx)).toThrow(/authorization identity/);
-    expect(() => sign('transaction', sourceTx.tx)).toThrow(/authorization identity/);
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', otherNonce.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', otherExpiration.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', sourceTx.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => sign('transaction', foreign.tx)).toThrow(/bound Stellar account/);
-    expect(() => sign('transaction', matched.tx)).not.toThrow();
-    expect(() => sign('auth_entry', matched.auth)).toThrow(/already used/);
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
-    expect(() => sign('transaction', matched.tx)).not.toThrow();
-    expect(() => sign('auth_entry', otherNonce.auth)).toThrow(/authorization identity/);
-    expect(() => sign('auth_entry', otherExpiration.auth)).toThrow(/authorization identity/);
-    expect(() => sign('auth_entry', matched.auth)).not.toThrow();
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', otherNonce.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', otherExpiration.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
-    expect(() => sign('transaction', sourceTx.tx)).not.toThrow();
-    expect(() => sign('auth_entry', matched.auth)).toThrow(/authorization identity/);
+    expect(() => sign('transaction', sourceTx.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
-    expect(() => sign('auth_entry', matched.auth)).not.toThrow();
-    expect(() => sign('transaction', sourceTx.tx)).toThrow(/authorization identity/);
-    expect(() => sign('transaction', matched.tx)).not.toThrow();
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', sourceTx.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
@@ -997,8 +1126,8 @@ describe('SPP sign gate attack cases', () => {
       Promise.resolve().then(() => sign('auth_entry', matched.auth)),
       Promise.resolve().then(() => sign('transaction', otherNonce.tx)),
     ]);
-    expect(raced.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    expect(raced.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(raced.filter((result) => result.status === 'fulfilled')).toHaveLength(0);
+    expect(raced.filter((result) => result.status === 'rejected')).toHaveLength(2);
   });
 
   it('covers supported credential routes and rejects the others', () => {
@@ -1035,37 +1164,37 @@ describe('SPP sign gate attack cases', () => {
     });
 
     mintSppSignApproval(deposit);
-    expect(() => sign('auth_entry', matched.auth)).not.toThrow();
-    expect(() => sign('transaction', otherSignature.tx)).not.toThrow();
-    expect(() => sign('transaction', matched.tx)).toThrow(/already used/);
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', otherSignature.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
-    expect(() => sign('transaction', matched.tx)).not.toThrow();
-    expect(() => sign('auth_entry', withAddress.auth)).toThrow(/authorization identity/);
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', withAddress.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
-    expect(() => sign('auth_entry', withAddress.auth)).not.toThrow();
-    expect(() => sign('transaction', matched.tx)).toThrow(/authorization identity/);
+    expect(() => sign('auth_entry', withAddress.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
     expect(() => sign('transaction', addressV2.tx)).toThrow(/Unsupported Soroban credential/);
-    expect(() => sign('transaction', matched.tx)).not.toThrow();
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     mintSppSignApproval(deposit);
     expect(() => sign('auth_entry', matched.auth)).toThrow(/ambiguous/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(intent());
-    expect(() => sign('transaction', transactXdr())).not.toThrow();
-    expect(() => sign('auth_entry', authXdr())).toThrow(/authorization identity/);
+    expect(() => sign('transaction', transactXdr())).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', authXdr())).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(intent({ operation: 'withdraw', recipient: null }));
-    expect(() => sign('transaction', transactXdr({ recipient: ACCOUNT }))).not.toThrow();
-    expect(() => sign('auth_entry', authXdr({ recipient: ACCOUNT }))).toThrow(/authorization identity/);
+    expect(() => sign('transaction', transactXdr({ recipient: ACCOUNT }))).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', authXdr({ recipient: ACCOUNT }))).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     const config = getNethermindPublicTestnetContractConfig();
     const registered = intent({
@@ -1078,6 +1207,9 @@ describe('SPP sign gate attack cases', () => {
       exactMessage: sppKeyDerivationMessage(config.kdf_domain),
       registerNoteKeyHex: NOTE_KEY,
       registerEncryptionKeyHex: ENC_KEY,
+      registerNoteKeyProofHex: noteProofHex(),
+      registerEncryptionKeySignatureHex: ENC_SIG_HEX,
+      registerOwnerSignatureHex: OWNER_SIG_HEX,
     });
     resetSppSignApprovalsForTests();
     mintSppSignApproval(registered);
@@ -1088,6 +1220,74 @@ describe('SPP sign gate attack cases', () => {
     mintSppSignApproval(registered);
     expect(() => sign('transaction', registerTxWithTwoAuth(NOTE_KEY, ENC_KEY))).toThrow(/more than one Soroban authorization/);
     expect(() => sign('transaction', registerXdr(NOTE_KEY, ENC_KEY))).not.toThrow();
+  });
+
+  it('keeps upstream pool shapes rejected and blocks payment approval', () => {
+    expect(() => authorizeSppSignature({
+      kind: 'transaction',
+      input: transactXdr({ amount: 0n, recipient: POOL }),
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/ext_amount must be positive/);
+    expect(() => authorizeSppSignature({
+      kind: 'transaction',
+      input: transactXdr({ amount: -4n, recipient: ACCOUNT }),
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/ext_amount must be positive/);
+    expect(() => authorizeSppSignature({
+      kind: 'transaction',
+      input: transactXdr({ amount: 13n, recipient: POOL }),
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/recipient is not a G/);
+    expect(() => assertSppPoolPaymentEconomicsBound('deposit')).toThrow(/BLOCKED|SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => assertSppPoolPaymentEconomicsBound('transfer')).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => assertSppPoolPaymentEconomicsBound('withdraw')).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => assertSppPoolPaymentEconomicsBound('register_public_keys')).not.toThrow();
+  });
+
+  it('accepts only the bound registration challenge and keeps the proof as XDR', () => {
+    const message = sppRegistrationMessage(REGISTRY, ACCOUNT, NOTE_KEY, ENC_KEY);
+    const digest = sppRegistrationDigest(message);
+    expect(Buffer.from(digest)).toEqual(Buffer.from(hashSep53Message(message)));
+    expect(Buffer.from(sppEncryptionKeyChallenge(digest))).toHaveLength(32);
+    const swapped = sppRegistrationMessage(REGISTRY, OTHER, NOTE_KEY, ENC_KEY);
+    expect(swapped).not.toBe(message);
+    const registered = intent({
+      operation: 'register_public_keys',
+      amountStroops: null,
+      recipient: null,
+      poolContractId: null,
+      registryContractId: REGISTRY,
+      maxFeeStroops: '5000000',
+      exactMessage: message,
+      registerNoteKeyHex: NOTE_KEY,
+      registerEncryptionKeyHex: ENC_KEY,
+      registerNoteKeyProofHex: noteProofHex(),
+      registerEncryptionKeySignatureHex: ENC_SIG_HEX,
+      registerOwnerSignatureHex: OWNER_SIG_HEX,
+    });
+    expect(() => mintSppSignApproval(registered)).not.toThrow();
+    resetSppSignApprovalsForTests();
+    expect(() => mintSppSignApproval({
+      ...registered,
+      exactMessage: 'Privacy Pool Key Registration [v1]\nnot bound',
+    })).toThrow(/not the pinned derivation challenge or the registration challenge/);
+    const raw = Buffer.concat([
+      Buffer.alloc(64, 1),
+      Buffer.alloc(128, 2),
+      Buffer.alloc(64, 3),
+    ]).toString('hex');
+    expect(raw).not.toBe(noteProofHex());
+    resetSppSignApprovalsForTests();
+    mintSppSignApproval({ ...registered, registerNoteKeyProofHex: raw });
+    expect(() => authorizeSppSignature({
+      kind: 'transaction',
+      input: registerXdr(NOTE_KEY, ENC_KEY),
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/no matching prior approval/);
   });
 
   it('does not sign a register envelope against a transfer approval', () => {

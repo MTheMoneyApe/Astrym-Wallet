@@ -5,7 +5,12 @@ import {
   executeSppPrivatePayment,
 } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
-import { mintSppSignApproval } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import {
+  assertSppPoolPaymentEconomicsBound,
+  mintSppSignApproval,
+  revokeSppSignApprovals,
+} from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { isSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
 import { tokenContractIdForEnabledPool } from '@solanym/wallet-core/src/stellar/spp/sppContractConfig.js';
 import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
@@ -31,6 +36,18 @@ export function createSppPrivatePaymentHandler(deps: { keyManager: KeyManager })
       );
     }
     const { address } = await resolveActiveStellarAddress(deps.keyManager);
+    if (!isSppTestnetBroadcastAuthorized()) {
+      revokeSppSignApprovals(address);
+      throw Object.assign(
+        new Error(
+          'SPP_BROADCAST_AWAITING_APPROVAL: private payment is disabled. No approval was minted.',
+        ),
+        { name: 'BROADCAST_AWAITING_APPROVAL', code: 'BROADCAST_AWAITING_APPROVAL' },
+      );
+    }
+    // BLOCKED: this throws for deposit, transfer, and withdraw. The mint below
+    // is not a payment authorization and does not run while the throw stands.
+    assertSppPoolPaymentEconomicsBound(payload.operation);
     const maxFeeStroops = payload.maxFeeStroops ?? maxFeeStroopsForOperation(payload.operation);
     const tokenContractId = tokenContractIdForEnabledPool(
       getNethermindPublicTestnetContractConfig(),
@@ -47,6 +64,8 @@ export function createSppPrivatePaymentHandler(deps: { keyManager: KeyManager })
       registerNoteKeyHex: null,
       registerEncryptionKeyHex: null,
       registerNoteKeyProofHex: null,
+      registerEncryptionKeySignatureHex: null,
+      registerOwnerSignatureHex: null,
       maxFeeStroops,
       minResourceFeeStroops: null,
       account: address,

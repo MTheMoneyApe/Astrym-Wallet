@@ -1,8 +1,10 @@
 /**
- * Fase 1 — Copy stellar-private-payments@0.2.1 runtime assets into
+ * Copy the SPP runtime built by scripts/prepare-spp-runtime.sh into
  * packages/extension/public/spp/ for Vite → dist/spp/ packaging.
  *
- * Source: packages/wallet-core/node_modules/stellar-private-payments only.
+ * The npm tarball stellar-private-payments@0.2.1 is not this runtime.
+ * If SPP_SOURCE_PROVENANCE.json is missing, this script runs the prepare
+ * script once, then copies. It does not fall back to node_modules.
  * Never reads mv3-spike/vendor or prepare-vendor.mjs.
  *
  * Profile: full — Client.new requires circuitsBaseUrl + circuitLock; prover
@@ -15,34 +17,45 @@
  */
 import { createHash } from 'node:crypto';
 import {
+  copyFileSync,
   createReadStream,
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
-  copyFileSync,
 } from 'node:fs';
-import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXTENSION_ROOT = resolve(__dirname, '..');
 const WALLET_CORE_ROOT = resolve(EXTENSION_ROOT, '../wallet-core');
-const DEST_ROOT = join(EXTENSION_ROOT, 'public', 'spp');
+const MANIFEST_PATH = join(
+  WALLET_CORE_ROOT,
+  'src/stellar/spp/nethermind/spp-runtime-manifest.json',
+);
+const DEST_ROOT = process.env.SPP_ASSET_DEST
+  ? resolve(process.env.SPP_ASSET_DEST)
+  : join(EXTENSION_ROOT, 'public', 'spp');
 
 const EXPECTED_NAME = 'stellar-private-payments';
-const EXPECTED_VERSION = '0.2.1';
+const SOURCE_COMMIT = 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120';
 const PROFILE = 'full';
 const MANAGED_BY = 'solanym-extension-copy-spp-assets';
 
 const META_NAME = 'SPP_ASSET_META.json';
+let stagingToClean = '';
 
 /** @returns {never} */
 function fail(message) {
+  if (stagingToClean) {
+    rmSync(stagingToClean, { recursive: true, force: true });
+  }
   console.error(`[copy-spp-assets] ERROR: ${message}`);
   process.exit(1);
 }
@@ -55,55 +68,98 @@ function toPosix(p) {
  * Resolve SDK package root robustly (Windows + CI / pnpm layouts).
  * @returns {string}
  */
-function resolveSdkRoot() {
-  const candidates = [];
+function repoRoot() {
+  return resolve(EXTENSION_ROOT, '../..');
+}
 
-  const direct = join(WALLET_CORE_ROOT, 'node_modules', EXPECTED_NAME);
-  candidates.push(direct);
+function candidateRoots() {
+  const buildRoot = process.env.SPP_BUILD_ROOT;
+  return [
+    process.env.SPP_SDK_ROOT,
+    buildRoot ? join(buildRoot, 'stellar-private-payments/sdk/web') : '',
+    join(repoRoot(), '.cache/spp-upstream/stellar-private-payments/sdk/web'),
+  ].filter((value) => typeof value === 'string' && value.length > 0);
+}
 
-  try {
-    const requireFromWallet = createRequire(join(WALLET_CORE_ROOT, 'package.json'));
-    const pkgJson = requireFromWallet.resolve(`${EXPECTED_NAME}/package.json`);
-    candidates.push(dirname(pkgJson));
-  } catch {
-    /* optional */
+function assertVersionedPins(sdkRoot) {
+  const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8'));
+  if (manifest.sourceCommit !== SOURCE_COMMIT) {
+    fail(`Versioned manifest sourceCommit is not ${SOURCE_COMMIT}`);
   }
-
-  try {
-    const requireFromExt = createRequire(join(EXTENSION_ROOT, 'package.json'));
-    // May resolve via workspace → wallet-core dependency graph
-    const pkgJson = requireFromExt.resolve(`${EXPECTED_NAME}/package.json`);
-    candidates.push(dirname(pkgJson));
-  } catch {
-    /* optional — extension does not declare the SDK directly */
-  }
-
-  // pnpm virtual store symlink under wallet-core
-  try {
-    const pnpmDir = join(WALLET_CORE_ROOT, 'node_modules', '.pnpm');
-    if (existsSync(pnpmDir)) {
-      for (const entry of readdirSync(pnpmDir)) {
-        if (!entry.startsWith(`${EXPECTED_NAME}@`)) continue;
-        const nested = join(pnpmDir, entry, 'node_modules', EXPECTED_NAME);
-        candidates.push(nested);
-      }
+  const problems = [];
+  for (const [rel, expect] of Object.entries(manifest.files ?? {})) {
+    const file = join(sdkRoot, ...rel.split('/'));
+    if (!existsSync(file)) {
+      problems.push(`missing ${rel}; expected sha256 ${expect.sha256} from the versioned manifest`);
+      continue;
     }
-  } catch {
-    /* optional */
+    const data = readFileSync(file);
+    const sha256 = createHash('sha256').update(data).digest('hex');
+    if (sha256 !== expect.sha256 || data.length !== expect.size) {
+      problems.push(
+        `mismatch ${rel}: got ${sha256} ${data.length} expected ${expect.sha256} ${expect.size} from the versioned manifest`,
+      );
+    }
   }
-
-  const seen = new Set();
-  for (const c of candidates) {
-    const abs = resolve(c);
-    if (seen.has(abs)) continue;
-    seen.add(abs);
-    const pkgPath = join(abs, 'package.json');
-    if (existsSync(pkgPath)) return abs;
+  if (problems.length > 0) {
+    fail(
+      `Refusing cache. npm stellar-private-payments@0.2.1 is not this runtime.\n${problems.join('\n')}`,
+    );
   }
+}
 
+function acceptProvenance(candidate) {
+  const abs = resolve(candidate);
+  const pkgPath = join(abs, 'package.json');
+  const provenancePath = join(abs, 'SPP_SOURCE_PROVENANCE.json');
+  if (!existsSync(pkgPath) || !existsSync(provenancePath)) return null;
+  const provenance = JSON.parse(readFileSync(provenancePath, 'utf8'));
+  if (provenance.sourceCommit !== SOURCE_COMMIT) {
+    fail(
+      `SPP source commit ${JSON.stringify(provenance.sourceCommit)} is not ${SOURCE_COMMIT}. ` +
+        'npm stellar-private-payments@0.2.1 is not this runtime.',
+    );
+  }
+  assertVersionedPins(abs);
+  return abs;
+}
+
+function findBuiltSdk() {
+  for (const candidate of candidateRoots()) {
+    const accepted = acceptProvenance(candidate);
+    if (accepted) return accepted;
+  }
+  return null;
+}
+
+function prepareRuntime() {
+  const script = join(repoRoot(), 'scripts/prepare-spp-runtime.sh');
+  if (!existsSync(script)) {
+    fail(`Missing ${script}. npm stellar-private-payments@0.2.1 is not accepted.`);
+  }
+  console.log('[copy-spp-assets] no provenance yet; running scripts/prepare-spp-runtime.sh');
+  const result = spawnSync('bash', [script], {
+    cwd: repoRoot(),
+    stdio: 'inherit',
+    env: process.env,
+  });
+  if (result.status !== 0) {
+    fail(
+      `prepare-spp-runtime.sh exited ${String(result.status)}. ` +
+        'npm stellar-private-payments@0.2.1 is not accepted.',
+    );
+  }
+}
+
+function resolveSdkRoot() {
+  const existing = findBuiltSdk();
+  if (existing) return existing;
+  prepareRuntime();
+  const built = findBuiltSdk();
+  if (built) return built;
   fail(
-    `Could not resolve ${EXPECTED_NAME}@${EXPECTED_VERSION}. Tried:\n` +
-      [...seen].map((p) => `  - ${p}`).join('\n'),
+    'prepare-spp-runtime.sh finished without SPP_SOURCE_PROVENANCE.json for ' +
+      `${SOURCE_COMMIT}. npm stellar-private-payments@0.2.1 is not accepted.`,
   );
 }
 
@@ -268,8 +324,9 @@ async function main() {
   if (pkg.name !== EXPECTED_NAME) {
     fail(`Package name mismatch at ${pkgPath}: expected ${EXPECTED_NAME}, got ${pkg.name}`);
   }
-  if (pkg.version !== EXPECTED_VERSION) {
-    fail(`Package version mismatch at ${pkgPath}: expected ${EXPECTED_VERSION}, got ${pkg.version}`);
+  const provenance = JSON.parse(readFileSync(join(sdkRoot, 'SPP_SOURCE_PROVENANCE.json'), 'utf8'));
+  if (provenance.sourceCommit !== SOURCE_COMMIT) {
+    fail(`Refusing runtime whose sourceCommit is not ${SOURCE_COMMIT}`);
   }
 
   // Guard: never copy from spike vendor
@@ -283,13 +340,13 @@ async function main() {
 
   assertDestinationSafeToReplace(DEST_ROOT);
 
-  if (existsSync(DEST_ROOT)) {
-    rmSync(DEST_ROOT, { recursive: true, force: true });
-  }
-  mkdirSync(DEST_ROOT, { recursive: true });
+  const staging = `${DEST_ROOT}.staging-${process.pid}`;
+  stagingToClean = staging;
+  rmSync(staging, { recursive: true, force: true });
+  mkdirSync(staging, { recursive: true });
 
-  const jsFiles = await copyTreeFiltered(sdkRoot, DEST_ROOT, 'js');
-  const distFiles = await copyTreeFiltered(sdkRoot, DEST_ROOT, 'dist');
+  const jsFiles = await copyTreeFiltered(sdkRoot, staging, 'js');
+  const distFiles = await copyTreeFiltered(sdkRoot, staging, 'dist');
   const files = [...jsFiles, ...distFiles].sort((a, b) => a.path.localeCompare(b.path));
 
   const byPath = new Map(files.map((f) => [f.path, f]));
@@ -302,7 +359,7 @@ async function main() {
   }
 
   // Full profile: every circuits.json circuit id must have on-disk artifacts
-  const lockPath = join(DEST_ROOT, 'dist', 'circuits', 'circuits.json');
+  const lockPath = join(staging, 'dist', 'circuits', 'circuits.json');
   const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
   /** @type {string[]} */
   const circuitIds = [];
@@ -326,7 +383,9 @@ async function main() {
   const meta = {
     managedBy: MANAGED_BY,
     name: EXPECTED_NAME,
-    version: EXPECTED_VERSION,
+    version: pkg.version,
+    sourceCommit: SOURCE_COMMIT,
+    runtimeNote: 'Built from the pinned Nethermind commit. The npm 0.2.1 tarball is not this runtime even if package.json version matches.',
     profile: WEB_PROFILE ? 'web-runtime' : PROFILE,
     profileReason:
       'full: Client.new requires circuitsBaseUrl + circuitLock; prover loads r1cs/graph/proving keys. Reduced (circuits.json-only) profile was not verified safe for Client.new; matches laboratory RO-1 vendor tree minus .d.ts/source-bundle/freighter/types.',
@@ -340,14 +399,26 @@ async function main() {
     files,
   };
 
-  writeFileSync(join(DEST_ROOT, META_NAME), JSON.stringify(meta, null, 2) + '\n', 'utf8');
+  writeFileSync(join(staging, META_NAME), JSON.stringify(meta, null, 2) + '\n', 'utf8');
+  console.log(`[copy-spp-assets] atomic rename ${staging} -> ${DEST_ROOT}`);
+  const backup = `${DEST_ROOT}.bak-${process.pid}`;
+  if (existsSync(DEST_ROOT)) renameSync(DEST_ROOT, backup);
+  try {
+    renameSync(staging, DEST_ROOT);
+  } catch (cause) {
+    if (existsSync(backup) && !existsSync(DEST_ROOT)) renameSync(backup, DEST_ROOT);
+    throw cause;
+  }
+  if (existsSync(backup)) rmSync(backup, { recursive: true, force: true });
+  stagingToClean = '';
 
   console.log(
     JSON.stringify(
       {
         ok: true,
         profile: WEB_PROFILE ? 'web-runtime' : PROFILE,
-        version: EXPECTED_VERSION,
+        version: pkg.version,
+        sourceCommit: SOURCE_COMMIT,
         destination: DEST_ROOT,
         resolvedFrom: sdkRoot,
         fileCount: files.length,
