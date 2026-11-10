@@ -5,11 +5,21 @@ import { spawnSync } from 'node:child_process';
 import { compareFingerprints } from './t9-delta.mjs';
 
 const tool = { node: 'v22.23.4', pnpm: '10.33.4' };
-function tree(errors, tests) {
-  return { git: { sha: 'a'.repeat(40) }, toolchain: { ...tool }, errors, tests };
+const exits = {
+  'pnpm-install': 0,
+  'typecheck-extension': 1,
+  'typecheck-wallet-core': 1,
+  'test-full-extension': 1,
+  'test-full-wallet-core': 1,
+};
+function tree(errors, tests, extra = {}) {
+  return { git: { sha: 'a'.repeat(40) }, toolchain: { ...tool }, exits: { ...exits }, errors, tests, ...extra };
 }
-const baseErr = [{ package: 'extension', file: 'src/a.ts', code: 'TS4111', message: 'Property x' }];
-const baseFail = [{ package: 'extension', file: 'tests/a.test.ts', fullName: 'timer gate', status: 'failed', reason: 'setTimeout' }];
+const baseErr = [{ package: 'extension', file: 'src/a.ts', line: 4, code: 'TS4111', message: 'Property x' }];
+const baseFail = [
+  { package: 'extension', file: 'tests/a.test.ts', fullName: 'timer gate', status: 'failed', reason: 'setTimeout' },
+  { package: 'wallet-core', file: 'tests/security/staticInvariants.test.ts', fullName: 'mainnet', status: 'failed', reason: 'mainnet' },
+];
 const base = tree(baseErr, baseFail);
 
 function check(name, result, ok) {
@@ -24,7 +34,11 @@ function check(name, result, ok) {
 check('same', compareFingerprints(base, tree(baseErr, baseFail)), true);
 check('added-error', compareFingerprints(base, tree([...baseErr, { package: 'extension', file: 'src/b.ts', code: 'TS2304', message: 'missing' }], baseFail)), false);
 check('added-failure', compareFingerprints(base, tree(baseErr, [...baseFail, { package: 'extension', file: 'tests/b.test.ts', fullName: 'new', status: 'failed', reason: 'no' }])), false);
-check('resolved-failure', compareFingerprints(base, tree(baseErr, [{ ...baseFail[0], status: 'passed', reason: '' }])), true);
+check('resolved-failure', compareFingerprints(base, tree(baseErr, [{ ...baseFail[0], status: 'passed', reason: '' }, baseFail[1]], { exits: { ...exits, 'test-full-extension': 0 } })), true);
+check('deleted-test', compareFingerprints(base, tree(baseErr, [baseFail[1]], { exits: { ...exits, 'test-full-extension': 0 } })), false);
+check('became-skip', compareFingerprints(base, tree(baseErr, [{ ...baseFail[0], status: 'skipped' }, baseFail[1]])), false);
+check('message-not-in-key', compareFingerprints(base, tree([{ ...baseErr[0], message: 'different wording' }], baseFail)), true);
+check('empty-tests', compareFingerprints(base, tree(baseErr, [baseFail[1]])), false);
 
 const dir = mkdtempSync(join(tmpdir(), 't9-delta-'));
 const basePath = join(dir, 'base.json');

@@ -31,7 +31,25 @@ export function parseTypecheck(logText, packageName) {
         const index = file.indexOf(marker);
         if (index >= 0) file = file.slice(index + marker.length);
       }
-      current = { package: packageName, file, code: match.groups.code, message: match.groups.msg };
+      current = {
+        package: packageName,
+        file,
+        line: Number(match.groups.line),
+        code: match.groups.code,
+        message: match.groups.msg,
+      };
+      continue;
+    }
+    const global = /^error (?<code>TS\d+): (?<msg>.*)$/.exec(line);
+    if (global) {
+      flush();
+      errors.push({
+        package: packageName,
+        file: '<global>',
+        line: 0,
+        code: global.groups.code,
+        message: normalizeText(global.groups.msg),
+      });
       continue;
     }
     if (current && (line.startsWith(' ') || line.startsWith('\t'))) {
@@ -83,19 +101,33 @@ function fields(text) {
   return out;
 }
 
+function readExit(logDir, name) {
+  const path = join(logDir, `${name}.exit`);
+  if (!existsSync(path)) return null;
+  const text = readFileSync(path, 'utf8').trim();
+  if (text === '') return null;
+  const value = Number(text);
+  return Number.isInteger(value) ? value : null;
+}
+
 export function assembleFingerprint(logDir, git) {
   const tool = fields(`${readText(join(logDir, '00-toolchain.txt'))}\n${readText(join(logDir, '01-tool-versions-after-install.txt'))}`);
+  const names = ['pnpm-install', 'typecheck-extension', 'typecheck-wallet-core', 'test-full-extension', 'test-full-wallet-core'];
+  const exits = {};
+  for (const name of names) exits[name] = readExit(logDir, name);
+  const tests = [
+    ...parseVitest(readText(join(logDir, 'test-full-extension.json'))),
+    ...parseVitest(readText(join(logDir, 'test-full-wallet-core.json'))),
+  ];
   return {
     git,
     toolchain: { node: tool.node ?? '', pnpm: tool.pnpm ?? '' },
+    exits,
     errors: [
       ...parseTypecheck(readText(join(logDir, 'typecheck-extension.log')), 'extension'),
       ...parseTypecheck(readText(join(logDir, 'typecheck-wallet-core.log')), 'wallet-core'),
     ],
-    tests: [
-      ...parseVitest(readText(join(logDir, 'test-full-extension.json'))),
-      ...parseVitest(readText(join(logDir, 'test-full-wallet-core.json'))),
-    ],
+    tests,
   };
 }
 
