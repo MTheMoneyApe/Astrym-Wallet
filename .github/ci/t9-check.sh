@@ -147,21 +147,53 @@ full_suite() {
   run test-full-wallet-core pnpm --filter @solanym/wallet-core exec vitest run --reporter=json --outputFile="${LOG_DIR}/test-full-wallet-core.json"
 }
 
-note "toolchain node=$(node -v) pnpm=$(pnpm -v) npm=$(npm -v) head=$(git rev-parse HEAD)"
+write_toolchain() {
+  {
+    echo "node=$(node -v)"
+    echo "pnpm=$(pnpm -v)"
+    echo "npm=$(npm -v)"
+    echo "head=$(git -C "$ROOT" rev-parse HEAD)"
+    echo "baseSha=${T9_BASE_SHA:-}"
+    echo "headSha=${T9_HEAD_SHA:-}"
+    echo "mergeSha=${T9_MERGE_SHA:-}"
+    echo "runnerImage=${ImageOS:-local}"
+    echo "imageVersion=${ImageVersion:-local}"
+  } >"${LOG_DIR}/00-toolchain.txt"
+}
+
+write_versions() {
+  {
+    echo "tsc_root=$(pnpm exec tsc --version 2>/dev/null || true)"
+    echo "vitest_root=$(pnpm exec vitest --version 2>/dev/null || true)"
+    echo "node=$(node -v)"
+    echo "pnpm=$(pnpm -v)"
+  } >"${LOG_DIR}/01-tool-versions-after-install.txt"
+}
+
+note "toolchain node=$(node -v) pnpm=$(pnpm -v) npm=$(npm -v) head=$(git -C "$ROOT" rev-parse HEAD)"
+write_toolchain
 
 case "$MODE" in
   prepare)
+    run pnpm-install pnpm install --frozen-lockfile
+    write_versions
     prepare_assets
     ;;
   focal)
+    run pnpm-install pnpm install --frozen-lockfile
+    write_versions
     prepare_assets
     focal_tests
     ;;
   full)
+    run pnpm-install pnpm install --frozen-lockfile
+    write_versions
     prepare_assets
     full_suite
     ;;
   all)
+    run pnpm-install pnpm install --frozen-lockfile
+    write_versions
     prepare_assets
     focal_tests
     full_suite
