@@ -15,6 +15,22 @@
       "sha256": "35c36f4d0f7055514156b67df9995cb9550e5f380e9a84d85dddb457d17b241e",
       "size": 5526
     },
+    "dist/circuits/NOTICE.txt": {
+      "sha256": "d918fcd58c872971ef4785eaa01a45d0a442bed4171a4468d045c701943a88da",
+      "size": 1261
+    },
+    "dist/LICENSE.txt": {
+      "sha256": "3e4745a3293b2cc2fdac4f1a109f96f2036756588a7c6864beb2fa7e4a6b9871",
+      "size": 11360
+    },
+    "dist/licenses/GPL-3.0.txt": {
+      "sha256": "c40ccf650d110831d359f8f262435e65917474018d67b24383cce2b244dbd9ad",
+      "size": 35129
+    },
+    "dist/licenses/LGPL-3.0.txt": {
+      "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+      "size": 7651
+    },
     "dist/circuits/keyOwnership_proving_key.bin": {
       "sha256": "9c0482fad1ccf26cfde666d92ac7079bbbd232cd0e2a8e21c21dced5086a7331",
       "size": 47568
@@ -220,16 +236,16 @@
       "size": 10034824
     },
     "dist/stellar_private_payments_web_bg.wasm": {
-      "sha256": "bc71e665a818a8b5aff8e7394c22a293e0d71cbad023e217de0889dcbf0aec93",
-      "size": 2445778
+      "sha256": "8280c686ffc2d55c06a23aec92defb3e21850dd695bcb47a69ac45018b721027",
+      "size": 2445784
     },
     "dist/stellar_private_payments_web.js": {
       "sha256": "e93ac1520b5c1175d2203be2a6ae28265620dab1e0c7afba375f6f01dcacc139",
       "size": 185635
     },
     "dist/workers/prover-worker-module_bg.wasm": {
-      "sha256": "c0077ecb464e8b13d94b903e1b2f1d1501e51f32705c5b8511978f142862729d",
-      "size": 2625168
+      "sha256": "67275990eabce56529f18025709b12cf37970cd4f0b60766f0d4bba62d13f099",
+      "size": 2625174
     },
     "dist/workers/prover-worker-module.js": {
       "sha256": "d52837972a027223824e3f5a3aa722bbea56253512750972273d57a4fede7006",
@@ -240,8 +256,8 @@
       "size": 165
     },
     "dist/workers/storage-worker-module_bg.wasm": {
-      "sha256": "54810347ec3ab85faef35a9228f8279582a408ee1c37e193c5dd4d4bfc3eecad",
-      "size": 2727472
+      "sha256": "67ffccf1a1715a0a11e4ed987393a3856d91262088050dde601431a4ec6850c4",
+      "size": 2727478
     },
     "dist/workers/storage-worker-module.js": {
       "sha256": "8f5162a926478403f455dda7344e4154bd16f36a5f71c1173fd95032cf7070e1",
