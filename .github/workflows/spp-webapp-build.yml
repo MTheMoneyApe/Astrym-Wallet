@@ -1,6 +1,9 @@
 name: SPP webapp build
 
 on:
+  push:
+    branches:
+      - astrym/t4-spp-repair
   pull_request:
   workflow_dispatch:
 
