@@ -31,6 +31,7 @@ import {
 import { NymHostPermissionService } from './NymHostPermissionService.js';
 import {
   runNymHttpSmoke,
+  type NymHttpSmokeMixFetch,
   type NymHttpSmokeRequest,
   type NymHttpSmokeResult,
 } from './NymHttpSmoke.js';
@@ -1040,10 +1041,12 @@ export class NymRuntimeController {
    */
   async runHttpSmoke(request?: NymHttpSmokeRequest): Promise<NymHttpSmokeResult> {
     const connected = this._transport.getSnapshot().connected === true;
+    const mixFetch: NymHttpSmokeMixFetch = (url, init) =>
+      init === undefined ? this._transport.fetch(url) : this._transport.fetch(url, init);
     return runNymHttpSmoke({
       connected,
-      request,
-      mixFetch: (url, init) => this._transport.fetch(url, init),
+      mixFetch,
+      ...(request !== undefined ? { request } : {}),
     });
   }
 
