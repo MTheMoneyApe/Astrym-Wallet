@@ -66,11 +66,136 @@ jobs:
           pnpm install --frozen-lockfile 2>&1 | tee "$RUNNER_TEMP/spp-logs/install.txt"
 
       - name: Build
+        id: build
+        continue-on-error: true
         run: |
           set -o pipefail
           pnpm build:webapp 2>&1 | tee "$RUNNER_TEMP/spp-logs/build-webapp.txt"
 
+      - name: Capture WASM build forensics (even on pin mismatch)
+        if: always()
+        run: |
+          set -euo pipefail
+          proof="$RUNNER_TEMP/spp-proof/forensics"
+          source=".cache/spp-upstream/stellar-private-payments/sdk/web"
+          mkdir -p "$proof"
+          for name in \
+            stellar_private_payments_web_bg.wasm \
+            workers/storage-worker-module_bg.wasm \
+            workers/prover-worker-module_bg.wasm; do
+            file="$source/dist/$name"
+            if [ -f "$file" ]; then
+              mkdir -p "$proof/wasm/$(dirname "$name")"
+              cp "$file" "$proof/wasm/$name"
+            fi
+          done
+          if [ -f "$source/.trunk-wasm-profile" ]; then
+            cp "$source/.trunk-wasm-profile" "$proof/"
+          fi
+          if [ -f ".cache/spp-upstream/rust-flags.txt" ]; then
+            cp ".cache/spp-upstream/rust-flags.txt" "$proof/"
+          fi
+          python3 - "$proof" "packages/wallet-core/src/stellar/spp/nethermind/spp-runtime-manifest.json" <<'PY'
+          import hashlib, json, sys
+          from pathlib import Path
+
+          root, manifest_path = Path(sys.argv[1]), Path(sys.argv[2])
+          manifest = json.loads(manifest_path.read_text())
+          names = [
+              "stellar_private_payments_web_bg.wasm",
+              "workers/storage-worker-module_bg.wasm",
+              "workers/prover-worker-module_bg.wasm",
+          ]
+
+          def leb(data, pos):
+              value = shift = 0
+              while True:
+                  if pos >= len(data):
+                      raise ValueError("truncated LEB128")
+                  byte = data[pos]
+                  pos += 1
+                  value |= (byte & 0x7f) << shift
+                  if byte < 0x80:
+                      return value, pos
+                  shift += 7
+                  if shift > 35:
+                      raise ValueError("oversized LEB128")
+
+          records = []
+          for name in names:
+              path = root / "wasm" / name
+              if not path.is_file():
+                  records.append({"path": name, "present": False})
+                  continue
+              data = path.read_bytes()
+              if data[:4] != b"\0asm":
+                  raise SystemExit(f"{name}: invalid wasm magic")
+              sections, pos = [], 8
+              while pos < len(data):
+                  section_id = data[pos]
+                  pos += 1
+                  size, pos = leb(data, pos)
+                  body = data[pos:pos + size]
+                  if len(body) != size:
+                      raise SystemExit(f"{name}: truncated section {section_id}")
+                  pos += size
+                  entry = {
+                      "id": section_id,
+                      "size": size,
+                      "sha256": hashlib.sha256(body).hexdigest(),
+                  }
+                  if section_id == 0:
+                      n, offset = leb(body, 0)
+                      custom_name = body[offset:offset + n].decode("utf-8", "replace")
+                      entry["customName"] = custom_name
+                      entry["customPayloadSize"] = len(body) - offset - n
+                      entry["customPayloadSha256"] = hashlib.sha256(body[offset + n:]).hexdigest()
+                  sections.append(entry)
+              expected = manifest["files"].get("dist/" + name)
+              records.append({
+                  "path": name,
+                  "present": True,
+                  "size": len(data),
+                  "sha256": hashlib.sha256(data).hexdigest(),
+                  "expected": expected,
+                  "sections": sections,
+              })
+
+          (root / "wasm-forensics.json").write_text(json.dumps({
+              "sourceCommit": manifest["sourceCommit"],
+              "records": records,
+          }, indent=2) + "\n")
+          print((root / "wasm-forensics.json").read_text())
+          PY
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "runner=$(uname -s)-$(uname -m)"
+            echo "rustc=$(rustc --version 2>/dev/null || true)"
+            echo "wasm_bindgen=$(wasm-bindgen --version 2>/dev/null || true)"
+            echo "wasm_opt=$(.cache/spp-upstream/stellar-private-payments/target/tmp/binaryen/binaryen-version_131/bin/wasm-opt --version 2>/dev/null || true)"
+            echo "source_date_epoch=${SOURCE_DATE_EPOCH:-unset}"
+            echo "build_root=$PWD/.cache/spp-upstream"
+          } > "$proof/toolchain-and-paths.txt"
+          find "$proof" -type f -printf '%P %s bytes\n' | sort > "$proof/files.txt"
+
+      - name: Upload WASM build forensics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: spp-wasm-build-forensics
+          path: ${{ runner.temp }}/spp-proof/forensics
+          if-no-files-found: warn
+
+      - name: Upload SPP build logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: spp-build-logs
+          path: ${{ runner.temp }}/spp-logs
+          if-no-files-found: warn
+
       - name: Record the SHA-256 manifest and wasm sections
+        if: steps.build.outcome == 'success'
         run: |
           set -euo pipefail
           proof="$RUNNER_TEMP/spp-proof"
@@ -96,7 +221,7 @@ jobs:
 
       # actions/upload-artifact v4.6.2
       - name: Upload the SHA-256 manifest
-        if: always()
+        if: always() && steps.build.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: spp-sha256-manifest
@@ -105,9 +230,17 @@ jobs:
 
       # actions/upload-artifact v4.6.2
       - name: Upload the wasm section comparison
-        if: always()
+        if: always() && steps.build.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: spp-wasm-sections
           path: ${{ runner.temp }}/spp-proof/sections
           if-no-files-found: error
+
+      - name: Enforce the SPP build result after diagnostics
+        if: always()
+        run: |
+          if [ "${{ steps.build.outcome }}" != "success" ]; then
+            echo "SPP webapp build failed; forensic artifacts were uploaded above." >&2
+            exit 1
+          fi
