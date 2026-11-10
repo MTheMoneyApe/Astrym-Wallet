@@ -14,17 +14,26 @@ concurrency:
   group: t9-regression-${{ github.ref }}
   cancel-in-progress: true
 
-# full-suite has no dependency on critical-gates, so a red gate job does not skip it.
+# Commits from git ls-remote on 2026-11-10, not the moving v4 tag.
+# actions/checkout v4.4.0 11d5960a326750d5838078e36cf38b85af677262
+# actions/setup-node v4.4.0 49933ea5288caeca8642d1e84afbd3f7d6820020
+# pnpm/action-setup v4.4.0 fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+# actions/upload-artifact v4.6.2 ea165f8d65b6e75b540449e92b4886f43607fa02
+# Runner ubuntu-24.04. ubuntu-latest moves to Ubuntu 26.04 on 2026-11-19.
+# Node 22.23.4 and pnpm 10.33.4 are the measured T9 toolchain, not Vercel.
+
 jobs:
   critical-gates:
     name: t9-critical-gates
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
         with:
           version: 10.33.4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22.23.4
           cache: pnpm
@@ -32,16 +41,24 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Asset prep and focal invariants
         run: bash .github/ci/t9-check.sh focal
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: t9-critical-gates
+          path: t9-logs
+          if-no-files-found: error
 
   full-suite:
     name: t9-full-suite
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
         with:
           version: 10.33.4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22.23.4
           cache: pnpm
@@ -49,3 +66,54 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Asset prep, typecheck, and full vitest
         run: bash .github/ci/t9-check.sh full
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: t9-full-suite
+          path: t9-logs
+          if-no-files-found: error
+
+  delta:
+    name: t9-delta
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require base and head SHAs
+        env:
+          T9_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          T9_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          case "$T9_BASE_SHA" in
+            ""|0000000000000000000000000000000000000000) echo "baseline sha missing"; exit 1 ;;
+          esac
+          case "$T9_HEAD_SHA" in
+            "") echo "head sha missing"; exit 1 ;;
+          esac
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha || github.event.before }}
+          path: t9-baseline
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+        with:
+          version: 10.33.4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Compare base and head
+        env:
+          T9_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          T9_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          T9_BASE_DIR: ${{ github.workspace }}/t9-baseline
+        run: bash .github/ci/t9-delta-job.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: t9-delta
+          path: t9-logs
+          if-no-files-found: error
