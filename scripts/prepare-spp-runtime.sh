@@ -31,8 +31,8 @@ command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
 
 export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
 export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
-# After the rest of PATH, so a bootstrap rustup is found and a caller tool is not hidden.
-export PATH="${PATH:+$PATH:}$CARGO_HOME/bin"
+# The pinned rustup 1.97.1 proxy must win over any image toolchain.
+export PATH="$CARGO_HOME/bin${PATH:+:$PATH}"
 
 curl_https() {
   local dest="$1" url="$2"
@@ -192,7 +192,8 @@ ensure_official_jq() {
     mv "$dest.partial" "$dest"
   fi
   echo "$expect  $dest" | sha256sum -c - || die "jq 1.7.1 checksum mismatch; refusing to continue"
-  export PATH="$dir:$PATH"
+  # Pinned rustup stays ahead of jq and of any image toolchain.
+  export PATH="$CARGO_HOME/bin:$dir:$PATH"
   log "jq on build PATH: $dest ($("$dest" --version))"
 }
 ensure_official_jq
@@ -218,10 +219,11 @@ fi
 if [ -n "${RUSTFLAGS:-}${CARGO_ENCODED_RUSTFLAGS:-}" ]; then
   die "RUSTFLAGS or CARGO_ENCODED_RUSTFLAGS is already set; refusing a mixed flag set"
 fi
-mkdir -p "$CARGO_HOME" "$RUSTUP_HOME" "$BUILD_ROOT/bin"
+mkdir -p "$CARGO_HOME" "$RUSTUP_HOME" "$BUILD_ROOT/bin" "$BUILD_ROOT/date-bin"
 SOURCE_DATE_EPOCH="$(git -C "$SRC" log -1 --format=%ct)"
 export SOURCE_DATE_EPOCH
-cat > "$BUILD_ROOT/bin/date" <<'EOF'
+# The date wrapper is only on PATH for sdk/web/scripts/build.sh, which stamps NOTICE.txt.
+cat > "$BUILD_ROOT/date-bin/date" <<'EOF'
 #!/bin/sh
 # Upstream stamps NOTICE.txt with `date -u +%Y-%m-%dT%H:%M:%SZ`.
 # Honor SOURCE_DATE_EPOCH so two machines emit the same notice.
@@ -230,8 +232,7 @@ if [ -n "${SOURCE_DATE_EPOCH:-}" ] && [ "$1" = "-u" ] && [ "$2" = "+%Y-%m-%dT%H:
 fi
 exec /usr/bin/date "$@"
 EOF
-chmod 755 "$BUILD_ROOT/bin/date"
-export PATH="$BUILD_ROOT/bin:$PATH"
+chmod 755 "$BUILD_ROOT/date-bin/date"
 
 CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$SRC/target}"
 export CARGO_TARGET_DIR
@@ -245,7 +246,10 @@ config_path, flag_file = sys.argv[1], sys.argv[2]
 try:
     import tomllib
 except ModuleNotFoundError:
-    import tomli as tomllib
+    raise SystemExit(
+        "python3 tomllib is required to read upstream .cargo/config.toml "
+        "(Python 3.11 or newer). Refusing to guess rustflags."
+    )
 cfg = tomllib.loads(open(config_path, encoding="utf-8").read())
 upstream = list(cfg["target"]["wasm32-unknown-unknown"]["rustflags"])
 required = [
@@ -300,12 +304,52 @@ log "TOOL jq $(jq --version)"
 log "TOOL git $(git --version)"
 log "TOOL python3 $(python3 --version)"
 log "SOURCE_DATE_EPOCH $SOURCE_DATE_EPOCH"
-log "NOTICE date $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+log "NOTICE date $($BUILD_ROOT/date-bin/date -u +"%Y-%m-%dT%H:%M:%SZ")"
 log "effective RUSTFLAGS: $RUSTFLAGS"
 log "effective CFLAGS: $CFLAGS"
+log "PATH rustup $(command -v rustup) cargo $(command -v cargo)"
+
+# Upstream build.sh checksums the binaryen tarball only when wasm-opt is absent.
+# An existing binary is accepted on its version string alone. Download the
+# pinned tarball here, fail if the SHA-256 does not match, then let build.sh
+# use that tree.
+pin_binaryen() {
+  local platform expect url dest dir
+  case "$(uname -s)-$(uname -m)" in
+    Linux-x86_64)
+      platform="x86_64-linux"
+      expect="b5bf1f0eaf17c63ee588ff7a5954dc8f6ce2c26989051c66f24dfe9ece3e46db"
+      ;;
+    Linux-aarch64|Linux-arm64)
+      platform="aarch64-linux"
+      expect="ba991f677edd9a21d2bc96c0144bc8ac5b112d4d98a3eb266e075e22e557df2a"
+      ;;
+    *)
+      die "no pinned binaryen 131 tarball for $(uname -s)-$(uname -m)"
+      ;;
+  esac
+  dir="$SRC/target/tmp/binaryen"
+  dest="$dir/binaryen-version_131-${platform}.tar.gz"
+  rm -rf "$dir"
+  mkdir -p "$dir"
+  url="https://github.com/WebAssembly/binaryen/releases/download/version_131/binaryen-version_131-${platform}.tar.gz"
+  log "COMMAND: curl binaryen version_131 $platform"
+  curl_https "$dest" "$url"
+  if ! echo "$expect  $dest.partial" | sha256sum -c -; then
+    rm -f "$dest.partial"
+    die "binaryen version_131 checksum mismatch; refusing to continue"
+  fi
+  mv "$dest.partial" "$dest"
+  tar -xzf "$dest" -C "$dir"
+  rm -f "$dest"
+  [ -x "$dir/binaryen-version_131/bin/wasm-opt" ] || die "wasm-opt missing after the checksummed binaryen extract"
+  unset WASM_OPT
+  log "binaryen version_131 tarball sha256 $expect"
+}
+pin_binaryen
 
 log "COMMAND: bash sdk/web/scripts/build.sh"
-( cd "$SRC" && bash sdk/web/scripts/build.sh )
+( cd "$SRC" && PATH="$BUILD_ROOT/date-bin:$PATH" bash sdk/web/scripts/build.sh )
 
 log "COMMAND: scan shipped files for host paths and wasm memory limits"
 python3 - "$SRC/sdk/web" "$SRC" "$CARGO_HOME" "$RUSTUP_HOME" "$BUILD_ROOT" \
