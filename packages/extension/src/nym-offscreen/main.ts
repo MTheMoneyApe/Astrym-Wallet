@@ -6,6 +6,7 @@
 import { classifyNymFailure } from './diagnostics.js';
 import { NymOffscreenRuntime } from './runtime.js';
 import {
+  NYM_OFFSCREEN_LIFELINE,
   isNymOffscreenRequest,
   nymOffscreenError,
   nymOffscreenOk,
@@ -13,6 +14,14 @@ import {
 } from './protocol.js';
 
 const runtime = new NymOffscreenRuntime();
+
+if (typeof chrome !== 'undefined' && typeof chrome.runtime?.connect === 'function') {
+  try {
+    chrome.runtime.connect({ name: NYM_OFFSCREEN_LIFELINE });
+  } catch {
+    /* RPC still works if the lifeline port cannot be opened. */
+  }
+}
 
 async function handleMessage(raw: unknown): Promise<NymOffscreenResponse> {
   if (!isNymOffscreenRequest(raw)) {

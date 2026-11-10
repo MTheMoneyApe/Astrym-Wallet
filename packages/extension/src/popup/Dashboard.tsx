@@ -35,6 +35,9 @@ import type {
   NymStellarHorizonUiResult,
   NymUiSnapshot,
 } from './NymTransportPanel.js';
+import { PrivacyModeIndicator } from './privacyIndicator.js';
+import { NYM_PRIVACY_PREFERENCE_STORAGE_KEY } from '../shared/nymPrivacyPreference.js';
+import { bindNymRuntimeStatus } from '../shared/nymRuntimeStatus.js';
 import { beginGatewayPermissionRequestFromUserGesture } from './nymPermissionGesture.js';
 import { NYM_LIVE_SMOKE_EXECUTION_AUTHORIZED } from '../nym-offscreen/liveSmokeAuth.js';
 import { NYM_VERIFIED_GATEWAY } from '../nym-offscreen/verifiedGateway.js';
@@ -46,6 +49,10 @@ function coerceNymUiSnapshot(snap: {
   implementation: string;
   selfAddress?: string | null | undefined;
   mode: NymTransportMode;
+  preferenceHydrated?: boolean;
+  egressBlocked?: boolean;
+  privacyPreference?: 'direct' | 'nym' | null;
+  preferenceDurable?: boolean;
   documentReady: boolean;
   diagnosticCode?: string | undefined;
   diagnosticStage?: string | null | undefined;
@@ -64,6 +71,10 @@ function coerceNymUiSnapshot(snap: {
     mode: snap.mode,
     documentReady: snap.documentReady,
   };
+  if (snap.preferenceHydrated !== undefined) out.preferenceHydrated = snap.preferenceHydrated;
+  if (snap.egressBlocked !== undefined) out.egressBlocked = snap.egressBlocked;
+  if (snap.privacyPreference !== undefined) out.privacyPreference = snap.privacyPreference;
+  if (snap.preferenceDurable !== undefined) out.preferenceDurable = snap.preferenceDurable;
   if (snap.selfAddress !== undefined) out.selfAddress = snap.selfAddress;
   if (snap.diagnosticCode !== undefined) out.diagnosticCode = snap.diagnosticCode;
   if (snap.diagnosticStage !== undefined) out.diagnosticStage = snap.diagnosticStage;
@@ -949,8 +960,12 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     lastError: null,
     connected: false,
     implementation: 'mix-fetch-offscreen',
-    mode: 'direct',
+    // Fail closed until NYM_STATUS returns the runtime snapshot. Do not paint Direct.
+    mode: 'nym',
     documentReady: false,
+    preferenceHydrated: false,
+    egressBlocked: true,
+    privacyPreference: null,
   });
   const nymReadyForSpp = nymSnapshot.mode === 'nym' && nymSnapshot.connected;
   const sppStatusSnapshot: SppIntegrationSnapshot = useMemo(
@@ -1071,9 +1086,8 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     useState<NymStellarHorizonUiResult | null>(null);
 
   useEffect(() => {
-    if (view !== 'settings') return;
     let cancelled = false;
-    (async () => {
+    const pull = async () => {
       try {
         const snap = await sendIpcMessage('NYM_STATUS', {});
         if (!cancelled) setNymSnapshot(coerceNymUiSnapshot(snap));
@@ -1088,9 +1102,30 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           }));
         }
       }
-    })();
+    };
+    void pull();
+    const onChanged = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ) => {
+      if (area !== 'local' || !changes[NYM_PRIVACY_PREFERENCE_STORAGE_KEY]) return;
+      void pull();
+    };
+    if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.addListener(onChanged);
+    }
+    const unbindStatus = bindNymRuntimeStatus(
+      typeof chrome !== 'undefined' ? chrome.runtime?.onMessage : undefined,
+      (snapshot) => {
+        if (!cancelled) setNymSnapshot(coerceNymUiSnapshot(snapshot));
+      },
+    );
     return () => {
       cancelled = true;
+      unbindStatus();
+      if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+        chrome.storage.onChanged.removeListener(onChanged);
+      }
     };
   }, [view]);
 
@@ -1369,7 +1404,6 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         message: res.message,
         transportFetchInvoked: res.transportFetchInvoked,
       });
-      setNymSnapshot((prev) => ({ ...prev, mode: res.transport }));
     } catch (err: unknown) {
       setNymStellarHorizonResult({
         state: 'error',
@@ -1429,7 +1463,6 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         message: res.message,
         transportFetchInvoked: res.transportFetchInvoked,
       });
-      setNymSnapshot((prev) => ({ ...prev, mode: res.transport }));
     } catch (err: unknown) {
       setNymPublicDataResult({
         state: 'error',
@@ -1549,22 +1582,30 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   };
 
   if (view === 'receive') {
-    return <ReceiveAddressView account={account} onBack={() => setView('dashboard')} />;
+    return (
+      <div className="view-container">
+        <PrivacyModeIndicator snapshot={nymSnapshot} />
+        <ReceiveAddressView account={account} onBack={() => setView('dashboard')} />
+      </div>
+    );
   }
 
   if (view === 'send' && account) {
     return (
-      <Send
-        onBack={() => setView('dashboard')}
-        accountIndex={account.index}
-        accountAddress={account.address}
-        onComplete={() => setView('dashboard')}
-        privatePaymentsEnabled={sppSelected && nymReadyForSpp}
-        privatePreparePhase={sppPrepareStatus?.phase ?? 'idle'}
-        privatePoolContract={sppPoolContract}
-        paymentMode={sendKind}
-        onPaymentModeChange={setSendKind}
-      />
+      <>
+        <PrivacyModeIndicator snapshot={nymSnapshot} />
+        <Send
+          onBack={() => setView('dashboard')}
+          accountIndex={account.index}
+          accountAddress={account.address}
+          onComplete={() => setView('dashboard')}
+          privatePaymentsEnabled={sppSelected && nymReadyForSpp}
+          privatePreparePhase={sppPrepareStatus?.phase ?? 'idle'}
+          privatePoolContract={sppPoolContract}
+          paymentMode={sendKind}
+          onPaymentModeChange={setSendKind}
+        />
+      </>
     );
   }
 
@@ -1581,7 +1622,13 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           snapshot={sppStatusSnapshot}
           probing={!sppProbeDone}
           sessionGeneration={sppSessionGeneration}
-          nymMode={nymSnapshot.mode === 'nym' ? 'nym' : 'direct'}
+          nymMode={
+            nymSnapshot.preferenceHydrated === true &&
+            nymSnapshot.mode === 'direct' &&
+            nymSnapshot.egressBlocked !== true
+              ? 'direct'
+              : 'nym'
+          }
           nymConnected={nymSnapshot.connected}
           sppSelected={sppSelected}
           prepareStatus={sppPrepareStatus ?? null}
@@ -1806,10 +1853,13 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
                 <CopyAddressButton address={account.address} label={account.label} />
               </div>
               
-              <div className="horizon-status" data-horizon-status={rpcStatus}>
-                {rpcStatus === 'connecting' && <span className="text-secondary">Horizon pending</span>}
-                {rpcStatus === 'connected' && <span className="text-accent">Horizon OK</span>}
-                {rpcStatus === 'unavailable' && <span className="error-text">Horizon failed</span>}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                <PrivacyModeIndicator snapshot={nymSnapshot} />
+                <div className="horizon-status" data-horizon-status={rpcStatus}>
+                  {rpcStatus === 'connecting' && <span className="text-secondary">Horizon pending</span>}
+                  {rpcStatus === 'connected' && <span className="text-accent">Horizon OK</span>}
+                  {rpcStatus === 'unavailable' && <span className="error-text">Horizon failed</span>}
+                </div>
               </div>
             </div>
             

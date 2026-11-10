@@ -20,6 +20,10 @@ function toSnapshot(snap: NymRuntimeUiSnapshot): ValidatedResponsePayload<'NYM_S
     implementation: snap.implementation,
     selfAddress: snap.selfAddress ?? null,
     mode: snap.mode,
+    preferenceHydrated: snap.preferenceHydrated,
+    egressBlocked: snap.egressBlocked,
+    privacyPreference: snap.privacyPreference,
+    preferenceDurable: snap.preferenceDurable,
     documentReady: snap.documentReady,
     diagnosticCode: snap.diagnosticCode,
     diagnosticStage: snap.diagnosticStage ?? null,
@@ -85,7 +89,9 @@ export function createNymStatusHandler() {
   return async (
     _payload: ValidatedRequestPayload<'NYM_STATUS'>,
   ): Promise<ValidatedResponsePayload<'NYM_STATUS'>> => {
-    const snap = await getNymRuntimeController().refreshStatus();
+    const ctrl = getNymRuntimeController();
+    await ctrl.whenPrivacyReady();
+    const snap = await ctrl.refreshStatus();
     // Reload / Settings: if already connected, re-arm prepare without fake ready.
     if (snap.connected && snap.mode === 'nym') {
       void ensureSppAutoPrepareIfNeeded({
@@ -104,8 +110,8 @@ export function createNymSetModeHandler() {
     payload: ValidatedRequestPayload<'NYM_SET_MODE'>,
   ): Promise<ValidatedResponsePayload<'NYM_SET_MODE'>> => {
     const ctrl = getNymRuntimeController();
-    // Direct is the default Horizon path. Nym mode stays fail-closed (no silent clearnet).
-    ctrl.setMode(payload.mode);
+    // Direct is persisted only for this explicit request. Nym stays fail-closed.
+    await ctrl.setMode(payload.mode);
     await ctrl.syncGatewayConfigUi();
     return toSnapshot(ctrl.getSnapshot());
   };
