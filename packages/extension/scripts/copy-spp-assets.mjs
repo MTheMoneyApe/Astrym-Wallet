@@ -49,9 +49,13 @@ const PROFILE = 'full';
 const MANAGED_BY = 'solanym-extension-copy-spp-assets';
 
 const META_NAME = 'SPP_ASSET_META.json';
+let stagingToClean = '';
 
 /** @returns {never} */
 function fail(message) {
+  if (stagingToClean) {
+    rmSync(stagingToClean, { recursive: true, force: true });
+  }
   console.error(`[copy-spp-assets] ERROR: ${message}`);
   process.exit(1);
 }
@@ -337,6 +341,7 @@ async function main() {
   assertDestinationSafeToReplace(DEST_ROOT);
 
   const staging = `${DEST_ROOT}.staging-${process.pid}`;
+  stagingToClean = staging;
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(staging, { recursive: true });
 
@@ -405,6 +410,7 @@ async function main() {
     throw cause;
   }
   if (existsSync(backup)) rmSync(backup, { recursive: true, force: true });
+  stagingToClean = '';
 
   console.log(
     JSON.stringify(
