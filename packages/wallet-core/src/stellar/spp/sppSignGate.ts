@@ -30,6 +30,7 @@
 import {
   Address,
   FeeBumpTransaction,
+  Keypair,
   Networks,
   StrKey,
   Transaction,
@@ -255,6 +256,80 @@ export function sppEncryptionKeyChallenge(digest: Uint8Array): Uint8Array {
   return sha256(body);
 }
 
+function hexToBytes(hex: string, label: string): Uint8Array {
+  if (!/^(?:[0-9a-fA-F]{2})+$/.test(hex)) {
+    throw new SppSignerError(`${label} is not even hex`, 'INVALID_REQUEST');
+  }
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+/**
+ * Bind a Registration [v1] message before any approval is minted.
+ * Verifies the owner and encryption signatures. Does not mint and does not sign
+ * a transaction. Broadcast OFF throws before an intent exists.
+ */
+export function bindSppRegistrationBeforeMint(input: {
+  account: string;
+  registryContractId: string;
+  noteKeyHex: string;
+  encryptionKeyHex: string;
+  noteKeyProofHex: string;
+  encryptionKeySignatureHex: string;
+  ownerSignatureHex: string;
+  maxFeeStroops: string;
+}): SppSignIntent {
+  if (!isSppTestnetBroadcastAuthorized()) {
+    throw new SppSignerError(
+      'SPP_BROADCAST_AWAITING_APPROVAL: registration is disabled. No approval was minted.',
+      'UNAUTHORIZED',
+    );
+  }
+  const message = sppRegistrationMessage(
+    input.registryContractId,
+    input.account,
+    input.noteKeyHex,
+    input.encryptionKeyHex,
+  );
+  const digest = sppRegistrationDigest(message);
+  const ownerSig = hexToBytes(input.ownerSignatureHex, 'owner_signature');
+  const owner = Keypair.fromPublicKey(input.account);
+  if (!owner.verify(Buffer.from(digest), Buffer.from(ownerSig))) {
+    throw new SppSignerError('owner signature is not Registration [v1]', 'INVALID_REQUEST');
+  }
+  const encryptionSig = hexToBytes(input.encryptionKeySignatureHex, 'encryption_key_signature');
+  const encryptionRaw = hexToBytes(input.encryptionKeyHex, 'encryption key');
+  if (encryptionRaw.byteLength !== 32) {
+    throw new SppSignerError('encryption key must be 32 bytes', 'INVALID_REQUEST');
+  }
+  const encryption = Keypair.fromPublicKey(StrKey.encodeEd25519PublicKey(encryptionRaw));
+  const challenge = sppEncryptionKeyChallenge(digest);
+  if (!encryption.verify(Buffer.from(challenge), Buffer.from(encryptionSig))) {
+    throw new SppSignerError('encryption key signature is not Registration [v1]', 'INVALID_REQUEST');
+  }
+  return {
+    operation: 'register_public_keys',
+    amountStroops: null,
+    recipient: null,
+    networkPassphrase: Networks.TESTNET,
+    poolContractId: null,
+    registryContractId: input.registryContractId,
+    tokenContractId: null,
+    registerNoteKeyHex: input.noteKeyHex,
+    registerEncryptionKeyHex: input.encryptionKeyHex,
+    registerNoteKeyProofHex: input.noteKeyProofHex,
+    registerEncryptionKeySignatureHex: input.encryptionKeySignatureHex,
+    registerOwnerSignatureHex: input.ownerSignatureHex,
+    maxFeeStroops: input.maxFeeStroops,
+    minResourceFeeStroops: null,
+    account: input.account,
+    exactMessage: message,
+  };
+}
+
 function assertKdfDomain(kdfDomain: string): string {
   const domain = kdfDomain.trim();
   if (domain.length === 0 || /[()\r\n]/.test(domain)) {
@@ -331,7 +406,23 @@ export function assertSppPoolPaymentEconomicsBound(operation: SppSignOperation):
   );
 }
 
+/** Test-only. Production mint rejects deposit, transfer, and withdraw. */
+let paymentIdentityChecksForTests = false;
+
+export function setSppPaymentIdentityChecksForTests(enabled: boolean): void {
+  paymentIdentityChecksForTests = enabled;
+}
+
 export function mintSppSignApproval(intent: SppSignIntent, nowMs: number = Date.now()): string {
+  if (
+    !paymentIdentityChecksForTests
+    && (intent.operation === 'deposit' || intent.operation === 'transfer' || intent.operation === 'withdraw')
+  ) {
+    throw new SppSignerError(
+      'SPP_POOL_ECONOMICS_NOT_VERIFIED: payment approvals are not minted. Replay and identity checks stay behind the test flag.',
+      'INVALID_REQUEST',
+    );
+  }
   const frozen = freezeIntent(intent);
   const id = crypto.randomUUID();
   pending.push({
@@ -382,6 +473,13 @@ export function authorizeSppSignature(args: {
   nowMs?: number;
 }): SppSignAuthorization {
   assertStellarTestnetPassphrase(args.networkPassphrase);
+  if (!isSppTestnetBroadcastAuthorized()) {
+    revokeSppSignApprovals(args.boundAccount);
+    throw new SppSignerError(
+      'SPP_BROADCAST_AWAITING_APPROVAL: signing is disabled. No signature was produced.',
+      'UNAUTHORIZED',
+    );
+  }
   if (args.boundAccount.length === 0 || !StrKey.isValidEd25519PublicKey(args.boundAccount)) {
     throw new SppSignerError('Bound account must be a G… address', 'INVALID_REQUEST');
   }

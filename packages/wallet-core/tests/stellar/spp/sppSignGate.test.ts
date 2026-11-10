@@ -22,9 +22,12 @@ import {
   assertStellarTestnetPassphrase,
   assertSppPoolPaymentEconomicsBound,
   authorizeSppSignature,
+  bindSppRegistrationBeforeMint,
   mintSppSignApproval,
   resetSppSignApprovalsForTests,
+  setSppPaymentIdentityChecksForTests,
   signDigestWithSppGate,
+  sppSignApprovalCount,
   sppEncryptionKeyChallenge,
   sppKeyDerivationMessage,
   sppRegistrationDigest,
@@ -599,6 +602,56 @@ describe('SPP sign gate attack cases', () => {
   beforeEach(() => {
     resetSppSignApprovalsForTests();
     resetSppBroadcastGateForTests();
+    setSppTestnetBroadcastAuthorized(true);
+    setSppPaymentIdentityChecksForTests(true);
+  });
+
+  it('binds Registration v1 before mint and refuses it while the gate is off', () => {
+    const owner = Keypair.random();
+    const encryption = Keypair.random();
+    const note = 'ab'.repeat(32);
+    const encHex = Buffer.from(encryption.rawPublicKey()).toString('hex');
+    const message = sppRegistrationMessage(REGISTRY, owner.publicKey(), note, encHex);
+    const digest = sppRegistrationDigest(message);
+    const ownerSig = Buffer.from(owner.sign(digest)).toString('hex');
+    const encSig = Buffer.from(encryption.sign(sppEncryptionKeyChallenge(digest))).toString('hex');
+    const input = {
+      account: owner.publicKey(),
+      registryContractId: REGISTRY,
+      noteKeyHex: note,
+      encryptionKeyHex: encHex,
+      noteKeyProofHex: 'cd'.repeat(8),
+      encryptionKeySignatureHex: encSig,
+      ownerSignatureHex: ownerSig,
+      maxFeeStroops: '5000000',
+    };
+    const bound = bindSppRegistrationBeforeMint(input);
+    expect(bound.exactMessage).toBe(message);
+    expect(() => mintSppSignApproval(bound)).not.toThrow();
+    expect(() => bindSppRegistrationBeforeMint({
+      ...input,
+      ownerSignatureHex: '00'.repeat(64),
+    })).toThrow(/Registration/);
+    setSppTestnetBroadcastAuthorized(false);
+    expect(() => bindSppRegistrationBeforeMint(input)).toThrow(/SPP_BROADCAST_AWAITING_APPROVAL/);
+  });
+
+  it('does not mint a payment unless the identity-check flag is on', () => {
+    setSppPaymentIdentityChecksForTests(false);
+    expect(() => mintSppSignApproval(intent())).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(sppSignApprovalCount()).toBe(0);
+  });
+
+  it('refuses authorize while the broadcast gate is off', () => {
+    setSppTestnetBroadcastAuthorized(false);
+    mintSppSignApproval(intent());
+    expect(() => authorizeSppSignature({
+      kind: 'transaction',
+      input: transactXdr(),
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/SPP_BROADCAST_AWAITING_APPROVAL/);
+    expect(sppSignApprovalCount()).toBe(0);
   });
 
   it('allowlists Testnet and rejects Public and Futurenet', () => {

@@ -36,6 +36,7 @@ import {
 import {
   mintSppSignApproval,
   resetSppSignApprovalsForTests,
+  setSppPaymentIdentityChecksForTests,
   sppKeyDerivationMessage,
   type SppSignIntent,
 } from '../../../src/stellar/spp/sppSignGate.js';
@@ -377,6 +378,7 @@ function buildPaymentXdr(source: string, networkPassphrase: string, dest?: strin
 describe('SppWalletSignerAdapter hardening (offline)', () => {
   beforeEach(() => {
     resetSppSignApprovalsForTests();
+    setSppPaymentIdentityChecksForTests(true);
     resetSppBroadcastGateForTests();
     setSppTestnetBroadcastAuthorized(true);
   });
