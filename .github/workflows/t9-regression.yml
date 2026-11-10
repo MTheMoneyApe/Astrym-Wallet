@@ -6,6 +6,15 @@ on:
   push:
     branches: [astrym/testnet-mvp]
   workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Baseline commit
+        required: true
+        default: 2dedcc4f68be57558fd0042d0df25ac26f45f23c
+      head_sha:
+        description: Candidate commit
+        required: true
+        default: 215d5dc2d94a600c401e8fb1ded0dda669cde0f9
 
 permissions:
   contents: read
@@ -14,34 +23,32 @@ concurrency:
   group: t9-regression-${{ github.ref }}
   cancel-in-progress: true
 
-# Commits from git ls-remote on 2026-11-10, not the moving v4 tag.
-# actions/checkout v4.4.0 11d5960a326750d5838078e36cf38b85af677262
-# actions/setup-node v4.4.0 49933ea5288caeca8642d1e84afbd3f7d6820020
-# pnpm/action-setup v4.4.0 fc06bc1257f339d1d5d8b3a19a8cae5388b55320
-# actions/upload-artifact v4.6.2 ea165f8d65b6e75b540449e92b4886f43607fa02
-# Runner ubuntu-24.04. ubuntu-latest moves to Ubuntu 26.04 on 2026-11-19.
-# Node 22.23.4 and pnpm 10.33.4 are the measured T9 toolchain, not Vercel.
+# Node 24 action commits from git ls-remote on 2026-11-10.
+# actions/checkout v7.0.1 3d3c42e5aac5ba805825da76410c181273ba90b1
+# actions/setup-node v7.1.0 949feb2413d6458794dcd2491c4babbbce0c15c1
+# pnpm/action-setup v6.1.1 73e46992e05b19abd31f2f3c20e0e7370d762115
+# actions/upload-artifact v7.0.2 cf430e030ddbb5b0abf93d22962f4752f3646cd9
+# Runner ubuntu-24.04. Node 22.23.4 and pnpm 10.33.4 are the T9 toolchain.
 
 jobs:
   critical-gates:
     name: t9-critical-gates
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
         with:
           version: 10.33.4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22.23.4
           cache: pnpm
-      - name: Install from the lockfile
-        run: pnpm install --frozen-lockfile
-      - name: Asset prep and focal invariants
+      - name: Focal invariants
         run: bash .github/ci/t9-check.sh focal
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: t9-critical-gates
@@ -50,23 +57,22 @@ jobs:
 
   full-suite:
     name: t9-full-suite
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
         with:
           version: 10.33.4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22.23.4
           cache: pnpm
-      - name: Install from the lockfile
-        run: pnpm install --frozen-lockfile
-      - name: Asset prep, typecheck, and full vitest
+      - name: Full typecheck and vitest
         run: bash .github/ci/t9-check.sh full
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: t9-full-suite
@@ -77,43 +83,41 @@ jobs:
     name: t9-delta
     runs-on: ubuntu-24.04
     steps:
-      - name: Require base and head SHAs
-        env:
-          T9_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          T9_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          case "$T9_BASE_SHA" in
-            ""|0000000000000000000000000000000000000000) echo "baseline sha missing"; exit 1 ;;
-          esac
-          case "$T9_HEAD_SHA" in
-            "") echo "head sha missing"; exit 1 ;;
-          esac
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.base.sha || github.event.before }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.head_sha || github.event.pull_request.head.sha || github.sha }}
+          path: t9-head
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
           path: t9-baseline
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
         with:
           version: 10.33.4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22.23.4
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - name: Compare base and head
         env:
-          T9_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          T9_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          T9_BASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
+          T9_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.head_sha || github.event.pull_request.head.sha || github.sha }}
+          T9_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           T9_BASE_DIR: ${{ github.workspace }}/t9-baseline
+          T9_HEAD_DIR: ${{ github.workspace }}/t9-head
+          T9_SCRIPT_FALLBACK: ${{ github.event_name == 'workflow_dispatch' && 'workflow' || '' }}
         run: bash .github/ci/t9-delta-job.sh
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: t9-delta
-          path: t9-logs
+          path: |
+            t9-logs
+            data/delta-215-vs-2dedcc4.json
           if-no-files-found: error

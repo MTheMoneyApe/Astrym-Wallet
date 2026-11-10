@@ -143,7 +143,12 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     process.stderr.write('usage: t9-fingerprint.mjs --log-dir DIR --out FILE --sha SHA\n');
     process.exit(2);
   }
-  const fingerprint = assembleFingerprint(logDir, { sha: arg('--sha') });
+  const fingerprint = assembleFingerprint(logDir, {
+    sha: arg('--sha'),
+    baseSha: arg('--base-sha'),
+    headSha: arg('--head-sha'),
+    mergeSha: arg('--merge-sha'),
+  });
   writeFileSync(out, `${JSON.stringify(fingerprint)}\n`);
   process.stdout.write(`errors=${fingerprint.errors.length} tests=${fingerprint.tests.length}\n`);
 }
