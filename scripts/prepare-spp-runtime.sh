@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Reproduce the SPP web runtime from Nethermind source commit e6ce95c2.
 # Does not use the npm stellar-private-payments@0.2.1 tarball.
-# jq is not used. rustup is installed from the pinned 1.29.3 installer when absent.
+# jq 1.7.1 is the official release binary, checked by SHA-256, on this build's PATH only.
+# rustup is installed from the pinned 1.29.3 installer when absent.
 # A toolchain already present on a developer machine is not assumed.
 # Official steps: rust-toolchain.toml, sdk/web/scripts/build.sh,
 # .github/actions/circuits/action.yml (circuits-v0.7 + circomlib lock).
@@ -140,10 +141,41 @@ print("laid out circuit artifacts")
 PY
 
 log "COMMAND: sh deployments/scripts/circuit-artifacts.sh verify"
-if ! command -v jq >/dev/null 2>&1; then
-  export PATH="$REPO_ROOT/scripts/bin:$PATH"
-  log "jq is absent; using the node shim for circuit-artifacts.sh verify"
-fi
+# Official circuit-artifacts.sh calls jq. Do not shim it. Install the pinned
+# jq 1.7.1 binary and put that directory first on this build's PATH.
+ensure_official_jq() {
+  local name expect dest dir
+  case "$(uname -s)-$(uname -m)" in
+    Linux-x86_64)
+      name="jq-linux-amd64"
+      expect="5942c9b0934e510ee61eb3e30273f1b3fe2590df93933a93d7c58b81d19c8ff5"
+      ;;
+    Linux-aarch64|Linux-arm64)
+      name="jq-linux-arm64"
+      expect="4dd2d8a0661df0b22f1bb9a1f9830f06b6f3b8f7d91211a1ef5d7c4f06a8b4a5"
+      ;;
+    *)
+      die "no pinned jq 1.7.1 binary for $(uname -s)-$(uname -m)"
+      ;;
+  esac
+  dir="$BUILD_ROOT/bin"
+  dest="$dir/jq"
+  mkdir -p "$dir"
+  if [ ! -f "$dest" ] || ! echo "$expect  $dest" | sha256sum -c - >/dev/null 2>&1; then
+    log "COMMAND: curl jq 1.7.1 $name"
+    curl -fsSL -o "$dest.partial" "https://github.com/jqlang/jq/releases/download/jq-1.7.1/$name"
+    if ! echo "$expect  $dest.partial" | sha256sum -c -; then
+      rm -f "$dest.partial"
+      die "jq 1.7.1 checksum mismatch; refusing to continue"
+    fi
+    chmod +x "$dest.partial"
+    mv "$dest.partial" "$dest"
+  fi
+  echo "$expect  $dest" | sha256sum -c - || die "jq 1.7.1 checksum mismatch; refusing to continue"
+  export PATH="$dir:$PATH"
+  log "jq on build PATH: $dest ($("$dest" --version))"
+}
+ensure_official_jq
 ( cd "$SRC" && sh deployments/scripts/circuit-artifacts.sh verify )
 
 LOCK="$(tr -d '[:space:]' < "$SRC/circuits/circomlib.lock")"

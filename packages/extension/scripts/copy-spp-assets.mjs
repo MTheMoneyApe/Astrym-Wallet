@@ -395,6 +395,7 @@ async function main() {
   };
 
   writeFileSync(join(staging, META_NAME), JSON.stringify(meta, null, 2) + '\n', 'utf8');
+  console.log(`[copy-spp-assets] atomic rename ${staging} -> ${DEST_ROOT}`);
   const backup = `${DEST_ROOT}.bak-${process.pid}`;
   if (existsSync(DEST_ROOT)) renameSync(DEST_ROOT, backup);
   try {
