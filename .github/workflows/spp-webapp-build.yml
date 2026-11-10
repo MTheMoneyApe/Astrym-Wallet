@@ -94,9 +94,7 @@ jobs:
               exit 1
               ;;
           esac
-          sudo apt-get install -y \\
-            "clang-$LLVM_MAJOR=$package_version" \\
-            "llvm-$LLVM_MAJOR=$package_version"
+          sudo apt-get install -y "clang-$LLVM_MAJOR=$package_version" "llvm-$LLVM_MAJOR=$package_version"
           sudo apt-mark hold "clang-$LLVM_MAJOR" "llvm-$LLVM_MAJOR"
 
       - name: Pin WASM C compiler and matching LLVM archiver
