@@ -91,7 +91,7 @@ jobs:
             fi
           done
           if [ -f "$source/.trunk-wasm-profile" ]; then
-            cp "$source/.trunk-wasm-profile" "$proof/"
+            cp "$source/.trunk-wasm-profile" "$proof/trunk-wasm-profile.txt"
           fi
           if [ -f ".cache/spp-upstream/rust-flags.txt" ]; then
             cp ".cache/spp-upstream/rust-flags.txt" "$proof/"
@@ -168,6 +168,51 @@ jobs:
           }, indent=2) + "\n")
           print((root / "wasm-forensics.json").read_text())
           PY
+          node - "$proof/wasm/stellar_private_payments_web_bg.wasm" "scripts/spp-wasm-sections-fb3481af.txt" <<'NODE'
+          const fs = require("node:fs");
+          const wasmPath = process.argv[2];
+          const baselinePath = process.argv[3];
+          const baseline = fs.readFileSync(baselinePath, "utf8").split(/\\r?\\n/);
+          const expectedImports = [];
+          const expectedExports = [];
+          let section = "";
+          for (const line of baseline) {
+            if (line.startsWith("Import[")) { section = "imports"; continue; }
+            if (line.startsWith("Memory[")) { section = "memory"; continue; }
+            if (line.startsWith("Export[")) { section = "exports"; continue; }
+            if (section === "imports") {
+              const match = line.match(/^\\s-\\s(\\w+)\\[\\d+\\].*<-\\s(.+)$/);
+              if (match) {
+                const target = match[2];
+                const dot = target.lastIndexOf(".");
+                if (dot <= 0) throw new Error("Cannot parse baseline import: " + line);
+                expectedImports.push([target.slice(0, dot), target.slice(dot + 1), match[1]].join("|"));
+              }
+            } else if (section === "exports") {
+              const match = line.match(/^\\s-\\s(\\w+)\\[\\d+\\].*-> "([^"]+)"$/);
+              if (match) expectedExports.push([match[2], match[1]].join("|"));
+            }
+          }
+          const module = new WebAssembly.Module(fs.readFileSync(wasmPath));
+          const kind = (value) => value === "function" ? "func" : value;
+          const actualImports = WebAssembly.Module.imports(module)
+            .map((entry) => [entry.module, entry.name, kind(entry.kind)].join("|"));
+          const actualExports = WebAssembly.Module.exports(module)
+            .map((entry) => [entry.name, kind(entry.kind)].join("|"));
+          const sort = (values) => values.slice().sort();
+          const same = (a, b) => JSON.stringify(sort(a)) === JSON.stringify(sort(b));
+          const result = {
+            imports: { expected: expectedImports.length, actual: actualImports.length, identical: same(expectedImports, actualImports) },
+            exports: { expected: expectedExports.length, actual: actualExports.length, identical: same(expectedExports, actualExports) },
+          };
+          fs.writeFileSync(process.env.RUNNER_TEMP + "/spp-proof/forensics/wasm-api-compat.json", JSON.stringify(result, null, 2) + "\\n");
+          console.log(JSON.stringify(result));
+          if (!result.imports.identical || !result.exports.identical) process.exit(1);
+          NODE
+          if [ -f "$RUNNER_TEMP/spp-logs/build-webapp.txt" ]; then
+            grep -E '^(TOOL |SOURCE_DATE_EPOCH |NOTICE date |effective RUSTFLAGS:|effective CFLAGS:|PATH rustup )' \\
+              "$RUNNER_TEMP/spp-logs/build-webapp.txt" > "$proof/build-toolchain-from-prepare.log" || true
+          fi
           {
             echo "commit=$GITHUB_SHA"
             echo "runner=$(uname -s)-$(uname -m)"
