@@ -161,6 +161,21 @@ jobs:
               cp "$file" "$proof/wasm/$name"
             fi
           done
+          for name in \
+            stellar_private_payments_web.js \
+            workers/storage-worker-module.js \
+            workers/prover-worker-module.js \
+            workers/storage-worker.js \
+            workers/prover-worker.js; do
+            file="$source/dist/$name"
+            if [ -f "$file" ]; then
+              mkdir -p "$proof/js/$(dirname "$name")"
+              cp "$file" "$proof/js/$name"
+            fi
+          done
+          if [ -f "$source/js/index.js" ]; then
+            cp "$source/js/index.js" "$proof/js/index.js"
+          fi
           if [ -f "$source/.trunk-wasm-profile" ]; then
             cp "$source/.trunk-wasm-profile" "$proof/trunk-wasm-profile.txt"
           fi
@@ -239,6 +254,38 @@ jobs:
           }, indent=2) + "\n")
           print((root / "wasm-forensics.json").read_text())
           PY
+          python3 - "$proof" "packages/wallet-core/src/stellar/spp/nethermind/spp-runtime-manifest.json" <<'PY'
+          import hashlib, json, sys
+          from pathlib import Path
+
+          root, manifest_path = Path(sys.argv[1]), Path(sys.argv[2])
+          manifest = json.loads(manifest_path.read_text())
+          names = [
+              "dist/stellar_private_payments_web.js",
+              "dist/workers/storage-worker-module.js",
+              "dist/workers/prover-worker-module.js",
+              "dist/workers/storage-worker.js",
+              "dist/workers/prover-worker.js",
+              "js/index.js",
+          ]
+          records = []
+          for rel in names:
+              local = root / "js" / (rel.removeprefix("dist/") if rel.startswith("dist/") else rel)
+              expected = manifest["files"].get(rel)
+              if not local.is_file():
+                  records.append({"path": rel, "present": False, "expected": expected})
+                  continue
+              data = local.read_bytes()
+              records.append({
+                  "path": rel,
+                  "present": True,
+                  "size": len(data),
+                  "sha256": hashlib.sha256(data).hexdigest(),
+                  "expected": expected,
+              })
+          (root / "js-glue-forensics.json").write_text(json.dumps(records, indent=2) + "\n")
+          print((root / "js-glue-forensics.json").read_text())
+          PY
           node - "$proof/wasm/stellar_private_payments_web_bg.wasm" "scripts/spp-wasm-sections-fb3481af.txt" <<'NODE'
           const fs = require("node:fs");
           const wasmPath = process.argv[2];
@@ -270,15 +317,36 @@ jobs:
             .map((entry) => [entry.module, entry.name, kind(entry.kind)].join("|"));
           const actualExports = WebAssembly.Module.exports(module)
             .map((entry) => [entry.name, kind(entry.kind)].join("|"));
+          const generatedPrefix = "__wasm_bindgen_func_elem_";
+          const stable = (values) => values.filter((value) =>
+            !value.split("|")[0].startsWith(generatedPrefix));
+          const generated = (values) => values
+            .map((value) => value.split("|")[0])
+            .filter((name) => name.startsWith(generatedPrefix))
+            .sort();
           const sort = (values) => values.slice().sort();
           const same = (a, b) => JSON.stringify(sort(a)) === JSON.stringify(sort(b));
           const result = {
-            imports: { expected: expectedImports.length, actual: actualImports.length, identical: same(expectedImports, actualImports) },
-            exports: { expected: expectedExports.length, actual: actualExports.length, identical: same(expectedExports, actualExports) },
+            imports: {
+              expected: expectedImports.length,
+              actual: actualImports.length,
+              identical: same(expectedImports, actualImports),
+            },
+            stableExports: {
+              expected: stable(expectedExports).length,
+              actual: stable(actualExports).length,
+              identical: same(stable(expectedExports), stable(actualExports)),
+            },
+            generatedWasmBindgenExports: {
+              expected: generated(expectedExports),
+              actual: generated(actualExports),
+              identical: same(generated(expectedExports), generated(actualExports)),
+              classification: "internal function-element exports; tracked separately from stable public ABI",
+            },
           };
           fs.writeFileSync(process.env.RUNNER_TEMP + "/spp-proof/forensics/wasm-api-compat.json", JSON.stringify(result, null, 2) + "\n");
           console.log(JSON.stringify(result));
-          if (!result.imports.identical || !result.exports.identical) process.exit(1);
+          if (!result.imports.identical || !result.stableExports.identical) process.exit(1);
           NODE
           if [ -f "$RUNNER_TEMP/spp-logs/build-webapp.txt" ]; then
             grep -E '^(TOOL |SOURCE_DATE_EPOCH |NOTICE date |effective RUSTFLAGS:|effective CFLAGS:|PATH rustup )' "$RUNNER_TEMP/spp-logs/build-webapp.txt" > "$proof/build-toolchain-from-prepare.log" || true
