@@ -58,6 +58,17 @@ export function rewriteSdfHorizonUrlForMixFetch(url: string): string {
   return resolveHorizonUrlForNym(url, DEFAULT_STELLAR_NYM_HORIZON_CONFIG).effectiveUrl;
 }
 
+const STELLAR_NYM_HEADER_ALLOWLIST = new Set(['accept', 'content-type']);
+
+function allowlistedStellarHeaders(headers: HeadersInit | undefined): Headers {
+  const out = new Headers();
+  if (headers === undefined) return out;
+  new Headers(headers).forEach((value, key) => {
+    if (STELLAR_NYM_HEADER_ALLOWLIST.has(key.toLowerCase())) out.set(key, value);
+  });
+  return out;
+}
+
 export function createStellarTransportFetch(
   deps: StellarTransportFetchDeps,
 ): StellarReadFetch {
@@ -80,12 +91,13 @@ export function createStellarTransportFetch(
     deps.onResolved?.(resolution);
 
     // Explicit nym: MixFetch only. Strip signal — AbortController unsupported in v1 mix-fetch.
-    const headers = init?.headers;
+    const headers = allowlistedStellarHeaders(init?.headers);
     const nymInit: RequestInit & { mode?: string } = {
-      method: init?.method ?? 'GET',
+      method: 'POST',
+      redirect: 'error',
       mode: 'unsafe-ignore-cors',
+      headers,
     };
-    if (headers !== undefined) nymInit.headers = headers;
     if (init?.body != null) nymInit.body = init.body;
 
     try {

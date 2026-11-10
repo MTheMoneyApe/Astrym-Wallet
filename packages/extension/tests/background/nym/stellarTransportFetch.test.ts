@@ -14,7 +14,12 @@ describe('createStellarTransportFetch', () => {
     const fetchViaRouter = vi.fn(async (url: string, init?: RequestInit & { mode?: string }) => {
       expect(url).toBe(`${STELLAR_MIXFETCH_TESTNET_HORIZON_URL}/fee_stats`);
       expect(init?.mode).toBe('unsafe-ignore-cors');
+      expect(init?.method).toBe('POST');
+      expect(init?.redirect).toBe('error');
       expect(init?.signal).toBeUndefined();
+      const headers = new Headers(init?.headers);
+      expect(headers.get('accept')).toBe('application/json');
+      expect(headers.get('cookie')).toBeNull();
       return new Response('{"ok":true}', { status: 200 });
     });
     const onResolved = vi.fn();
@@ -25,7 +30,7 @@ describe('createStellarTransportFetch', () => {
       onResolved,
     });
     const res = await fetchImpl('https://horizon-testnet.stellar.org/fee_stats', {
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', Cookie: 'session=secret' },
       signal: AbortSignal.timeout(1000),
     });
     expect(res.status).toBe(200);

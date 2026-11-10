@@ -34,7 +34,14 @@ export type SppHostBridgeHandlerDeps = {
   networkPassphrase?: string;
 };
 
-const SOROBAN_READ_METHODS = new Set(['getHealth', 'getLatestLedger', 'getLedgerEntries']);
+const SOROBAN_READ_METHODS = new Set([
+  'getHealth',
+  'getLatestLedger',
+  'getLedgerEntries',
+  'getEvents',
+  'getTransaction',
+  'simulateTransaction',
+]);
 
 type SorobanRpcClass = 'read' | 'send' | 'unknown' | 'mixed';
 

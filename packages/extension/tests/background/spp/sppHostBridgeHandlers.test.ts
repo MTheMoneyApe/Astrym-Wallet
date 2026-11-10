@@ -9,6 +9,7 @@ import { STELLAR_SOROBAN_TESTNET_RPC } from '@solanym/wallet-core/src/stellar/sp
 import {
   mintSppSignApproval,
   resetSppSignApprovalsForTests,
+  setSppPaymentIdentityChecksForTests,
   sppSignApprovalCount,
   type SppSignIntent,
 } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
@@ -79,6 +80,7 @@ describe('handleSppHostNymFetchRequest', () => {
     vi.clearAllMocks();
     resetSppBroadcastGateForTests();
     resetSppSignApprovalsForTests();
+    setSppPaymentIdentityChecksForTests(true);
     setSppTestnetBroadcastAuthorized(false);
   });
 
@@ -104,7 +106,7 @@ describe('handleSppHostNymFetchRequest', () => {
       },
     }, HOST_SENDER);
 
-    for (const method of ['getHealth', 'getLatestLedger', 'getLedgerEntries']) {
+    for (const method of ['getHealth', 'getLatestLedger', 'getLedgerEntries', 'getEvents', 'getTransaction', 'simulateTransaction']) {
       fetchImpl.mockClear();
       const result = await call(JSON.stringify({ jsonrpc: '2.0', id: 1, method }));
       expect(result.ok).toBe(true);
@@ -118,12 +120,6 @@ describe('handleSppHostNymFetchRequest', () => {
     expect(sent.ok).toBe(false);
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(sppSignApprovalCount()).toBe(0);
-
-    mintSppSignApproval(transferIntent());
-    const unknown = await call(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'simulateTransaction' }));
-    expect(unknown.ok).toBe(false);
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(sppSignApprovalCount()).toBe(1);
 
     const mixed = await call(JSON.stringify([
       { jsonrpc: '2.0', id: 1, method: 'getHealth' },
