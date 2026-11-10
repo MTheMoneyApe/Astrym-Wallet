@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Reproduce the SPP web runtime from Nethermind source commit e6ce95c2.
 # Does not use the npm stellar-private-payments@0.2.1 tarball.
+# jq is not used. rustup is installed from the pinned 1.29.3 installer when absent.
+# A toolchain already present on a developer machine is not assumed.
 # Official steps: rust-toolchain.toml, sdk/web/scripts/build.sh,
 # .github/actions/circuits/action.yml (circuits-v0.7 + circomlib lock).
 set -euo pipefail
@@ -9,6 +11,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SOURCE_COMMIT="e6ce95c2a71ed6313f78bb19cfdd0de1d9663120"
 SOURCE_REPO="https://github.com/NethermindEth/stellar-private-payments.git"
 RUST_CHANNEL="1.97.1"
+RUSTUP_VERSION="1.29.3"
 WASM_BINDGEN_VERSION="0.2.128"
 CIRCUITS_URL="https://github.com/NethermindEth/stellar-private-payments/releases/download/circuits-v0.7/circuits.tar.gz"
 CIRCUITS_SHA256="c4ad54de6cc146bd8323e502341d545e09d0cd95d21b4f60ad2388188f64a2f9"
@@ -21,17 +24,51 @@ MANIFEST="$REPO_ROOT/packages/wallet-core/src/stellar/spp/nethermind/spp-runtime
 log() { printf '%s\n' "$*"; }
 die() { printf 'prepare-spp-runtime: %s\n' "$*" >&2; exit 1; }
 
-command -v rustup >/dev/null 2>&1 || die "rustup is required (https://rustup.rs)"
 command -v git >/dev/null 2>&1 || die "git is required"
 command -v curl >/dev/null 2>&1 || die "curl is required"
-command -v jq >/dev/null 2>&1 || die "jq is required"
+command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
+
+export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+export PATH="$CARGO_HOME/bin:$PATH"
+
+if ! command -v rustup >/dev/null 2>&1; then
+  triple=""
+  expect=""
+  case "$(uname -s)-$(uname -m)" in
+    Linux-x86_64)
+      triple="x86_64-unknown-linux-gnu"
+      expect="b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55"
+      ;;
+    Linux-aarch64|Linux-arm64)
+      triple="aarch64-unknown-linux-gnu"
+      expect="9f608c142e0e38a78957d0661ba1dfaf0b6fb37184cfaa4b9a0aa57af6184282"
+      ;;
+    *)
+      die "no pinned rustup-init for $(uname -s)-$(uname -m)"
+      ;;
+  esac
+  mkdir -p "$BUILD_ROOT"
+  installer="$BUILD_ROOT/rustup-init-$RUSTUP_VERSION-$triple"
+  log "COMMAND: curl rustup-init $RUSTUP_VERSION $triple"
+  curl -fsSL -o "$installer" "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/$triple/rustup-init"
+  echo "$expect  $installer" | sha256sum -c -
+  chmod +x "$installer"
+  log "COMMAND: rustup-init -y --default-toolchain none --profile minimal --no-modify-path"
+  "$installer" -y --default-toolchain none --profile minimal --no-modify-path
+  command -v rustup >/dev/null 2>&1 || die "rustup bootstrap did not put rustup on PATH"
+fi
 
 log "COMMAND: rustup toolchain install $RUST_CHANNEL --profile minimal --component rustfmt,clippy"
 rustup toolchain install "$RUST_CHANNEL" --profile minimal --component rustfmt,clippy
 log "COMMAND: rustup target add wasm32-unknown-unknown wasm32v1-none --toolchain $RUST_CHANNEL"
 rustup target add wasm32-unknown-unknown wasm32v1-none --toolchain "$RUST_CHANNEL"
 
-export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:/usr/local/cargo/bin:$PATH"
+if [ "${SPP_PREPARE_STOP_AFTER:-}" = "toolchain" ]; then
+  log "prepare-spp-runtime: toolchain bootstrap complete ($(rustc +"$RUST_CHANNEL" --version))"
+  exit 0
+fi
+
 if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
   log "COMMAND: cargo +$RUST_CHANNEL install wasm-bindgen-cli --version $WASM_BINDGEN_VERSION --locked --force"
   cargo "+$RUST_CHANNEL" install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
