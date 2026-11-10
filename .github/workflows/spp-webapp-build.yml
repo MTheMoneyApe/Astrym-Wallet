@@ -174,6 +174,7 @@ jobs:
             fi
           done
           if [ -f "$source/js/index.js" ]; then
+            mkdir -p "$proof/js"
             cp "$source/js/index.js" "$proof/js/index.js"
           fi
           if [ -f "$source/.trunk-wasm-profile" ]; then
@@ -270,7 +271,7 @@ jobs:
           ]
           records = []
           for rel in names:
-              local = root / "js" / (rel.removeprefix("dist/") if rel.startswith("dist/") else rel)
+              local = root / "js" / rel.removeprefix("dist/") if rel.startswith("dist/") else root / rel
               expected = manifest["files"].get(rel)
               if not local.is_file():
                   records.append({"path": rel, "present": False, "expected": expected})
@@ -326,6 +327,21 @@ jobs:
             .sort();
           const sort = (values) => values.slice().sort();
           const same = (a, b) => JSON.stringify(sort(a)) === JSON.stringify(sort(b));
+          const gluePaths = [
+            "stellar_private_payments_web.js",
+            "workers/storage-worker-module.js",
+            "workers/prover-worker-module.js",
+            "workers/storage-worker.js",
+            "workers/prover-worker.js",
+            "index.js",
+          ];
+          const glueReferences = generated(actualExports).map((name) => ({
+            name,
+            referencedBy: gluePaths.filter((rel) => {
+              const path = process.env.RUNNER_TEMP + "/spp-proof/forensics/js/" + rel;
+              return fs.existsSync(path) && fs.readFileSync(path, "utf8").includes(name);
+            }),
+          }));
           const result = {
             imports: {
               expected: expectedImports.length,
@@ -342,6 +358,7 @@ jobs:
               actual: generated(actualExports),
               identical: same(generated(expectedExports), generated(actualExports)),
               classification: "internal function-element exports; tracked separately from stable public ABI",
+              jsGlueReferences: glueReferences,
             },
           };
           fs.writeFileSync(process.env.RUNNER_TEMP + "/spp-proof/forensics/wasm-api-compat.json", JSON.stringify(result, null, 2) + "\n");
