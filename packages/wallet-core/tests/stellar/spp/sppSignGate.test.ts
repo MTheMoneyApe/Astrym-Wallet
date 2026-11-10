@@ -657,6 +657,20 @@ describe('SPP sign gate attack cases', () => {
   it('enforces tx.fee and simulated minResourceFee against the real ceiling', () => {
     expect(() => assertSppAssembledFees({
       operation: 'deposit',
+      approvedMaxFeeStroops: '15000000',
+      txFeeStroops: '13418332',
+      requireTxFee: true,
+    })).not.toThrow();
+
+    expect(() => assertSppAssembledFees({
+      operation: 'withdraw',
+      approvedMaxFeeStroops: '15000000',
+      txFeeStroops: '15000001',
+      requireTxFee: true,
+    })).toThrow(/tx\.fee/);
+
+    expect(() => assertSppAssembledFees({
+      operation: 'deposit',
       approvedMaxFeeStroops: '8000000',
       txFeeStroops: '7900000',
       minResourceFeeStroops: '7900000',
