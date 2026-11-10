@@ -31,7 +31,14 @@ command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
 
 export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
 export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
-export PATH="$CARGO_HOME/bin:$PATH"
+# After the rest of PATH, so a bootstrap rustup is found and a caller tool is not hidden.
+export PATH="${PATH:+$PATH:}$CARGO_HOME/bin"
+
+curl_https() {
+  local dest="$1" url="$2"
+  rm -f "$dest.partial"
+  curl --proto '=https' -fsSL -o "$dest.partial" "$url"
+}
 
 if ! command -v rustup >/dev/null 2>&1; then
   triple=""
@@ -52,9 +59,13 @@ if ! command -v rustup >/dev/null 2>&1; then
   mkdir -p "$BUILD_ROOT"
   installer="$BUILD_ROOT/rustup-init-$RUSTUP_VERSION-$triple"
   log "COMMAND: curl rustup-init $RUSTUP_VERSION $triple"
-  curl -fsSL -o "$installer" "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/$triple/rustup-init"
-  echo "$expect  $installer" | sha256sum -c -
-  chmod +x "$installer"
+  curl_https "$installer" "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/$triple/rustup-init"
+  if ! echo "$expect  $installer.partial" | sha256sum -c -; then
+    rm -f "$installer.partial"
+    die "rustup-init checksum mismatch; refusing to continue"
+  fi
+  chmod +x "$installer.partial"
+  mv "$installer.partial" "$installer"
   log "COMMAND: rustup-init -y --default-toolchain none --profile minimal --no-modify-path"
   "$installer" -y --default-toolchain none --profile minimal --no-modify-path
   command -v rustup >/dev/null 2>&1 || die "rustup bootstrap did not put rustup on PATH"
@@ -70,10 +81,14 @@ if [ "${SPP_PREPARE_STOP_AFTER:-}" = "toolchain" ]; then
   exit 0
 fi
 
-if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
+bindgen_version() {
+  wasm-bindgen --version 2>/dev/null | awk '{print $2}'
+}
+if [ "$(bindgen_version)" != "$WASM_BINDGEN_VERSION" ]; then
   log "COMMAND: cargo +$RUST_CHANNEL install wasm-bindgen-cli --version $WASM_BINDGEN_VERSION --locked --force"
   cargo "+$RUST_CHANNEL" install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
 fi
+[ "$(bindgen_version)" = "$WASM_BINDGEN_VERSION" ] || die "wasm-bindgen $(bindgen_version) is not $WASM_BINDGEN_VERSION"
 
 mkdir -p "$BUILD_ROOT"
 if [ ! -d "$SRC/.git" ]; then
@@ -86,9 +101,10 @@ if [ "$(git -C "$SRC" rev-parse HEAD 2>/dev/null || true)" != "$SOURCE_COMMIT" ]
   git -C "$SRC" checkout --detach FETCH_HEAD
 fi
 [ "$(git -C "$SRC" rev-parse HEAD)" = "$SOURCE_COMMIT" ] || die "upstream HEAD is not $SOURCE_COMMIT"
-if [ -n "$(git -C "$SRC" status --porcelain --untracked-files=no)" ]; then
-  git -C "$SRC" status --porcelain --untracked-files=no >&2
-  die "upstream worktree has tracked changes; refusing to build or reuse it"
+dirty="$(git -C "$SRC" status --porcelain --untracked-files=all)"
+if [ -n "$dirty" ]; then
+  printf '%s\n' "$dirty" >&2
+  die "upstream worktree is not clean; refusing to build or reuse it"
 fi
 if [ "${SPP_PREPARE_STOP_AFTER:-}" = "worktree" ]; then
   log "prepare-spp-runtime: worktree clean at $SOURCE_COMMIT"
@@ -115,8 +131,12 @@ mkdir -p "$ART" "$KEYS" "$BUILD_ROOT/circuits-unpacked"
 TARBALL="$BUILD_ROOT/circuits-v0.7.tar.gz"
 if [ ! -f "$TARBALL" ] || ! echo "$CIRCUITS_SHA256  $TARBALL" | sha256sum -c -; then
   log "COMMAND: curl circuits-v0.7"
-  curl -fsSL -o "$TARBALL" "$CIRCUITS_URL"
-  echo "$CIRCUITS_SHA256  $TARBALL" | sha256sum -c -
+  curl_https "$TARBALL" "$CIRCUITS_URL"
+  if ! echo "$CIRCUITS_SHA256  $TARBALL.partial" | sha256sum -c -; then
+    rm -f "$TARBALL.partial"
+    die "circuits-v0.7 checksum mismatch; refusing to continue"
+  fi
+  mv "$TARBALL.partial" "$TARBALL"
 fi
 rm -rf "$BUILD_ROOT/circuits-unpacked"
 mkdir -p "$BUILD_ROOT/circuits-unpacked"
@@ -163,7 +183,7 @@ ensure_official_jq() {
   mkdir -p "$dir"
   if [ ! -f "$dest" ] || ! echo "$expect  $dest" | sha256sum -c - >/dev/null 2>&1; then
     log "COMMAND: curl jq 1.7.1 $name"
-    curl -fsSL -o "$dest.partial" "https://github.com/jqlang/jq/releases/download/jq-1.7.1/$name"
+    curl_https "$dest" "https://github.com/jqlang/jq/releases/download/jq-1.7.1/$name"
     if ! echo "$expect  $dest.partial" | sha256sum -c -; then
       rm -f "$dest.partial"
       die "jq 1.7.1 checksum mismatch; refusing to continue"
@@ -187,56 +207,122 @@ if [ "$(git -C "$SRC/circuits/src/circomlib" rev-parse HEAD 2>/dev/null || true)
   git -C "$SRC/circuits/src/circomlib" checkout -q --detach FETCH_HEAD
 fi
 [ "$(git -C "$SRC/circuits/src/circomlib" rev-parse HEAD)" = "$LOCK" ] || die "circomlib is not $LOCK"
+circomlib_dirty="$(git -C "$SRC/circuits/src/circomlib" status --porcelain --untracked-files=all)"
+if [ -n "$circomlib_dirty" ]; then
+  printf '%s\n' "$circomlib_dirty" >&2
+  die "circomlib worktree is not clean; refusing to build or reuse it"
+fi
 
-# Panic locations and registry paths must not depend on this machine.
-# CARGO_ENCODED_RUSTFLAGS overrides RUSTFLAGS, so both carry the same remaps.
+# CARGO_ENCODED_RUSTFLAGS replaces .cargo/config.toml rustflags entirely.
+# Keep the upstream wasm32 memory link-args and append the path remaps.
 if [ -n "${RUSTFLAGS:-}${CARGO_ENCODED_RUSTFLAGS:-}" ]; then
   die "RUSTFLAGS or CARGO_ENCODED_RUSTFLAGS is already set; refusing a mixed flag set"
 fi
-mkdir -p "$CARGO_HOME" "$RUSTUP_HOME"
-remap_from_to() {
-  python3 - "$@" <<'PY'
+mkdir -p "$CARGO_HOME" "$RUSTUP_HOME" "$BUILD_ROOT/bin"
+SOURCE_DATE_EPOCH="$(git -C "$SRC" log -1 --format=%ct)"
+export SOURCE_DATE_EPOCH
+cat > "$BUILD_ROOT/bin/date" <<'EOF'
+#!/bin/sh
+# Upstream stamps NOTICE.txt with `date -u +%Y-%m-%dT%H:%M:%SZ`.
+# Honor SOURCE_DATE_EPOCH so two machines emit the same notice.
+if [ -n "${SOURCE_DATE_EPOCH:-}" ] && [ "$1" = "-u" ] && [ "$2" = "+%Y-%m-%dT%H:%M:%SZ" ]; then
+  exec /usr/bin/date -u -d "@${SOURCE_DATE_EPOCH}" "+%Y-%m-%dT%H:%M:%SZ"
+fi
+exec /usr/bin/date "$@"
+EOF
+chmod 755 "$BUILD_ROOT/bin/date"
+export PATH="$BUILD_ROOT/bin:$PATH"
+
+CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$SRC/target}"
+export CARGO_TARGET_DIR
+FLAG_FILE="$BUILD_ROOT/rust-flags.txt"
+python3 - "$SRC/.cargo/config.toml" "$FLAG_FILE" \
+  "src=$SRC" "cargo=$CARGO_HOME" "rustup=$RUSTUP_HOME" \
+  "build=$BUILD_ROOT" "target=$CARGO_TARGET_DIR" "home=$HOME" \
+  "circuits=$SRC/circuits" <<'PY'
 import os, sys
+config_path, flag_file = sys.argv[1], sys.argv[2]
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+cfg = tomllib.loads(open(config_path, encoding="utf-8").read())
+upstream = list(cfg["target"]["wasm32-unknown-unknown"]["rustflags"])
+required = [
+    "-Clink-arg=--initial-memory=67108864",
+    "-Clink-arg=--max-memory=4294967296",
+]
+missing = [item for item in required if item not in upstream]
+if missing:
+    raise SystemExit("upstream wasm32 rustflags lost: " + ", ".join(missing))
+tokens = {
+    "src": "/spp-src",
+    "cargo": "/cargo",
+    "rustup": "/rustup",
+    "build": "/spp-build",
+    "target": "/spp-target",
+    "home": "/spp-home",
+    "circuits": "/spp-circuits",
+}
 pairs = []
-args = sys.argv[1:]
-tokens = {"src": "/spp-src", "cargo": "/cargo", "rustup": "/rustup"}
-for item in args:
+for item in sys.argv[3:]:
     key, path = item.split("=", 1)
     path = os.path.abspath(path)
     real = os.path.realpath(path)
     for candidate in (path, real):
-        if candidate and candidate not in [p for p, _ in pairs]:
+        if candidate and all(candidate != old for old, _ in pairs):
             pairs.append((candidate, tokens[key]))
 pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
-flags = [f"--remap-path-prefix={src}={dst}" for src, dst in pairs]
-print("\n".join(flags))
+remaps = [f"--remap-path-prefix={src}={dst}" for src, dst in pairs]
+prefix_maps = [f"-ffile-prefix-map={src}={dst}" for src, dst in pairs]
+flags = upstream + remaps
+open(flag_file, "w", encoding="utf-8").write(
+    "RUST\n" + "\n".join(flags) + "\nCFLAGS\n" + "\n".join(prefix_maps) + "\n"
+)
 PY
-}
-mapfile -t REMAP_ARGS < <(remap_from_to "src=$SRC" "cargo=$CARGO_HOME" "rustup=$RUSTUP_HOME")
-[ "${#REMAP_ARGS[@]}" -ge 3 ] || die "path remap flags were not built"
-RUSTFLAGS="${REMAP_ARGS[*]}"
+mapfile -t RUST_FLAGS < <(awk 'BEGIN{s=0} /^RUST$/{s=1; next} /^CFLAGS$/{s=0; next} s && NF{print}' "$FLAG_FILE")
+mapfile -t C_FLAGS < <(awk 'BEGIN{s=0} /^CFLAGS$/{s=1; next} s && NF{print}' "$FLAG_FILE")
+[ "${#RUST_FLAGS[@]}" -ge 4 ] || die "combined rustflags were not built"
+printf -v RUSTFLAGS '%s ' "${RUST_FLAGS[@]}"
+RUSTFLAGS="${RUSTFLAGS% }"
 export RUSTFLAGS
-CARGO_ENCODED_RUSTFLAGS="$(printf '%s\037' "${REMAP_ARGS[@]}")"
+CARGO_ENCODED_RUSTFLAGS="$(printf '%s\037' "${RUST_FLAGS[@]}")"
 CARGO_ENCODED_RUSTFLAGS="${CARGO_ENCODED_RUSTFLAGS%$'\037'}"
 export CARGO_ENCODED_RUSTFLAGS
-log "COMMAND: rustc path remap (longest prefix first)"
-printf '  %s\n' "${REMAP_ARGS[@]}"
+printf -v CFLAGS '%s ' "${C_FLAGS[@]}"
+CFLAGS="${CFLAGS% }"
+export CFLAGS
+export CXXFLAGS="$CFLAGS"
+log "TOOL rustc $(rustc +"$RUST_CHANNEL" --version)"
+log "TOOL cargo $(cargo +"$RUST_CHANNEL" --version)"
+log "TOOL wasm-bindgen $(wasm-bindgen --version)"
+log "TOOL jq $(jq --version)"
+log "TOOL git $(git --version)"
+log "TOOL python3 $(python3 --version)"
+log "SOURCE_DATE_EPOCH $SOURCE_DATE_EPOCH"
+log "NOTICE date $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+log "effective RUSTFLAGS: $RUSTFLAGS"
+log "effective CFLAGS: $CFLAGS"
 
 log "COMMAND: bash sdk/web/scripts/build.sh"
 ( cd "$SRC" && bash sdk/web/scripts/build.sh )
 
-log "COMMAND: scan shipped wasm and bindgen glue for host paths"
-python3 - "$SRC/sdk/web/dist" "$SRC" "$CARGO_HOME" "$RUSTUP_HOME" <<'PY'
+log "COMMAND: scan shipped files for host paths and wasm memory limits"
+python3 - "$SRC/sdk/web" "$SRC" "$CARGO_HOME" "$RUSTUP_HOME" "$BUILD_ROOT" \
+  "$CARGO_TARGET_DIR" "$HOME" "$SRC/circuits" "$SRC/target/circuits-artifacts" \
+  "$SRC/deployments/testnet/circuit_keys" <<'PY'
 import os, sys
 from pathlib import Path
 
-dist, src, cargo, rustup = map(Path, sys.argv[1:])
+web = Path(sys.argv[1])
 needles = []
-for path in (src, cargo, rustup):
+for raw in sys.argv[2:]:
+    path = Path(raw)
     for candidate in (path.resolve(), Path(os.path.realpath(path))):
         text = str(candidate)
-        if text not in needles:
+        if text and text not in needles:
             needles.append(text)
+needles.append("/tmp/")
 
 def leb(data, i):
     n = s = 0
@@ -264,13 +350,36 @@ def custom_sections(data):
         name = body[j : j + nlen].decode("utf-8", "replace")
         yield name, body[j + nlen :]
 
+def memory_limits(data):
+    if data[:4] != b"\0asm":
+        raise SystemExit("shipped wasm is not a wasm module")
+    i = 8
+    while i < len(data):
+        sid = data[i]
+        i += 1
+        size, i = leb(data, i)
+        body = data[i : i + size]
+        i += size
+        if sid != 5:
+            continue
+        count, j = leb(body, 0)
+        if count != 1:
+            raise SystemExit(f"wasm memory count {count}")
+        flags = body[j]
+        j += 1
+        initial, j = leb(body, j)
+        maximum = None
+        if flags & 1:
+            maximum, j = leb(body, j)
+        return flags, initial, maximum, body.hex()
+    raise SystemExit("wasm has no memory section")
+
+scan_suffixes = {".wasm", ".js", ".txt", ".json"}
 scanned = []
-for path in sorted(dist.rglob("*")):
-    if not path.is_file():
+for path in sorted(web.rglob("*")):
+    if not path.is_file() or path.suffix not in scan_suffixes:
         continue
-    if path.suffix not in {".wasm", ".js"}:
-        continue
-    if "circuits" in path.parts:
+    if path.name == "source-bundle.tar.gz":
         continue
     data = path.read_bytes()
     scanned.append(path)
@@ -278,6 +387,15 @@ for path in sorted(dist.rglob("*")):
         if needle.encode() in data:
             raise SystemExit(f"host path still embedded in {path}: {needle}")
     if path.suffix == ".wasm":
+        flags, initial, maximum, raw = memory_limits(data)
+        # .cargo/config.toml: initial 64 MiB (1024 pages), max 4 GiB (65536 pages).
+        if (flags, initial, maximum) != (1, 1024, 65536):
+            raise SystemExit(
+                f"wasm memory {path.name} {flags},{initial},{maximum} raw {raw} "
+                "is not the upstream 64 MiB / 4 GiB limit"
+            )
+        print(f"memory {path.name}: flags={flags} initial_pages={initial} max_pages={maximum} raw={raw}")
+    if path.name == "stellar_private_payments_web_bg.wasm":
         for name, payload in custom_sections(data):
             strings = []
             i = 0
@@ -295,7 +413,7 @@ for path in sorted(dist.rglob("*")):
 
 if not any(path.name == "stellar_private_payments_web_bg.wasm" for path in scanned):
     raise SystemExit("shipped main wasm was not scanned")
-print(f"host paths absent from {len(scanned)} shipped wasm/js files")
+print(f"host paths absent from {len(scanned)} shipped files")
 PY
 
 python3 - "$SRC/sdk/web" "$MANIFEST" "$SOURCE_COMMIT" <<'PY'
