@@ -10,6 +10,7 @@ permissions:
 jobs:
   vercel-build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -170,7 +171,14 @@ jobs:
           {
             echo "commit=$GITHUB_SHA"
             echo "runner=$(uname -s)-$(uname -m)"
+            echo "kernel=$(uname -a)"
             echo "rustc=$(rustc --version 2>/dev/null || true)"
+            echo "rustc_verbose=$(rustc -vV 2>/dev/null | tr '\\n' ';' || true)"
+            echo "cargo=$(cargo --version 2>/dev/null || true)"
+            echo "cargo_verbose=$(cargo -vV 2>/dev/null | tr '\\n' ';' || true)"
+            echo "cc=$(cc --version 2>/dev/null | head -n 1 || true)"
+            echo "clang=$(clang --version 2>/dev/null | head -n 1 || true)"
+            echo "cxx=$(c++ --version 2>/dev/null | head -n 1 || true)"
             echo "wasm_bindgen=$(wasm-bindgen --version 2>/dev/null || true)"
             echo "wasm_opt=$(.cache/spp-upstream/stellar-private-payments/target/tmp/binaryen/binaryen-version_131/bin/wasm-opt --version 2>/dev/null || true)"
             echo "source_date_epoch=${SOURCE_DATE_EPOCH:-unset}"
