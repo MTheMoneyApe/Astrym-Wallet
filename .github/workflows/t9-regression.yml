@@ -1,0 +1,125 @@
+name: T9 regression
+
+on:
+  pull_request:
+    branches: [astrym/testnet-mvp]
+  push:
+    branches: [astrym/testnet-mvp]
+  workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Baseline commit
+        required: true
+        default: 2dedcc4f68be57558fd0042d0df25ac26f45f23c
+      head_sha:
+        description: Candidate commit
+        required: true
+        default: cec2fab5b29c70b0a20b12f12bf5f2f032e190df
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t9-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+# Node 24 action commits from git ls-remote on 2026-11-10.
+# actions/checkout v7.0.1 3d3c42e5aac5ba805825da76410c181273ba90b1
+# actions/setup-node v7.1.0 949feb2413d6458794dcd2491c4babbbce0c15c1
+# pnpm/action-setup v6.1.1 73e46992e05b19abd31f2f3c20e0e7370d762115
+# actions/upload-artifact v7.0.2 cf430e030ddbb5b0abf93d22962f4752f3646cd9
+# Runner ubuntu-24.04. Node 22.23.4 and pnpm 10.33.4 are the T9 toolchain.
+
+jobs:
+  critical-gates:
+    name: t9-critical-gates
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
+        with:
+          version: 10.33.4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+      - name: Focal invariants
+        run: bash .github/ci/t9-check.sh focal
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: t9-critical-gates
+          path: t9-logs
+          if-no-files-found: error
+
+  full-suite:
+    name: t9-full-suite
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
+        with:
+          version: 10.33.4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+      - name: Full typecheck and vitest
+        run: bash .github/ci/t9-check.sh full
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: t9-full-suite
+          path: t9-logs
+          if-no-files-found: error
+
+  delta:
+    name: t9-delta
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: cec2fab5b29c70b0a20b12f12bf5f2f032e190df
+          path: t9-head
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: 2dedcc4f68be57558fd0042d0df25ac26f45f23c
+          path: t9-baseline
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
+        with:
+          version: 10.33.4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Compare base and head
+        env:
+          T9_BASE_SHA: 2dedcc4f68be57558fd0042d0df25ac26f45f23c
+          T9_HEAD_SHA: cec2fab5b29c70b0a20b12f12bf5f2f032e190df
+          T9_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          T9_BASE_DIR: ${{ github.workspace }}/t9-baseline
+          T9_HEAD_DIR: ${{ github.workspace }}/t9-head
+          T9_SCRIPT_FALLBACK: workflow
+        run: bash .github/ci/t9-delta-job.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: t9-delta
+          path: |
+            t9-logs
+            data/delta-215-vs-2dedcc4.json
+          if-no-files-found: error

@@ -35,6 +35,7 @@ import {
   createNymStatusHandler,
 } from './handlers/nymHandlers.js';
 import { isNymOffscreenChannelMessage } from '../nym-offscreen/protocol.js';
+import { isNymRuntimeStatusMessage } from '../shared/nymRuntimeStatus.js';
 import {
   isSppHostBridgeMessage,
   parseSppHostLifecycleEvent,
@@ -107,9 +108,11 @@ function initBackgroundSynchronous() {
   (globalThis as any).nymRuntime = nymRuntime;
 
   // Stellar Horizon/Friendbot → FailClosedTransportRouter via MixFetch-aware adapter.
-  // Logical Horizon base = SDF testnet. Default mode=direct (Horizon without Nym).
+  // Logical Horizon base = SDF testnet. Wallet fetch waits for the persisted privacy
+  // choice and does not use clearnet while that read is in flight, when no explicit
+  // Direct choice is stored, or while Nym is selected and MixFetch is down.
   // In mode=nym, getStellarFetch() remaps to the validated MixFetch-effective base
-  // (see stellarHorizonNymConfig.ts) with fail-closed routing (no silent clearnet).
+  // (see stellarHorizonNymConfig.ts).
   const stellarFetch = nymRuntime.getStellarFetch();
   const stellarReadClient = new StellarReadClient(
     STELLAR_TESTNET_HORIZON_URL,
@@ -250,6 +253,10 @@ function initBackgroundSynchronous() {
   // claim the response Promise (offscreen document owns that protocol).
   browser.runtime.onMessage.addListener((message: any, sender: any) => {
     if (isNymOffscreenChannelMessage(message)) {
+      return;
+    }
+    // Status push for open views. Not a command and not a clearnet grant.
+    if (isNymRuntimeStatusMessage(message)) {
       return;
     }
     // spp-host ↔ SW bridge: lifecycle events update the registry; sign + Nym

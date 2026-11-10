@@ -42,8 +42,10 @@ async function seededController(bridge: OffscreenMixFetchBridge): Promise<NymRun
 
 function mockBridge(setupImpl?: () => Promise<void>): OffscreenMixFetchBridge & {
   setup: ReturnType<typeof vi.fn>;
+  emitLost: () => void;
 } {
   let setupComplete = false;
+  let onLost: (() => void) | null = null;
   const setup = vi.fn(async () => {
     if (setupImpl) await setupImpl();
     setupComplete = true;
@@ -78,10 +80,22 @@ function mockBridge(setupImpl?: () => Promise<void>): OffscreenMixFetchBridge & 
             gatewayAllowlistConfigured: true,
           },
     ),
+    watchConnection(cb: () => void) {
+      onLost = cb;
+      return () => {
+        onLost = null;
+      };
+    },
+    emitLost() {
+      onLost?.();
+    },
     get setupComplete() {
       return setupComplete;
     },
-  } as unknown as OffscreenMixFetchBridge & { setup: ReturnType<typeof vi.fn> };
+  } as unknown as OffscreenMixFetchBridge & {
+    setup: ReturnType<typeof vi.fn>;
+    emitLost: () => void;
+  };
 }
 
 describe('NymRuntimeController lifecycle', () => {
@@ -102,14 +116,50 @@ describe('NymRuntimeController lifecycle', () => {
     expect(afterDisc.connected).toBe(false);
     expect(afterDisc.documentReady).toBe(false);
     expect(afterDisc.state).toBe('disconnected');
-    // Disconnect returns to Direct so Horizon works without Nym.
-    expect(afterDisc.mode).toBe('direct');
-    expect(ctrl.mode).toBe('direct');
+    // Disconnect closes MixFetch and keeps the Nym choice. Clearnet stays closed.
+    expect(afterDisc.mode).toBe('nym');
+    expect(afterDisc.privacyPreference).toBe('nym');
+    expect(afterDisc.egressBlocked).toBe(true);
+    expect(ctrl.mode).toBe('nym');
+    const clearnet = vi.fn(async () => new Response('clearnet'));
+    vi.stubGlobal('fetch', clearnet);
+    try {
+      await expect(
+        ctrl.getStellarFetch()('https://horizon-testnet.stellar.org/fee_stats'),
+      ).rejects.toMatchObject({ code: 'NOT_CONNECTED' });
+      expect(clearnet).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
 
     const again = await ctrl.connect();
     expect(again.connected).toBe(true);
     expect(bridge.setup).toHaveBeenCalledTimes(2);
     expect(again.lastError).toBeNull();
+  });
+
+  it('publishes MixFetch loss to listeners without a storage write', async () => {
+    const bridge = mockBridge();
+    const ctrl = await seededController(bridge);
+    const published: Array<{ connected: boolean; egressBlocked: boolean; mode: string }> = [];
+    ctrl.subscribeRuntimeStatus((snap) => {
+      published.push({
+        connected: snap.connected,
+        egressBlocked: snap.egressBlocked,
+        mode: snap.mode,
+      });
+    });
+    await ctrl.connect();
+    expect(ctrl.getSnapshot().connected).toBe(true);
+    published.length = 0;
+    bridge.emitLost();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(ctrl.getSnapshot().connected).toBe(false);
+    expect(ctrl.getSnapshot().egressBlocked).toBe(true);
+    expect(ctrl.mode).toBe('nym');
+    expect(published.some((snap) => snap.connected === false && snap.egressBlocked && snap.mode === 'nym')).toBe(
+      true,
+    );
   });
 
   it('serializes concurrent Connect into a single setup', async () => {
@@ -213,7 +263,19 @@ describe('NymRuntimeController lifecycle', () => {
 
     await expect(ctrl.connect()).rejects.toMatchObject({ code: 'CONNECT_FAILED' });
     expect(bridge.setup).not.toHaveBeenCalled();
-    // Failed connect must not leave the wallet stuck in Nym without MixFetch.
-    expect(ctrl.mode).toBe('direct');
+    // Connect is an explicit Nym choice. Failure must not fall through to clearnet.
+    expect(ctrl.mode).toBe('nym');
+    expect(ctrl.getSnapshot().privacyPreference).toBe('nym');
+    expect(ctrl.getSnapshot().egressBlocked).toBe(true);
+    const clearnet = vi.fn(async () => new Response('clearnet'));
+    vi.stubGlobal('fetch', clearnet);
+    try {
+      await expect(
+        ctrl.getStellarFetch()('https://horizon-testnet.stellar.org/fee_stats'),
+      ).rejects.toMatchObject({ code: 'NOT_CONNECTED' });
+      expect(clearnet).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

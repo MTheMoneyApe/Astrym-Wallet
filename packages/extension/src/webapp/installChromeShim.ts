@@ -9,6 +9,8 @@
  * timers because this page is the process.
  */
 
+import { NYM_PRIVACY_PREFERENCE_STORAGE_KEY } from '../shared/nymPrivacyPreference.js';
+
 const LOCAL_STORAGE_KEY = 'astrym.chrome.storage.local.v1';
 const SESSION_DB = 'astrym-chrome-session';
 const SESSION_STORE = 'kv';
@@ -16,6 +18,24 @@ const NO_RESPONSE = 'The message port closed before a response was received.';
 
 type Callback = (...args: unknown[]) => unknown;
 type Store = Record<string, unknown>;
+
+type LocalStorageLike = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+export type AndroidChromeShimOptions = {
+  /** Defaults to globalThis. Tests pass a separate host per webapp instance. */
+  host?: AndroidChromeHost;
+  /** Defaults to global localStorage, or an in-memory map when that is missing. */
+  localStorage?: LocalStorageLike;
+  /**
+   * Receives cross-document `storage` events. Defaults to `window`.
+   * The writing instance does not emit this; the browser delivers it to peers.
+   */
+  storageEvents?: EventTarget | null;
+};
 
 type ChromeEvent = {
   addListener: (fn: Callback) => void;
@@ -71,8 +91,10 @@ function selectKeys(store: Store, keys: unknown): Store {
   return {};
 }
 
-function browserLocal(): { read: () => Store; write: (next: Store) => void } {
-  if (typeof localStorage === 'undefined') {
+function browserLocal(storage?: LocalStorageLike): { read: () => Store; write: (next: Store) => void } {
+  const backing: LocalStorageLike | null =
+    storage ?? (typeof localStorage === 'undefined' ? null : localStorage);
+  if (!backing) {
     let mem: Store = {};
     return {
       read: () => mem,
@@ -84,16 +106,17 @@ function browserLocal(): { read: () => Store; write: (next: Store) => void } {
   return {
     read: () => {
       try {
-        const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+        const raw = backing.getItem(LOCAL_STORAGE_KEY);
         if (!raw) return {};
         const parsed = JSON.parse(raw) as unknown;
-        return parsed && typeof parsed === 'object' ? (parsed as Store) : {};
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Store) : {};
       } catch {
         return {};
       }
     },
     write: (next) => {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
+      // QuotaExceededError / SecurityError must escape so chrome.storage.set can reject.
+      backing.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
     },
   };
 }
@@ -115,12 +138,12 @@ type AndroidChromeHost = {
   chrome?: Record<string, unknown>;
 };
 
-export function installAndroidChromeShim(): void {
-  const host = globalThis as unknown as AndroidChromeHost;
+export function installAndroidChromeShim(options?: AndroidChromeShimOptions): void {
+  const host = options?.host ?? (globalThis as unknown as AndroidChromeHost);
   const existingRuntime = host.chrome?.['runtime'] as { id?: string } | undefined;
   if (typeof existingRuntime?.id === 'string' && existingRuntime.id.length > 0) return;
 
-  const local = browserLocal();
+  const local = browserLocal(options?.localStorage);
   const onChanged = createEvent();
   const onAlarm = createEvent();
   const onMessage = createEvent();
@@ -261,6 +284,91 @@ export function installAndroidChromeShim(): void {
    * (SPP auto-prepare, gateway config) — await resolves to undefined and
    * prepare never publishes status (idle forever after Nym Connect).
    */
+  function storageErrorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : 'storage write failed';
+  }
+
+  function deliverWrite(run: Promise<void>, callback?: Callback): Promise<void> | undefined {
+    if (typeof callback !== 'function') return run;
+    void run.then(
+      () => {
+        runtime.lastError = undefined;
+        callback();
+      },
+      (err: unknown) => {
+        runtime.lastError = { message: storageErrorMessage(err) };
+        try {
+          callback();
+        } finally {
+          runtime.lastError = undefined;
+        }
+      },
+    );
+    return undefined;
+  }
+
+  function parseLocalBlob(raw: string | null): { ok: true; store: Store } | { ok: false } {
+    if (!raw) return { ok: true, store: {} };
+    try {
+      const value = JSON.parse(raw) as unknown;
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false };
+      return { ok: true, store: value as Store };
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  function publishForeignLocal(oldRaw: string | null, newRaw: string | null): void {
+    const previous = parseLocalBlob(oldRaw);
+    const next = parseLocalBlob(newRaw);
+    if (!previous.ok || !next.ok) {
+      onChanged.emit(
+        { [NYM_PRIVACY_PREFERENCE_STORAGE_KEY]: { oldValue: undefined, newValue: undefined } },
+        'local',
+      );
+      return;
+    }
+    const keys = new Set([...Object.keys(previous.store), ...Object.keys(next.store)]);
+    const changes: Record<string, { oldValue?: unknown; newValue?: unknown }> = {};
+    for (const key of keys) {
+      if (!Object.is(previous.store[key], next.store[key])) {
+        changes[key] = { oldValue: previous.store[key], newValue: next.store[key] };
+      }
+    }
+    if (Object.keys(changes).length > 0) onChanged.emit(changes, 'local');
+  }
+
+  const storageEvents =
+    options?.storageEvents === undefined
+      ? typeof window !== 'undefined'
+        ? window
+        : null
+      : options.storageEvents;
+  if (storageEvents && typeof storageEvents.addEventListener === 'function') {
+    storageEvents.addEventListener('storage', (event) => {
+      const record = event as Event & {
+        key?: string | null;
+        oldValue?: string | null;
+        newValue?: string | null;
+      };
+      // localStorage.clear() delivers key === null and no per-key diff.
+      if (record.key === null) {
+        onChanged.emit(
+          {
+            [NYM_PRIVACY_PREFERENCE_STORAGE_KEY]: {
+              oldValue: undefined,
+              newValue: undefined,
+            },
+          },
+          'local',
+        );
+        return;
+      }
+      if (record.key !== LOCAL_STORAGE_KEY) return;
+      publishForeignLocal(record.oldValue ?? null, record.newValue ?? null);
+    });
+  }
+
   function area(kind: 'local' | 'session') {
     return {
       get(keys?: unknown, callback?: Callback) {
@@ -286,70 +394,70 @@ export function installAndroidChromeShim(): void {
       },
       set(items: Store, callback?: Callback) {
         const run = (): Promise<void> =>
-          new Promise((resolve) => {
+          new Promise((resolve, reject) => {
             const apply = () => {
-              const changes: Record<string, { oldValue?: unknown; newValue?: unknown }> = {};
-              if (kind === 'local') {
-                const current = local.read();
-                const next = { ...current };
-                for (const [key, value] of Object.entries(items)) {
-                  changes[key] = { oldValue: current[key], newValue: value };
-                  next[key] = value;
+              try {
+                const changes: Record<string, { oldValue?: unknown; newValue?: unknown }> = {};
+                if (kind === 'local') {
+                  const current = local.read();
+                  const next = { ...current };
+                  for (const [key, value] of Object.entries(items)) {
+                    changes[key] = { oldValue: current[key], newValue: value };
+                    next[key] = value;
+                  }
+                  local.write(next);
+                } else {
+                  for (const [key, value] of Object.entries(items)) {
+                    changes[key] = { oldValue: session.get(key), newValue: value };
+                    session.set(key, value);
+                    persistSession(key, value);
+                  }
                 }
-                local.write(next);
-              } else {
-                for (const [key, value] of Object.entries(items)) {
-                  changes[key] = { oldValue: session.get(key), newValue: value };
-                  session.set(key, value);
-                  persistSession(key, value);
-                }
+                runtime.lastError = undefined;
+                onChanged.emit(changes, kind);
+                resolve();
+              } catch (err) {
+                reject(err instanceof Error ? err : new Error(storageErrorMessage(err)));
               }
-              runtime.lastError = undefined;
-              onChanged.emit(changes, kind);
-              resolve();
             };
             if (kind === 'local') queueMicrotask(apply);
-            else void sessionReady.then(apply);
+            else void sessionReady.then(apply, reject);
           });
-        if (typeof callback === 'function') {
-          void run().then(() => callback());
-          return undefined;
-        }
-        return run();
+        return deliverWrite(run(), callback);
       },
       remove(keys: string | string[], callback?: Callback) {
         const list = Array.isArray(keys) ? keys : [keys];
         const run = (): Promise<void> =>
-          new Promise((resolve) => {
+          new Promise((resolve, reject) => {
             const apply = () => {
-              const changes: Record<string, { oldValue?: unknown }> = {};
-              if (kind === 'local') {
-                const current = local.read();
-                const next = { ...current };
-                for (const key of list) {
-                  changes[key] = { oldValue: current[key] };
-                  delete next[key];
+              try {
+                const changes: Record<string, { oldValue?: unknown }> = {};
+                if (kind === 'local') {
+                  const current = local.read();
+                  const next = { ...current };
+                  for (const key of list) {
+                    changes[key] = { oldValue: current[key] };
+                    delete next[key];
+                  }
+                  local.write(next);
+                } else {
+                  for (const key of list) {
+                    changes[key] = { oldValue: session.get(key) };
+                    session.delete(key);
+                    persistSession(key, undefined);
+                  }
                 }
-                local.write(next);
-              } else {
-                for (const key of list) {
-                  changes[key] = { oldValue: session.get(key) };
-                  session.delete(key);
-                  persistSession(key, undefined);
-                }
+                runtime.lastError = undefined;
+                onChanged.emit(changes, kind);
+                resolve();
+              } catch (err) {
+                reject(err instanceof Error ? err : new Error(storageErrorMessage(err)));
               }
-              runtime.lastError = undefined;
-              onChanged.emit(changes, kind);
-              resolve();
             };
             if (kind === 'local') queueMicrotask(apply);
-            else void sessionReady.then(apply);
+            else void sessionReady.then(apply, reject);
           });
-        if (typeof callback === 'function') {
-          void run().then(() => callback());
-          return undefined;
-        }
-        return run();
+        return deliverWrite(run(), callback);
       },
     };
   }

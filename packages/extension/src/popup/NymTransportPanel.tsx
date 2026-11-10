@@ -9,6 +9,7 @@ import type { NymTransportMode } from '@solanym/wallet-core/src/nym/NymTransport
 import { NYM_VERIFIED_GATEWAY } from '../nym-offscreen/verifiedGateway.js';
 import { NYM_HTTP_SMOKE_DEFAULT_URL } from '../nym-offscreen/httpSmokeConfig.js';
 import { NYM_PUBLIC_DATA_DEFAULT_URL } from '../nym-offscreen/publicDataConfig.js';
+import { PrivacyModeIndicator, describeWalletPrivacy } from './privacyIndicator.js';
 
 export type NymHttpSmokeUiResult = {
   state: 'idle' | 'running' | 'success' | 'error' | 'timeout';
@@ -62,6 +63,10 @@ export type NymStellarHorizonUiResult = {
 
 export type NymUiSnapshot = NymTransportSnapshot & {
   mode?: NymTransportMode;
+  preferenceHydrated?: boolean;
+  egressBlocked?: boolean;
+  privacyPreference?: 'direct' | 'nym' | null;
+  preferenceDurable?: boolean;
   documentReady?: boolean;
   diagnosticCode?: string;
   diagnosticStage?: string | null;
@@ -140,6 +145,7 @@ export function NymTransportPanel({
   return (
     <div className="card" style={{ marginBottom: 20 }} data-testid="nym-transport-panel">
       <h3 style={{ marginTop: 0, fontSize: '0.95rem' }}>Nym Mixnet</h3>
+      <PrivacyModeIndicator snapshot={snapshot} />
       <p
         style={{ margin: '0 0 8px', fontSize: '0.85rem' }}
         data-nym-state={snapshot.state}
@@ -152,7 +158,7 @@ export function NymTransportPanel({
       </p>
       <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.78rem', color: 'var(--muted, #888)' }}>
         <li>Implementación: {snapshot.implementation}</li>
-        <li>Modo: {mode}</li>
+        <li data-testid="nym-mode-label">{describeWalletPrivacy(snapshot).label}</li>
         <li>Conectado: {snapshot.connected ? 'sí' : 'no'}</li>
         <li>
           Documento offscreen: {snapshot.documentReady ? 'abierto' : 'no'} (≠ Mixnet Ready)
@@ -295,7 +301,7 @@ export function NymTransportPanel({
             <button
               type="button"
               className="btn-secondary"
-              disabled={busy || mode === 'nym'}
+              disabled={busy || snapshot.privacyPreference === 'nym'}
               onClick={() => onSetMode('nym')}
               data-testid="nym-mode-nym"
             >
@@ -304,10 +310,10 @@ export function NymTransportPanel({
             <button
               type="button"
               className="btn-secondary"
-              disabled={busy || mode === 'direct'}
+              disabled={busy || snapshot.privacyPreference === 'direct'}
               onClick={() => onSetMode('direct')}
               data-testid="nym-mode-direct"
-              title="Horizon / clearnet for ordinary wallet ops. Private SPP stays Nym-only."
+              title="Explicit switch to clearnet. Disconnect does not select Direct."
             >
               Direct (Horizon)
             </button>
@@ -572,14 +578,15 @@ export function NymTransportPanel({
       ) : null}
 
       <p style={{ margin: '10px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
-        Por defecto la wallet usa Horizon en Direct. Connect activa Nym (MixFetch fail-closed).
-        Disconnect vuelve a Direct. En modo Nym no hay fallback silencioso a clearnet. En la
-        extensión, el permiso de host se pide en el mismo clic; en Android MixFetch corre en la página.
+        La elección se guarda y se restaura al reiniciar. Sin una elección explícita
+        guardada, la red de la wallet permanece bloqueada: no hay Direct por defecto.
+        Connect o «Nym mode» eligen Nym. «Direct (Horizon)» es el único paso a clearnet.
+        Disconnect cierra MixFetch y no elige Direct.
       </p>
       {mode === 'nym' && !ready ? (
         <p style={{ margin: '6px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
-          Mientras Nym está seleccionado y no Ready, las peticiones Stellar por MixFetch fallan
-          cerradas (sin clearnet). Usa Direct para Horizon ordinario.
+          Mientras Nym está seleccionado y no Ready, las peticiones de la wallet fallan
+          cerradas (sin clearnet). Direct es un cambio explícito.
         </p>
       ) : null}
     </div>

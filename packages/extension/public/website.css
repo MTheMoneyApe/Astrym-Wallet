@@ -22,7 +22,7 @@ html, body {
   min-height: 100dvh;
   background: var(--bg);
   color: var(--white);
-  font-family: "Instrument Sans", sans-serif;
+  font-family: system-ui, sans-serif;
 }
 
 body {
@@ -97,7 +97,7 @@ a { color: var(--mint); }
 }
 
 .inline-code {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: ui-monospace, monospace;
   font-size: 0.78em;
   color: var(--gold);
 }
@@ -148,7 +148,7 @@ a { color: var(--mint); }
 }
 
 .badge, .kicker, .steps span, footer {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: ui-monospace, monospace;
   letter-spacing: 0.08em;
 }
 
@@ -163,7 +163,7 @@ a { color: var(--mint); }
   overflow-wrap: anywhere;
 }
 
-h1, h2, h3 { font-family: Orbitron, sans-serif; font-weight: 700; }
+h1, h2, h3 { font-family: system-ui, sans-serif; font-weight: 700; }
 
 h1 {
   font-size: clamp(1.2rem, 4.2vw, 2.15rem);
@@ -197,7 +197,7 @@ h1 {
   justify-content: center;
   min-height: max(52px, var(--tap-min));
   padding: 0 18px;
-  font-family: Orbitron, sans-serif;
+  font-family: system-ui, sans-serif;
   font-size: 0.78rem;
   letter-spacing: 0.03em;
   box-sizing: border-box;
@@ -207,7 +207,7 @@ h1 {
 .btn.gold { background: transparent; color: var(--gold); border: 1px solid var(--gold); }
 
 .ghost {
-  font-family: "JetBrains Mono", monospace;
+  font-family: ui-monospace, monospace;
   font-size: 0.75rem;
   text-decoration: none;
   border-bottom: 1px solid var(--mint);
@@ -260,7 +260,7 @@ article p, .steps p { color: var(--grey); line-height: 1.5; overflow-wrap: anywh
 .steps span { color: var(--gold); font-size: 0.78rem; }
 
 .founder {
-  font-family: Orbitron, sans-serif;
+  font-family: system-ui, sans-serif;
   font-size: clamp(1rem, 2.4vw, 1.4rem);
   margin: 0;
   overflow-wrap: anywhere;
@@ -288,7 +288,7 @@ dialog {
 }
 
 dialog::backdrop { background: rgba(0, 0, 0, 0.72); }
-dialog h3 { margin-top: 0; font-family: Orbitron, sans-serif; }
+dialog h3 { margin-top: 0; font-family: system-ui, sans-serif; }
 dialog p { color: var(--grey); line-height: 1.5; }
 dialog .btn { width: 100%; }
 
@@ -336,4 +336,44 @@ img, svg {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+
+.language-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--tap-min);
+  padding: 3px;
+  border: 1px solid rgba(60, 232, 148, 0.35);
+  border-radius: 999px;
+}
+
+.language-button {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  min-width: 38px;
+  min-height: 34px;
+  padding: 0 9px;
+  background: transparent;
+  color: var(--grey);
+  cursor: pointer;
+  font: 600 0.72rem ui-monospace, monospace;
+}
+
+.language-button.is-active {
+  background: var(--mint);
+  color: #102018;
+}
+
+.language-button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+@media (max-width: 429px) {
+  .top-nav { gap: 8px; }
+  .language-switch { gap: 2px; }
+  .language-button { min-width: 34px; padding: 0 7px; }
 }
