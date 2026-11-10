@@ -19,6 +19,7 @@ import type {
   SppPrivatePoolResult,
 } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import { assertSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
+import { assertSppPoolPaymentEconomicsBound } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
 import { runWithSppHostFeeScope } from './sppHostFeeScope.js';
 import {
@@ -118,8 +119,12 @@ export function noteSppHostReadonlySessionReady(): void {
   publish('session_ready_readonly', 'RO session ready; write PrivatePool not bound yet');
 }
 
-function mapPoolResult(result: SppPrivatePoolResult): { txHash: string | null } {
-  return { txHash: result.txHash };
+function mapPoolResult(result: SppPrivatePoolResult): SppPrivatePoolResult {
+  const txHashes = hashesOf(result);
+  return {
+    txHash: txHashes.length === 1 ? (txHashes[0] ?? null) : null,
+    txHashes: [...txHashes],
+  };
 }
 
 function failureResult(
@@ -295,6 +300,17 @@ export async function executeSppHostWritePool(
       id,
       'UNAUTHORIZED',
       cause instanceof Error ? cause.message : 'Broadcast blocked',
+    );
+  }
+
+  try {
+    assertSppPoolPaymentEconomicsBound(operation);
+  } catch (cause) {
+    abortSequenceInFlight(sequenceBegun);
+    return failureResult(
+      id,
+      'INVALID_REQUEST',
+      cause instanceof Error ? cause.message : 'SPP_POOL_ECONOMICS_NOT_VERIFIED',
     );
   }
 

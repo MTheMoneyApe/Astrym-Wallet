@@ -33,6 +33,10 @@ import {
   type SppSignIntent,
 } from '../../../src/stellar/spp/sppSignGate.js';
 import { hashSep53Message } from '../../../src/stellar/spp/sep53.js';
+import {
+  resetSppBroadcastGateForTests,
+  setSppTestnetBroadcastAuthorized,
+} from '../../../src/stellar/spp/sppBroadcastGate.js';
 
 const ACCOUNT = 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6';
 const OTHER = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
@@ -594,6 +598,7 @@ const digestSigner = {
 describe('SPP sign gate attack cases', () => {
   beforeEach(() => {
     resetSppSignApprovalsForTests();
+    resetSppBroadcastGateForTests();
   });
 
   it('allowlists Testnet and rejects Public and Futurenet', () => {
@@ -713,23 +718,14 @@ describe('SPP sign gate attack cases', () => {
   it('rejects replay of a used approval, including a disposable digest signer', async () => {
     mintSppSignApproval(intent());
     const xdrInput = transactXdr();
-    const first = await signDigestWithSppGate({
-      kind: 'transaction',
-      input: xdrInput,
-      boundAccount: ACCOUNT,
-      networkPassphrase: Networks.TESTNET,
-      signer: digestSigner,
-    });
-    expect(first.signature).toHaveLength(64);
-
+    setSppTestnetBroadcastAuthorized(true);
     await expect(signDigestWithSppGate({
       kind: 'transaction',
       input: xdrInput,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
       signer: digestSigner,
-    })).rejects.toThrow(/already used/);
-
+    })).rejects.toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     await expect(signDigestWithSppGate({
       kind: 'transaction',
       input: xdrInput,
@@ -757,6 +753,7 @@ describe('SPP sign gate attack cases', () => {
       registerOwnerSignatureHex: OWNER_SIG_HEX,
     });
     mintSppSignApproval(approved);
+    setSppTestnetBroadcastAuthorized(true);
     const signed = await signDigestWithSppGate({
       kind: 'message',
       input: message,
@@ -855,7 +852,7 @@ describe('SPP sign gate attack cases', () => {
       input: depositAuthXdr(token),
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
@@ -882,7 +879,7 @@ describe('SPP sign gate attack cases', () => {
       input: depositTxXdr('token', token),
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
@@ -912,25 +909,25 @@ describe('SPP sign gate attack cases', () => {
       input: treeA.auth,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => authorizeSppSignature({
       kind: 'transaction',
       input: treeB.tx,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).toThrow(/authorization identity/);
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => authorizeSppSignature({
       kind: 'transaction',
       input: treeA.tx,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => authorizeSppSignature({
       kind: 'auth_entry',
       input: treeA.auth,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).toThrow(/already used/);
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
@@ -939,19 +936,19 @@ describe('SPP sign gate attack cases', () => {
       input: treeB.tx,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => authorizeSppSignature({
       kind: 'auth_entry',
       input: treeA.auth,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).toThrow(/authorization identity/);
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => authorizeSppSignature({
       kind: 'auth_entry',
       input: treeB.auth,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
@@ -969,12 +966,12 @@ describe('SPP sign gate attack cases', () => {
         networkPassphrase: Networks.TESTNET,
       })),
     ]);
-    expect(raced.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    expect(raced.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(raced.filter((result) => result.status === 'fulfilled')).toHaveLength(0);
+    expect(raced.filter((result) => result.status === 'rejected')).toHaveLength(2);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
-    await Promise.all([
+    const racedAgain = await Promise.allSettled([
       Promise.resolve().then(() => authorizeSppSignature({
         kind: 'transaction',
         input: treeA.tx,
@@ -988,6 +985,7 @@ describe('SPP sign gate attack cases', () => {
         networkPassphrase: Networks.TESTNET,
       })),
     ]);
+    expect(racedAgain.filter((result) => result.status === 'rejected')).toHaveLength(2);
 
     const extOnly = depositPair(token, 1, 8);
     resetSppSignApprovalsForTests();
@@ -997,13 +995,13 @@ describe('SPP sign gate attack cases', () => {
       input: treeA.auth,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).not.toThrow();
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => authorizeSppSignature({
       kind: 'transaction',
       input: extOnly.tx,
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
-    })).toThrow(/authorization identity/);
+    })).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
   });
 
   it('binds auth and transaction to one address nonce and expiration', async () => {
@@ -1029,31 +1027,31 @@ describe('SPP sign gate attack cases', () => {
     });
 
     mintSppSignApproval(deposit);
-    expect(() => sign('auth_entry', matched.auth)).not.toThrow();
-    expect(() => sign('transaction', otherNonce.tx)).toThrow(/authorization identity/);
-    expect(() => sign('transaction', otherExpiration.tx)).toThrow(/authorization identity/);
-    expect(() => sign('transaction', sourceTx.tx)).toThrow(/authorization identity/);
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', otherNonce.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', otherExpiration.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', sourceTx.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     expect(() => sign('transaction', foreign.tx)).toThrow(/bound Stellar account/);
-    expect(() => sign('transaction', matched.tx)).not.toThrow();
-    expect(() => sign('auth_entry', matched.auth)).toThrow(/already used/);
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
-    expect(() => sign('transaction', matched.tx)).not.toThrow();
-    expect(() => sign('auth_entry', otherNonce.auth)).toThrow(/authorization identity/);
-    expect(() => sign('auth_entry', otherExpiration.auth)).toThrow(/authorization identity/);
-    expect(() => sign('auth_entry', matched.auth)).not.toThrow();
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', otherNonce.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', otherExpiration.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
-    expect(() => sign('transaction', sourceTx.tx)).not.toThrow();
-    expect(() => sign('auth_entry', matched.auth)).toThrow(/authorization identity/);
+    expect(() => sign('transaction', sourceTx.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
-    expect(() => sign('auth_entry', matched.auth)).not.toThrow();
-    expect(() => sign('transaction', sourceTx.tx)).toThrow(/authorization identity/);
-    expect(() => sign('transaction', matched.tx)).not.toThrow();
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', sourceTx.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
@@ -1061,8 +1059,8 @@ describe('SPP sign gate attack cases', () => {
       Promise.resolve().then(() => sign('auth_entry', matched.auth)),
       Promise.resolve().then(() => sign('transaction', otherNonce.tx)),
     ]);
-    expect(raced.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    expect(raced.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(raced.filter((result) => result.status === 'fulfilled')).toHaveLength(0);
+    expect(raced.filter((result) => result.status === 'rejected')).toHaveLength(2);
   });
 
   it('covers supported credential routes and rejects the others', () => {
@@ -1099,37 +1097,37 @@ describe('SPP sign gate attack cases', () => {
     });
 
     mintSppSignApproval(deposit);
-    expect(() => sign('auth_entry', matched.auth)).not.toThrow();
-    expect(() => sign('transaction', otherSignature.tx)).not.toThrow();
-    expect(() => sign('transaction', matched.tx)).toThrow(/already used/);
+    expect(() => sign('auth_entry', matched.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', otherSignature.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
-    expect(() => sign('transaction', matched.tx)).not.toThrow();
-    expect(() => sign('auth_entry', withAddress.auth)).toThrow(/authorization identity/);
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', withAddress.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
-    expect(() => sign('auth_entry', withAddress.auth)).not.toThrow();
-    expect(() => sign('transaction', matched.tx)).toThrow(/authorization identity/);
+    expect(() => sign('auth_entry', withAddress.auth)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(deposit);
     expect(() => sign('transaction', addressV2.tx)).toThrow(/Unsupported Soroban credential/);
-    expect(() => sign('transaction', matched.tx)).not.toThrow();
+    expect(() => sign('transaction', matched.tx)).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     mintSppSignApproval(deposit);
     expect(() => sign('auth_entry', matched.auth)).toThrow(/ambiguous/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(intent());
-    expect(() => sign('transaction', transactXdr())).not.toThrow();
-    expect(() => sign('auth_entry', authXdr())).toThrow(/authorization identity/);
+    expect(() => sign('transaction', transactXdr())).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', authXdr())).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     resetSppSignApprovalsForTests();
     mintSppSignApproval(intent({ operation: 'withdraw', recipient: null }));
-    expect(() => sign('transaction', transactXdr({ recipient: ACCOUNT }))).not.toThrow();
-    expect(() => sign('auth_entry', authXdr({ recipient: ACCOUNT }))).toThrow(/authorization identity/);
+    expect(() => sign('transaction', transactXdr({ recipient: ACCOUNT }))).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    expect(() => sign('auth_entry', authXdr({ recipient: ACCOUNT }))).toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     const config = getNethermindPublicTestnetContractConfig();
     const registered = intent({

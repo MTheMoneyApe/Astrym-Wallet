@@ -40,6 +40,7 @@ import {
 } from '@stellar/stellar-sdk';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hashSep53Message } from './sep53.js';
+import { isSppTestnetBroadcastAuthorized } from './sppBroadcastGate.js';
 import { NETHERMIND_PUBLIC_KDF_DOMAIN } from './nethermind/nethermindPublicTestnet.js';
 import {
   SPP_PROPOSED_MAX_FEE_STROOPS,
@@ -129,9 +130,27 @@ export type SppSignAuthorization = {
   readonly context: SignatureAuthContext;
   readonly unsignedTransactionXdr: string | null;
   readonly approvalId: string;
+  readonly permissionEpoch: number;
 };
 
 const APPROVAL_TTL_MS = 120_000;
+let permissionEpoch = 0;
+
+export function sppSignPermissionEpoch(): number {
+  return permissionEpoch;
+}
+
+/** Broadcast and revoke state at the moment of signing, not at an earlier await. */
+export function assertSppSignatureStillPermitted(epoch: number): void {
+  if (!isSppTestnetBroadcastAuthorized()) {
+    permissionEpoch += 1;
+    pending.length = 0;
+    throw new SppSignerError('SPP_BROADCAST_AWAITING_APPROVAL: execution permission is off');
+  }
+  if (epoch !== permissionEpoch) {
+    throw new SppSignerError('SPP approval was revoked before signing');
+  }
+}
 
 type UsedSlots = Record<SppSignatureKind, boolean>;
 
@@ -329,10 +348,12 @@ export function mintSppSignApproval(intent: SppSignIntent, nowMs: number = Date.
 /** Test-only. Production has no message that clears used approvals. */
 export function resetSppSignApprovalsForTests(): void {
   pending.length = 0;
+  permissionEpoch = 0;
 }
 
 /** Drop pending approvals so a disabled broadcast cannot be signed later. */
 export function revokeSppSignApprovals(account?: string): number {
+  permissionEpoch += 1;
   if (account === undefined) {
     const removed = pending.length;
     pending.length = 0;
@@ -379,6 +400,7 @@ export function authorizeSppSignature(args: {
     context,
     unsignedTransactionXdr: prepared.unsignedTransactionXdr,
     approvalId: approval.id,
+    permissionEpoch,
   };
 }
 
@@ -401,7 +423,9 @@ export async function signDigestWithSppGate(args: {
     networkPassphrase: args.networkPassphrase,
     ...(args.nowMs !== undefined ? { nowMs: args.nowMs } : {}),
   });
+  assertSppSignatureStillPermitted(authorization.permissionEpoch);
   const signature = await args.signer.signDigest(authorization.digest);
+  assertSppSignatureStillPermitted(authorization.permissionEpoch);
   return { signature, authorization };
 }
 
@@ -1246,6 +1270,13 @@ function consumeMatchingApproval(
         requireMinResourceFee: true,
       });
     }
+  }
+  if (
+    chosen.intent.operation === 'deposit'
+    || chosen.intent.operation === 'transfer'
+    || chosen.intent.operation === 'withdraw'
+  ) {
+    assertSppPoolPaymentEconomicsBound(chosen.intent.operation);
   }
   if (kind === 'transaction' || kind === 'auth_entry') {
     if (!facts.authorizationId) {

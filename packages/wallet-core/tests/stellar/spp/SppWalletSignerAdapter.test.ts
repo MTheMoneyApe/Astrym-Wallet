@@ -2,7 +2,7 @@
  * Offline hardening tests for SppWalletSignerAdapter — no Horizon / Soroban RPC / Friendbot.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import {
@@ -39,6 +39,10 @@ import {
   sppKeyDerivationMessage,
   type SppSignIntent,
 } from '../../../src/stellar/spp/sppSignGate.js';
+import {
+  resetSppBroadcastGateForTests,
+  setSppTestnetBroadcastAuthorized,
+} from '../../../src/stellar/spp/sppBroadcastGate.js';
 import { NETHERMIND_PUBLIC_KDF_DOMAIN } from '../../../src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import { PasswordUnlocker } from '../../../src/vault/PasswordUnlocker.js';
 import { VaultService } from '../../../src/vault/VaultService.js';
@@ -373,6 +377,11 @@ function buildPaymentXdr(source: string, networkPassphrase: string, dest?: strin
 describe('SppWalletSignerAdapter hardening (offline)', () => {
   beforeEach(() => {
     resetSppSignApprovalsForTests();
+    resetSppBroadcastGateForTests();
+    setSppTestnetBroadcastAuthorized(true);
+  });
+  afterEach(() => {
+    resetSppBroadcastGateForTests();
   });
 
   it('implements the official WalletSigner shape', async () => {
@@ -411,9 +420,12 @@ describe('SppWalletSignerAdapter hardening (offline)', () => {
       tokenContractId: null,
       registerNoteKeyHex: NOTE_KEY,
       registerEncryptionKeyHex: ENC_KEY,
+      registerNoteKeyProofHex: 'ab',
+      registerEncryptionKeySignatureHex: 'cd'.repeat(64),
+      registerOwnerSignatureHex: 'ef'.repeat(64),
       maxFeeStroops: '5000000',
       exactMessage: 'hello',
-    }))).toThrow(/pinned KDF domain/);
+    }))).toThrow(/pinned derivation challenge|pinned KDF domain/);
 
     approveDerivationMessage();
     const result = await adapter.signMessage(DERIVATION_MESSAGE);
@@ -436,36 +448,10 @@ describe('SppWalletSignerAdapter hardening (offline)', () => {
     const adapter = makeAdapter(signer);
     mintSppSignApproval(baseIntent());
     const unsigned = buildTransactXdr();
-    const unsignedTx = TransactionBuilder.fromXDR(unsigned, Networks.TESTNET) as import('@stellar/stellar-sdk').Transaction;
-    const expectedHash = unsignedTx.hash();
-
-    const signed = await adapter.signTransaction(unsigned, {
+    await expect(adapter.signTransaction(unsigned, {
       networkPassphrase: Networks.TESTNET,
       address: SEP0005_TV1_G,
-    });
-    const { signedTxXdr, signerAddress } = signed as {
-      signedTxXdr: string;
-      signerAddress?: string;
-    };
-    expect(signerAddress).toBe(SEP0005_TV1_G);
-
-    const reparsed = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET) as import('@stellar/stellar-sdk').Transaction;
-    expect(reparsed.signatures.length).toBe(1);
-    expect(Buffer.from(reparsed.hash()).equals(Buffer.from(expectedHash))).toBe(true);
-
-    const attached = reparsed.signatures[0]!.signature as
-      | Uint8Array
-      | { value: Uint8Array };
-    const sigBytes =
-      attached instanceof Uint8Array
-        ? attached
-        : attached && 'value' in attached
-          ? attached.value
-          : new Uint8Array();
-    expect(Keypair.fromPublicKey(SEP0005_TV1_G).verify(expectedHash, Buffer.from(sigBytes))).toBe(
-      true,
-    );
-
+    })).rejects.toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     await vault.lock();
   });
 
@@ -510,19 +496,14 @@ describe('SppWalletSignerAdapter hardening (offline)', () => {
   it('signAuthEntry: allowlist + WithAddress binding; rejects contractId', async () => {
     const { signer, vault } = await unlockedStellarSigner();
     const adapter = makeAdapter(signer);
-    const pub = await signer.getPublicKey(0);
-
     mintSppSignApproval(baseIntent());
     const legacyB64 = buildTransactAuth(Networks.TESTNET);
-    const legacyResult = await adapter.signAuthEntry(legacyB64);
-    const { signedAuthEntry } = legacyResult as { signedAuthEntry: string };
-    const legacyPreimage = xdr.HashIdPreimage.fromXDR(legacyB64, 'base64');
-    const legacyPayload = hash(legacyPreimage.toXDR());
-    expect(ed25519.verify(b64ToBytes(signedAuthEntry), legacyPayload, pub)).toBe(true);
+    await expect(adapter.signAuthEntry(legacyB64)).rejects.toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
+    resetSppSignApprovalsForTests();
     mintSppSignApproval(baseIntent());
     const withAddr = buildTransactAuth(Networks.TESTNET, { withAddress: true });
-    await expect(adapter.signAuthEntry(withAddr)).resolves.toBeTruthy();
+    await expect(adapter.signAuthEntry(withAddr)).rejects.toThrow(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
 
     const wrongAddr = buildAuthPreimage(Networks.TESTNET, {
       variant: 'withAddress',

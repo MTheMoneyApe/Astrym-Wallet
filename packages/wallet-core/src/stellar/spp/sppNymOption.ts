@@ -11,6 +11,7 @@ import {
   privatePaymentFingerprint,
 } from './sppExecutionGuard.js';
 import { assertSppTestnetBroadcastAuthorized } from './sppBroadcastGate.js';
+import { assertSppPoolPaymentEconomicsBound } from './sppSignGate.js';
 import { assertFeeWithinCeiling, maxFeeStroopsForOperation } from './sppFeePolicy.js';
 
 export const STELLAR_SOROBAN_TESTNET_RPC = 'https://soroban-testnet.stellar.org';
@@ -359,9 +360,21 @@ export async function executeSppPrivatePayment(input: {
     );
   }
 
+  try {
+    assertSppPoolPaymentEconomicsBound(request.operation);
+  } catch (cause) {
+    release();
+    throw new SppPrivatePaymentError(
+      'INVALID_REQUEST',
+      cause instanceof Error ? cause.message : 'SPP_POOL_ECONOMICS_NOT_VERIFIED',
+      { cause },
+    );
+  }
+
   const pool = input.pool;
   const preferInjected = input.preferInjectedTransport !== false;
   let completed = false;
+  let reconcile = false;
 
   const run = async () => {
     await probeSorobanRpc(input.rpcUrl, input.nymFetch);
@@ -369,6 +382,7 @@ export async function executeSppPrivatePayment(input: {
       const result = await runPool(pool, request);
       const hashes = reportedPoolHashes(result);
       if (hashes.length !== 1) {
+        reconcile = true;
         throw new SppPrivatePaymentError(
           'SUBMISSION_UNKNOWN',
           `El SDK devolvió ${hashes.length} hash(es). No se confirma solo el primero y no hay reintento. hashes=${hashes.join(',')}`,
@@ -384,9 +398,13 @@ export async function executeSppPrivatePayment(input: {
         confirmation: 'confirmed' as const,
       };
     } catch (cause) {
-      if (cause instanceof SppPrivatePaymentError) throw cause;
+      if (cause instanceof SppPrivatePaymentError) {
+        if (cause.txHashes.length > 0) reconcile = true;
+        throw cause;
+      }
       const message = cause instanceof Error ? cause.message : 'El pago privado SPP falló';
       const recovered = hashesCarriedBy(cause);
+      if (recovered.length > 0) reconcile = true;
       throw new SppPrivatePaymentError(
         'EXECUTION_FAILED',
         recovered.length > 0 ? `${message} completedHashes=${recovered.join(',')}` : message,
@@ -401,7 +419,7 @@ export async function executeSppPrivatePayment(input: {
     }
     return await withSppRpcThroughNym(input.rpcUrl, input.nymFetch, run);
   } finally {
-    release(completed ? { completed: true } : undefined);
+    release(completed ? { completed: true } : reconcile ? { reconcile: true } : undefined);
   }
 }
 

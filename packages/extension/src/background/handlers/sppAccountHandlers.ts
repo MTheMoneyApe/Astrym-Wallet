@@ -8,8 +8,10 @@ import browser from 'webextension-polyfill';
 import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
 import {
   mintSppSignApproval,
+  revokeSppSignApprovals,
   sppKeyDerivationMessage,
 } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { isSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
 import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import type { ValidatedRequestPayload, ValidatedResponsePayload } from '../../shared/ipcTypes.js';
@@ -114,6 +116,13 @@ export function createSppRegisterPublicKeysHandler(deps: {
     const address = deps.resolveAccount
       ? await deps.resolveAccount()
       : (await resolveActiveStellarAddress(requiredKeyManager(deps.keyManager))).address;
+    if (!isSppTestnetBroadcastAuthorized()) {
+      revokeSppSignApprovals(address);
+      throw Object.assign(
+        new Error('SPP_BROADCAST_AWAITING_APPROVAL: registration is disabled. No approval was minted.'),
+        { name: 'UNAUTHORIZED', code: 'BROADCAST_AWAITING_APPROVAL' },
+      );
+    }
     const config = getNethermindPublicTestnetContractConfig();
     mintSppSignApproval({
       operation: 'register_public_keys',

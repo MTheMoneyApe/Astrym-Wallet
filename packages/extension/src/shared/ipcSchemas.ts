@@ -7,6 +7,8 @@
 export const IpcErrorSchema = z.object({
   name: z.string(),
   message: z.string(),
+  code: z.string().optional(),
+  txHashes: z.array(z.string()).optional(),
 });
 
 export const BaseRequestEnvelopeSchema = z.object({
