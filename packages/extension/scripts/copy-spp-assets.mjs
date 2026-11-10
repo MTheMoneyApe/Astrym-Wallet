@@ -354,7 +354,7 @@ async function main() {
   }
 
   // Full profile: every circuits.json circuit id must have on-disk artifacts
-  const lockPath = join(DEST_ROOT, 'dist', 'circuits', 'circuits.json');
+  const lockPath = join(staging, 'dist', 'circuits', 'circuits.json');
   const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
   /** @type {string[]} */
   const circuitIds = [];
