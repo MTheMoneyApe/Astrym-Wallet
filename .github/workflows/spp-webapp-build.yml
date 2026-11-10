@@ -68,6 +68,8 @@ jobs:
       - name: Build
         id: spp_build
         continue-on-error: true
+        env:
+          CC_ENABLE_DEBUG_OUTPUT: "1"
         run: |
           set -o pipefail
           pnpm build:webapp 2>&1 | tee "$RUNNER_TEMP/spp-logs/build-webapp.txt"
@@ -79,9 +81,36 @@ jobs:
           proof="$RUNNER_TEMP/spp-proof"
           runtime=".cache/spp-upstream/stellar-private-payments/sdk/web"
           mkdir -p "$proof/wasm" "$proof/manifest"
-          if [ -d "$runtime/dist" ]; then
-            find "$runtime/dist" -type f -name '*.wasm' -exec cp --parents {} "$proof/wasm/" \;
-          fi
+          for entry in \
+            "dist/stellar_private_payments_web_bg.wasm:main.wasm" \
+            "dist/workers/prover-worker-module_bg.wasm:prover-worker.wasm" \
+            "dist/workers/storage-worker-module_bg.wasm:storage-worker.wasm"; do
+            source_path="${entry%%:*}"
+            evidence_name="${entry#*:}"
+            if [ -f "$runtime/$source_path" ]; then
+              cp "$runtime/$source_path" "$proof/wasm/$evidence_name"
+            fi
+          done
+          {
+            echo "=== native compiler commands (cc-rs) ==="
+            for tool in cc clang clang-18 clang-19 wasm-ld wasm-ld-18 llvm-ar ar; do
+              if command -v "$tool" >/dev/null 2>&1; then
+                echo "--- $tool: $(command -v "$tool")"
+                "$tool" --version 2>&1 | sed -n '1,4p' || true
+              fi
+            done
+            for name in CC CC_wasm32_unknown_unknown TARGET_CC AR AR_wasm32_unknown_unknown CFLAGS CFLAGS_wasm32_unknown_unknown; do
+              eval "value=\${$name-}"
+              printf '%s=%s\n' "$name" "${value:-<unset>}"
+            done
+            echo "=== rust toolchain ==="
+            if [ -x "$HOME/.cargo/bin/rustc" ]; then
+              "$HOME/.cargo/bin/rustc" +1.97.1 --version --verbose
+              "$HOME/.cargo/bin/cargo" +1.97.1 --version --verbose
+            fi
+            wasm_opt="$runtime/../../target/tmp/binaryen/binaryen-version_131/bin/wasm-opt"
+            if [ -x "$wasm_opt" ]; then "$wasm_opt" --version; fi
+          } > "$proof/wasm/toolchain.txt"
           python3 - \
             packages/wallet-core/src/stellar/spp/nethermind/spp-runtime-manifest.json \
             "$runtime" "$proof/manifest/comparison.json" <<'PY'
@@ -130,16 +159,21 @@ jobs:
               "report": str(output_path),
           }, indent=2))
           PY
-          wasm="$runtime/dist/stellar_private_payments_web_bg.wasm"
-          if [ -f "$wasm" ]; then
+          if [ -f "$proof/wasm/main.wasm" ]; then
             curl --proto '=https' -fsSL -o "$RUNNER_TEMP/wabt.tar.gz.partial" \
               https://github.com/WebAssembly/wabt/releases/download/1.0.37/wabt-1.0.37-ubuntu-20.04.tar.gz
             echo "cfc675dc9b663d9adc8c75d982c1ba29f661448a2e026a67e71fe3f76a3e09f3  $RUNNER_TEMP/wabt.tar.gz.partial" | sha256sum -c -
             mkdir -p "$RUNNER_TEMP/wabt"
             tar -xzf "$RUNNER_TEMP/wabt.tar.gz.partial" -C "$RUNNER_TEMP/wabt"
             obj="$RUNNER_TEMP/wabt/wabt-1.0.37/bin/wasm-objdump"
-            "$obj" -x "$wasm" | python3 scripts/spp-wasm-sections.py > "$proof/wasm/built-import-memory-export.txt"
-            if diff -u scripts/spp-wasm-sections-fb3481af.txt "$proof/wasm/built-import-memory-export.txt" > "$proof/wasm/section-diff.txt"; then
+            for name in main prover-worker storage-worker; do
+              wasm="$proof/wasm/$name.wasm"
+              if [ -f "$wasm" ]; then
+                "$obj" -h "$wasm" > "$proof/wasm/$name-section-headers.txt"
+                "$obj" -x "$wasm" | python3 scripts/spp-wasm-sections.py > "$proof/wasm/$name-import-memory-export.txt"
+              fi
+            done
+            if diff -u scripts/spp-wasm-sections-fb3481af.txt "$proof/wasm/main-import-memory-export.txt" > "$proof/wasm/section-diff.txt"; then
               echo "IDENTICAL to fb3481af import, memory, and export sections" | tee "$proof/wasm/section-result.txt"
             else
               echo "DIFFERENT from fb3481af import, memory, or export sections" | tee "$proof/wasm/section-result.txt"
