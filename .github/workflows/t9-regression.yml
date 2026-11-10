@@ -14,7 +14,7 @@ on:
       head_sha:
         description: Candidate commit
         required: true
-        default: 215d5dc2d94a600c401e8fb1ded0dda669cde0f9
+        default: cec2fab5b29c70b0a20b12f12bf5f2f032e190df
 
 permissions:
   contents: read
@@ -90,7 +90,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-          ref: 215d5dc2d94a600c401e8fb1ded0dda669cde0f9
+          ref: cec2fab5b29c70b0a20b12f12bf5f2f032e190df
           path: t9-head
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -109,7 +109,7 @@ jobs:
       - name: Compare base and head
         env:
           T9_BASE_SHA: 2dedcc4f68be57558fd0042d0df25ac26f45f23c
-          T9_HEAD_SHA: 215d5dc2d94a600c401e8fb1ded0dda669cde0f9
+          T9_HEAD_SHA: cec2fab5b29c70b0a20b12f12bf5f2f032e190df
           T9_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           T9_BASE_DIR: ${{ github.workspace }}/t9-baseline
           T9_HEAD_DIR: ${{ github.workspace }}/t9-head
