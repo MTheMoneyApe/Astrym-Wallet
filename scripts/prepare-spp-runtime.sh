@@ -188,8 +188,115 @@ if [ "$(git -C "$SRC/circuits/src/circomlib" rev-parse HEAD 2>/dev/null || true)
 fi
 [ "$(git -C "$SRC/circuits/src/circomlib" rev-parse HEAD)" = "$LOCK" ] || die "circomlib is not $LOCK"
 
+# Panic locations and registry paths must not depend on this machine.
+# CARGO_ENCODED_RUSTFLAGS overrides RUSTFLAGS, so both carry the same remaps.
+if [ -n "${RUSTFLAGS:-}${CARGO_ENCODED_RUSTFLAGS:-}" ]; then
+  die "RUSTFLAGS or CARGO_ENCODED_RUSTFLAGS is already set; refusing a mixed flag set"
+fi
+mkdir -p "$CARGO_HOME" "$RUSTUP_HOME"
+remap_from_to() {
+  python3 - "$@" <<'PY'
+import os, sys
+pairs = []
+args = sys.argv[1:]
+tokens = {"src": "/spp-src", "cargo": "/cargo", "rustup": "/rustup"}
+for item in args:
+    key, path = item.split("=", 1)
+    path = os.path.abspath(path)
+    real = os.path.realpath(path)
+    for candidate in (path, real):
+        if candidate and candidate not in [p for p, _ in pairs]:
+            pairs.append((candidate, tokens[key]))
+pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
+flags = [f"--remap-path-prefix={src}={dst}" for src, dst in pairs]
+print("\n".join(flags))
+PY
+}
+mapfile -t REMAP_ARGS < <(remap_from_to "src=$SRC" "cargo=$CARGO_HOME" "rustup=$RUSTUP_HOME")
+[ "${#REMAP_ARGS[@]}" -ge 3 ] || die "path remap flags were not built"
+RUSTFLAGS="${REMAP_ARGS[*]}"
+export RUSTFLAGS
+CARGO_ENCODED_RUSTFLAGS="$(printf '%s\037' "${REMAP_ARGS[@]}")"
+CARGO_ENCODED_RUSTFLAGS="${CARGO_ENCODED_RUSTFLAGS%$'\037'}"
+export CARGO_ENCODED_RUSTFLAGS
+log "COMMAND: rustc path remap (longest prefix first)"
+printf '  %s\n' "${REMAP_ARGS[@]}"
+
 log "COMMAND: bash sdk/web/scripts/build.sh"
 ( cd "$SRC" && bash sdk/web/scripts/build.sh )
+
+log "COMMAND: scan shipped wasm and bindgen glue for host paths"
+python3 - "$SRC/sdk/web/dist" "$SRC" "$CARGO_HOME" "$RUSTUP_HOME" <<'PY'
+import os, sys
+from pathlib import Path
+
+dist, src, cargo, rustup = map(Path, sys.argv[1:])
+needles = []
+for path in (src, cargo, rustup):
+    for candidate in (path.resolve(), Path(os.path.realpath(path))):
+        text = str(candidate)
+        if text not in needles:
+            needles.append(text)
+
+def leb(data, i):
+    n = s = 0
+    while True:
+        b = data[i]
+        i += 1
+        n |= (b & 0x7F) << s
+        if b < 128:
+            return n, i
+        s += 7
+
+def custom_sections(data):
+    if data[:4] != b"\0asm":
+        return
+    i = 8
+    while i < len(data):
+        sid = data[i]
+        i += 1
+        size, i = leb(data, i)
+        body = data[i : i + size]
+        i += size
+        if sid != 0 or not body:
+            continue
+        nlen, j = leb(body, 0)
+        name = body[j : j + nlen].decode("utf-8", "replace")
+        yield name, body[j + nlen :]
+
+scanned = []
+for path in sorted(dist.rglob("*")):
+    if not path.is_file():
+        continue
+    if path.suffix not in {".wasm", ".js"}:
+        continue
+    if "circuits" in path.parts:
+        continue
+    data = path.read_bytes()
+    scanned.append(path)
+    for needle in needles:
+        if needle.encode() in data:
+            raise SystemExit(f"host path still embedded in {path}: {needle}")
+    if path.suffix == ".wasm":
+        for name, payload in custom_sections(data):
+            strings = []
+            i = 0
+            while i < len(payload):
+                try:
+                    n, j = leb(payload, i)
+                except Exception:
+                    break
+                if 0 < n <= 200 and j + n <= len(payload) and all(32 <= b < 127 for b in payload[j : j + n]):
+                    strings.append(payload[j : j + n].decode())
+                    i = j + n
+                else:
+                    i += 1
+            print(f"custom {path.name} {name}: {strings}")
+
+if not any(path.name == "stellar_private_payments_web_bg.wasm" for path in scanned):
+    raise SystemExit("shipped main wasm was not scanned")
+print(f"host paths absent from {len(scanned)} shipped wasm/js files")
+PY
 
 python3 - "$SRC/sdk/web" "$MANIFEST" "$SOURCE_COMMIT" <<'PY'
 import hashlib, json, sys
