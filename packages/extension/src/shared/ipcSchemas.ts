@@ -699,6 +699,15 @@ export const MessageSchemas = {
       transportFetchInvoked: z.boolean(),
     }),
   },
+  SPP_AUTHORIZE_KEY_DERIVATION: {
+    request: z.object({
+      acknowledgeHighRisk: z.literal(true),
+      kdfDomain: z.string().min(1).max(64),
+    }),
+    response: z.object({
+      approved: z.literal(true),
+    }),
+  },
   SPP_PRIVATE_PAYMENT: {
     request: z.object({
       enabled: z.literal(true),
