@@ -269,7 +269,7 @@ export async function handleSppHostSignRequest(
     let signatureBase64: string;
     switch (kind) {
       case 'message': {
-        let result;
+        let result: Awaited<ReturnType<SppWalletSignerAdapter['signMessage']>>;
         if (storageUnlockToken) {
           result = await adapter.signStorageUnlockMessage(
             input,
