@@ -1,4 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import {
+  openSppHostInternal,
+  resetSppHostOpenLockForTests,
+} from '../../src/spp-host/openSppHost.js';
 
 const tabs = {
   query: vi.fn(),
@@ -12,7 +16,7 @@ const runtime = {
 const windows = { update: vi.fn() };
 
 beforeEach(() => {
-  vi.resetModules();
+  resetSppHostOpenLockForTests();
   tabs.query.mockReset();
   tabs.create.mockReset();
   tabs.update.mockReset();
@@ -46,7 +50,6 @@ describe('openSppHostInternal tab reuse', () => {
     tabs.get.mockResolvedValue({ id: 42, windowId: 7 });
     tabs.update.mockResolvedValue({});
     windows.update.mockResolvedValue({});
-    const { openSppHostInternal } = await import('../../src/spp-host/openSppHost.js');
     await openSppHostInternal({ active: true });
     expect(tabs.create).not.toHaveBeenCalled();
     expect(tabs.update).toHaveBeenCalledWith(42, { active: true });
@@ -61,12 +64,10 @@ describe('openSppHostInternal tab reuse', () => {
     );
     tabs.create.mockResolvedValue({ id: 99 });
 
-    const { openSppHostInternal } = await import('../../src/spp-host/openSppHost.js');
     const first = openSppHostInternal({ active: false });
     const second = openSppHostInternal({ active: false });
 
     // Let the serialized lookup begin, then release it and await both callers.
-    await Promise.resolve();
     expect(runtime.getContexts).toHaveBeenCalledTimes(1);
     resolveContexts([]);
     await Promise.all([first, second]);
@@ -76,7 +77,6 @@ describe('openSppHostInternal tab reuse', () => {
   it('creates a tab when none exists', async () => {
     runtime.getContexts.mockResolvedValue([]);
     tabs.create.mockResolvedValue({ id: 1 });
-    const { openSppHostInternal } = await import('../../src/spp-host/openSppHost.js');
     await openSppHostInternal({ active: false });
     expect(tabs.create.mock.calls[0][0].url).toContain('spp-host.html');
   });
