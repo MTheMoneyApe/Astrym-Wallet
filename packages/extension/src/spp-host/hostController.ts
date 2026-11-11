@@ -380,6 +380,7 @@ export class SppHostController {
     poolContract: string;
     userAddress: string;
     networkPassphrase: string;
+    prepareGeneration: number;
   }): Promise<SppHostSnapshot> {
     if (!input.nymActive) {
       throw new Error('Stellar Private Payments write pool requires Nym connected');
@@ -401,6 +402,7 @@ export class SppHostController {
       poolContract: input.poolContract,
       userAddress: input.userAddress,
       networkPassphrase: input.networkPassphrase,
+      prepareGeneration: input.prepareGeneration,
     });
     return this.snapshot();
   }
