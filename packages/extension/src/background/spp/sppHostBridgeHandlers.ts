@@ -27,7 +27,12 @@ import {
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
 import { isSppHostDocumentSender } from '../trustedWalletOrigin.js';
 import { resolveActiveStellarAddress } from './sppBoundAccount.js';
-import { SPP_PREPARE_STATUS_KEY, type SppPrepareStatus } from '../../shared/sppPrepareStatus.js';
+import {
+  SPP_AUTO_PREPARE_INTENT_KEY,
+  SPP_PREPARE_STATUS_KEY,
+  type SppAutoPrepareIntent,
+  type SppPrepareStatus,
+} from '../../shared/sppPrepareStatus.js';
 
 /** Testnet passphrase (keep in sync with Networks.TESTNET). */
 const STELLAR_TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
@@ -193,13 +198,19 @@ export async function handleSppHostSignRequest(
     const kdfDomain = kind === 'message' ? sppKeyDerivationDomainFromMessage(input) : null;
     const kdfApprovalToken = kdfDomain
       ? await (async () => {
-          const stored = await browser.storage.local.get(SPP_PREPARE_STATUS_KEY);
+          const [stored, storedIntent] = await Promise.all([
+            browser.storage.local.get(SPP_PREPARE_STATUS_KEY),
+            browser.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY),
+          ]);
           const current = stored[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+          const activeIntent = storedIntent[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
           if (
             current?.phase !== 'initializing_write_pool' ||
             !Number.isSafeInteger(current.generation) ||
             current.generation <= 0 ||
-            current.generation !== request.payload.prepareGeneration
+            current.generation !== request.payload.prepareGeneration ||
+            activeIntent?.autoRun !== true ||
+            activeIntent.generation !== request.payload.prepareGeneration
           ) {
             throw new Error('SPP KDF signing requires the exact current write-pool preparation');
           }
@@ -235,13 +246,23 @@ export async function handleSppHostSignRequest(
               input, kdfApprovalToken, request.payload.prepareGeneration,
               { address, networkPassphrase },
               async () => {
-                const [stored, nym, active] = await Promise.all([
+                const [stored, storedIntent, nym, active] = await Promise.all([
                   browser.storage.local.get(SPP_PREPARE_STATUS_KEY),
+                  browser.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY),
                   Promise.resolve(getNymRuntimeController().getSnapshot()),
                   resolveActiveStellarAddress(deps.keyManager),
                 ]);
                 const current = stored[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
-                if (current?.phase !== 'initializing_write_pool' || current.generation !== request.payload.prepareGeneration || nym.mode !== 'nym' || !nym.connected || active.address !== address) {
+                const activeIntent = storedIntent[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+                if (
+                  current?.phase !== 'initializing_write_pool' ||
+                  current.generation !== request.payload.prepareGeneration ||
+                  activeIntent?.autoRun !== true ||
+                  activeIntent.generation !== request.payload.prepareGeneration ||
+                  nym.mode !== 'nym' ||
+                  !nym.connected ||
+                  active.address !== address
+                ) {
                   throw new Error('SPP KDF preparation changed or was cancelled before signing');
                 }
               },
