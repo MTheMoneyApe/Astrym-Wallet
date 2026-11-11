@@ -301,6 +301,7 @@ export function SppStatusPanel({
           ) : null}
           <SppAccountPanel
             preparePhase={prepareStatus?.phase ?? 'idle'}
+            prepareGeneration={prepareStatus?.generation ?? 0}
             nymConnected={nymReady}
             kdfDomain={kdfDomain}
           />
