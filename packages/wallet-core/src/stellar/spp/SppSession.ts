@@ -141,7 +141,10 @@ export type SppSdkRuntimeDeps = {
  */
 async function closeStorageSafely(storage: Storage): Promise<void> {
   try {
-    await storage.close();
+    // The pinned SDK runtime exposes close() on its JS Storage handle even
+    // where the published consumer declaration omits it.
+    const close = (storage as Storage & { close(): Promise<void> }).close;
+    await close.call(storage);
   } catch {
     // Best effort only; an already-closed worker must not mask the real failure.
   }
