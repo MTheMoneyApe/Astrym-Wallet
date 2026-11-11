@@ -4,7 +4,7 @@ const storage = new Map<string, unknown>();
 type StorageChangeListener = (
   changes: Record<string, { newValue?: unknown; oldValue?: unknown }>,
   areaName: string,
-) => void;
+) => void | Promise<void>;
 const storageChangeListeners: StorageChangeListener[] = [];
 let localSet: (items: Record<string, unknown>) => Promise<void>;
 
@@ -73,17 +73,15 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
 
     installSppPrepareGenerationGuard();
     expect(storageChangeListeners).toHaveLength(1);
-    storageChangeListeners[0]!({
+    await storageChangeListeners[0]!({
       [statusKey]: {
         newValue: storage.get(statusKey),
       },
     }, 'local');
 
-    await vi.waitFor(() => {
-      expect(storage.get(statusKey)).toMatchObject({
-        phase: 'opening_host',
-        generation: 8,
-      });
+    expect(storage.get(statusKey)).toMatchObject({
+      phase: 'opening_host',
+      generation: 8,
     });
     expect(storage.get(intentKey)).toMatchObject({
       autoRun: true,
