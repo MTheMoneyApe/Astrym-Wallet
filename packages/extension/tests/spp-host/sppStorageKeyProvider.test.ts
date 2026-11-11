@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ed25519 } from '@noble/curves/ed25519.js';
-import { StrKey } from '@stellar/stellar-sdk';
+import { Keypair, StrKey } from '@stellar/stellar-sdk';
 import { hashSep53Message } from '@solanym/wallet-core/src/stellar/spp/sep53.js';
 import { SPP_STORAGE_DATABASE_ID, SPP_STORAGE_UNLOCK_RECORD_KEY } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 import { openSppEncryptedStorage } from '../../src/spp-host/sppStorageKeyProvider.js';
 
 const SEED = new Uint8Array(32).fill(23);
-const ACCOUNT = StrKey.encodeEd25519PublicKey(ed25519.getPublicKey(SEED));
+const KEYPAIR = Keypair.fromRawEd25519Seed(Buffer.from(SEED));
+const ACCOUNT = KEYPAIR.publicKey();
 const ORIGIN = 'chrome-extension://peanjgnchnfcfaclipankhfkligmlklc';
 const APPROVAL = '7c1d5f52-8f9d-4b0a-8e3b-76d7b8b7e4d1';
 
@@ -65,7 +65,7 @@ function fixture() {
     signStorageUnlockMessage: vi.fn(async (message: string) => {
       signatures.push(message);
       return {
-        signedMessage: Buffer.from(ed25519.sign(hashSep53Message(message), SEED)).toString('base64'),
+        signedMessage: Buffer.from(KEYPAIR.sign(Buffer.from(hashSep53Message(message)))).toString('base64'),
         signerAddress: ACCOUNT,
       };
     }),
@@ -219,7 +219,7 @@ describe('openSppEncryptedStorage', () => {
       storageOpen: f.storageOpen as never,
       workerUrl: `${ORIGIN}/spp/dist/workers/storage-worker.js`,
       signer: f.signer,
-      activeStellarAddress: StrKey.encodeEd25519PublicKey(ed25519.getPublicKey(new Uint8Array(32).fill(24))),
+      activeStellarAddress: Keypair.fromRawEd25519Seed(Buffer.from(new Uint8Array(32).fill(24))).publicKey(),
       prepareGeneration: 14,
       confirmUnlock: f.confirmUnlock,
     })).rejects.toThrow(/Switch to the Stellar account/);
