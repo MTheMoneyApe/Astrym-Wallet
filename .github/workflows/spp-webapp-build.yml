@@ -81,18 +81,21 @@ jobs:
         env:
           CC_ENABLE_DEBUG_OUTPUT: "1"
           CARGO_TERM_VERBOSE: "true"
-          CARGO_HOME: ${{ runner.home }}/.cargo
-          RUSTUP_HOME: ${{ runner.home }}/.rustup
         run: |
-          set -u
+          set -eu
+          export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+          export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+          export PATH="$CARGO_HOME/bin:$PATH"
           out="$RUNNER_TEMP/spp-proof/wasm/cc-rs-target-probe.txt"
           mkdir -p "$(dirname "$out")"
           probe="$RUNNER_TEMP/spp-cc-wasm-probe"
           mkdir -p "$probe"
           if [ ! -x "$CARGO_HOME/bin/cargo" ] || [ ! -x "$CARGO_HOME/bin/rustup" ]; then
-            echo "pinned cargo/rustup unavailable; probe skipped" | tee "$out"
-            exit 0
+            echo "pinned cargo/rustup unavailable at CARGO_HOME=$CARGO_HOME" | tee "$out"
+            exit 1
           fi
+          "$CARGO_HOME/bin/rustup" toolchain list | tee "$out"
+          "$CARGO_HOME/bin/rustc" +1.97.1 --version --verbose | tee -a "$out"
           cat > "$probe/Cargo.toml" <<'EOF'
           [package]
           name = "spp-cc-wasm-probe"
