@@ -159,6 +159,10 @@ export class SppWalletSignerAdapter implements WalletSigner {
           true,
           authorization.keyDerivationEpoch,
         );
+        // A disconnect or generation change during local signing discards the
+        // signature instead of returning it to the host for key derivation.
+        await assertApprovalCurrent();
+        assertBeforeSign();
         return {
           signedMessage: uint8ArrayToBase64(signature),
           signerAddress: this._stellarAddress,
