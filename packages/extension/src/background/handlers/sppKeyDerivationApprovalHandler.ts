@@ -55,7 +55,10 @@ export function createSppKeyDerivationApprovalHandler(deps: {
 
     const storedStatus = await browser.storage.local.get(SPP_PREPARE_STATUS_KEY);
     const status = storedStatus[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
-    if (status?.phase !== 'initializing_write_pool') {
+    if (payload.prepareGeneration !== status?.generation) {
+      throw Object.assign(new Error('KDF approval belongs to a stale SPP preparation.'), { name: 'UNAUTHORIZED' });
+    }
+    if (status?.phase !== 'initializing_write_pool' || !Number.isSafeInteger(status.generation) || status.generation <= 0) {
       throw Object.assign(
         new Error('No active SPP key-derivation request is waiting for approval.'),
         { name: 'UNAUTHORIZED' },
@@ -76,7 +79,13 @@ export function createSppKeyDerivationApprovalHandler(deps: {
     }
 
     const { address } = await resolveActiveStellarAddress(deps.keyManager);
-    const accepted = approveSppKeyDerivationRequest(address, kdfDomain);
+    const latest = await browser.storage.local.get(SPP_PREPARE_STATUS_KEY);
+    const latestStatus = latest[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+    const latestNym = getNymRuntimeController().getSnapshot();
+    if (latestStatus?.phase !== 'initializing_write_pool' || latestStatus.generation !== status.generation || latestNym.mode !== 'nym' || !latestNym.connected) {
+      throw Object.assign(new Error('SPP preparation changed before KDF approval.'), { name: 'UNAUTHORIZED' });
+    }
+    const accepted = approveSppKeyDerivationRequest(address, kdfDomain, status.generation);
     if (!accepted) {
       throw Object.assign(
         new Error('A key-derivation approval is already pending or was just submitted.'),
