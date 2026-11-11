@@ -16,6 +16,13 @@ const validDirectory = (value: unknown): value is string =>
 const WRAP_INFO = 'spp.browser.storage-key-wrap.v1';
 const encoder = new TextEncoder();
 
+/** WebCrypto BufferSource requires an ArrayBuffer-backed view under strict TS. */
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
 type StorageSignResult = { signedMessage: string; signerAddress: string };
 
 function encode(bytes: Uint8Array): string {
@@ -42,7 +49,7 @@ async function verifySignedMessage(
   try {
     const publicKey = await crypto.subtle.importKey(
       'raw',
-      StrKey.decodeEd25519PublicKey(account),
+      toArrayBuffer(StrKey.decodeEd25519PublicKey(account)),
       { name: 'Ed25519' },
       false,
       ['verify'],
@@ -50,8 +57,8 @@ async function verifySignedMessage(
     return await crypto.subtle.verify(
       'Ed25519',
       publicKey,
-      signature,
-      hashSep53Message(message),
+      toArrayBuffer(signature),
+      toArrayBuffer(hashSep53Message(message)),
     );
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'NotSupportedError') {
@@ -313,21 +320,21 @@ export async function openSppEncryptedStorage(input: {
           throw new Error('Wallet signatures must be reproducible to initialize encrypted SPP storage.');
         }
 
-        const material = await crypto.subtle.importKey('raw', signature, 'HKDF', false, ['deriveKey']);
+        const material = await crypto.subtle.importKey('raw', toArrayBuffer(signature), 'HKDF', false, ['deriveKey']);
         const wrappingKey = await crypto.subtle.deriveKey({
           name: 'HKDF',
           hash: 'SHA-256',
-          salt: decode(record.salt),
-          info: encoder.encode(WRAP_INFO),
+          salt: toArrayBuffer(decode(record.salt)),
+          info: toArrayBuffer(encoder.encode(WRAP_INFO)),
         }, material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
 
         key = crypto.getRandomValues(new Uint8Array(32));
         const iv = crypto.getRandomValues(new Uint8Array(12));
         record.iv = encode(iv);
         record.envelope = encode(new Uint8Array(await crypto.subtle.encrypt(
-          { name: 'AES-GCM', iv, additionalData: encoder.encode(message) },
+          { name: 'AES-GCM', iv: toArrayBuffer(iv), additionalData: toArrayBuffer(encoder.encode(message)) },
           wrappingKey,
-          key,
+          toArrayBuffer(key),
         )));
         record.pending = true;
         // Persist the wrapped key before the first OPFS create attempt. This is
@@ -346,9 +353,9 @@ export async function openSppEncryptedStorage(input: {
         }, material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
         key = new Uint8Array(await crypto.subtle.decrypt({
           name: 'AES-GCM',
-          iv: decode(record.iv),
-          additionalData: encoder.encode(message),
-        }, wrappingKey, decode(record.envelope)));
+          iv: toArrayBuffer(decode(record.iv)),
+          additionalData: toArrayBuffer(encoder.encode(message)),
+        }, wrappingKey, toArrayBuffer(decode(record.envelope))));
       }
       if (!key || key.byteLength !== 32) throw new Error('Invalid SPP database key envelope.');
 
