@@ -73,11 +73,10 @@ async function verifySignedMessage(
 
 async function hasExistingEncryptedDatabase(): Promise<boolean> {
   const root = await navigator.storage.getDirectory();
-  const rootEntries = root as unknown as AsyncIterable<[string, FileSystemHandle]>;
-  for await (const [name, handle] of rootEntries) {
+  for await (const [name, handle] of root.entries()) {
     if (handle.kind !== 'directory' || (name !== DIRECTORY && !name.startsWith(DIRECTORY_PREFIX))) continue;
-    const directoryEntries = handle as unknown as AsyncIterable<[string, FileSystemHandle]>;
-    for await (const _entry of directoryEntries) return true;
+    const directory = handle as FileSystemDirectoryHandle;
+    for await (const _entry of directory.entries()) return true;
   }
   return false;
 }
