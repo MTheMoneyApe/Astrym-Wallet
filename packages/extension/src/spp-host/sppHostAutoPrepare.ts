@@ -36,9 +36,40 @@ import {
   type SppCircuitLock,
 } from '@solanym/wallet-core/src/stellar/spp/sppProvingKeys.js';
 
+class SppPrepareSupersededError extends Error {
+  constructor() {
+    super('SPP prepare generation was superseded');
+    this.name = 'SppPrepareSupersededError';
+  }
+}
+
 async function publish(status: SppPrepareStatus): Promise<void> {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+  // The service-worker-owned intent is the generation lease. An old host must
+  // never overwrite a newer prepare status, even if its async work completes late.
+  const current = await chrome.storage.local.get([
+    SPP_AUTO_PREPARE_INTENT_KEY,
+    SPP_PREPARE_STATUS_KEY,
+  ]);
+  const intent = current[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+  const currentStatus = current[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+  if (
+    intent?.autoRun !== true ||
+    intent.generation !== status.generation ||
+    currentStatus?.generation !== status.generation
+  ) {
+    throw new SppPrepareSupersededError();
+  }
   await chrome.storage.local.set({ [SPP_PREPARE_STATUS_KEY]: status });
+}
+
+async function removeIntentIfOwned(generation: number): Promise<void> {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+  const raw = await chrome.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY);
+  const current = raw[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+  if (current?.generation === generation) {
+    await chrome.storage.local.remove(SPP_AUTO_PREPARE_INTENT_KEY);
+  }
 }
 
 async function readIntent(): Promise<SppAutoPrepareIntent | null> {
@@ -111,6 +142,18 @@ export async function runSppHostAutoPrepareIfRequested(
 ): Promise<void> {
   const intent = await readIntent();
   if (!intent) return;
+
+  const storedStatusRaw = await chrome.storage.local.get(SPP_PREPARE_STATUS_KEY);
+  const storedStatus = storedStatusRaw[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+  if (
+    storedStatus?.generation !== intent.generation ||
+    storedStatus.phase === 'idle' ||
+    storedStatus.phase === 'failed' ||
+    storedStatus.phase === 'ready'
+  ) {
+    await removeIntentIfOwned(intent.generation);
+    return;
+  }
 
   const storedPool =
     intent.poolContract ??
@@ -367,15 +410,17 @@ export async function runSppHostAutoPrepareIfRequested(
       updatedAt: Date.now(),
     });
   } catch (cause) {
-    await publish({
-      ...base(),
-      phase: 'failed',
-      message: cause instanceof Error ? cause.message : 'Auto-prepare SPP falló',
-      updatedAt: Date.now(),
-    });
-  } finally {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      void chrome.storage.local.remove(SPP_AUTO_PREPARE_INTENT_KEY);
+    if (!(cause instanceof SppPrepareSupersededError)) {
+      await publish({
+        ...base(),
+        phase: 'failed',
+        message: cause instanceof Error ? cause.message : 'Auto-prepare SPP falló',
+        updatedAt: Date.now(),
+      }).catch((publishCause: unknown) => {
+        if (!(publishCause instanceof SppPrepareSupersededError)) throw publishCause;
+      });
     }
+  } finally {
+    await removeIntentIfOwned(intent.generation);
   }
 }
