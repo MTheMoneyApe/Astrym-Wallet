@@ -54,8 +54,11 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
     resetSppAutoPrepareEnsureLockForTests();
     await ensureSppAutoPrepareIfNeeded({ nymConnected: true, nymMode: 'nym' });
     expect(openSppHostInternal).toHaveBeenCalledTimes(1);
-    expect(storage.get('astrym_spp_prepare_status')).toMatchObject({ phase: 'opening_host' });
-    expect(storage.get('astrym_spp_auto_prepare_intent')).toMatchObject({ autoRun: true });
+    const status = storage.get('astrym_spp_prepare_status') as { generation: number };
+    const intent = storage.get('astrym_spp_auto_prepare_intent') as { generation: number };
+    expect(status).toMatchObject({ phase: 'opening_host' });
+    expect(intent).toMatchObject({ autoRun: true });
+    expect(intent.generation).toBe(status.generation);
   });
 
   it('skips duplicate start while prepare is in flight', async () => {
