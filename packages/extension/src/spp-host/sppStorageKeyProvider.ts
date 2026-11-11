@@ -50,16 +50,24 @@ async function verifySignedMessage(
       signature,
       hashSep53Message(message),
     );
-  } catch {
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'NotSupportedError') {
+      throw new Error(
+        'This browser does not support Ed25519 verification required to unlock encrypted SPP storage. Update the browser before continuing.',
+        { cause },
+      );
+    }
     return false;
   }
 }
 
 async function hasExistingEncryptedDatabase(): Promise<boolean> {
   const root = await navigator.storage.getDirectory();
-  for await (const [name, handle] of root.entries()) {
+  const rootEntries = root as unknown as AsyncIterable<[string, FileSystemHandle]>;
+  for await (const [name, handle] of rootEntries) {
     if (handle.kind !== 'directory' || (name !== DIRECTORY && !name.startsWith(DIRECTORY_PREFIX))) continue;
-    for await (const _entry of (handle as FileSystemDirectoryHandle).entries()) return true;
+    const directoryEntries = handle as unknown as AsyncIterable<[string, FileSystemHandle]>;
+    for await (const _entry of directoryEntries) return true;
   }
   return false;
 }
