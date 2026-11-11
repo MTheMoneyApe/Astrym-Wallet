@@ -127,9 +127,7 @@ function openOrFocusExtensionSppHost(active: boolean): Promise<void> {
 export function openSppHostInternal(options?: OpenSppHostOptions): Promise<void> {
   const active = options?.active === true;
   if (isExtensionHost()) {
-    return openOrFocusExtensionSppHost(active).catch(() => {
-      // Auto-prepare status remains non-ready; a later retry can safely reopen.
-    });
+    return openOrFocusExtensionSppHost(active);
   }
 
   // Webapp / PWA: never rely on window.open after async Nym connect (popup blockers).
@@ -163,5 +161,7 @@ export function openSppHostInternal(options?: OpenSppHostOptions): Promise<void>
 
 /** @deprecated Prefer {@link openSppHostInternal}; kept for lab tooling. */
 export function openSppHost(): void {
-  openSppHostInternal({ active: true });
+  void openSppHostInternal({ active: true }).catch(() => {
+    // Lab callers do not own the auto-prepare status lifecycle.
+  });
 }
