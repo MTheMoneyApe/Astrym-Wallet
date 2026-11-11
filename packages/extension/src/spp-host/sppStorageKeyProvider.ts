@@ -11,7 +11,7 @@ import type { SppHostRemoteSigner } from './sppHostRemoteSigner.js';
 const DIRECTORY = '.opfs-sahpool-encrypted';
 const DIRECTORY_PREFIX = `${DIRECTORY}-`;
 const validDirectory = (value: unknown): value is string =>
-  value === DIRECTORY || (typeof value === 'string' && /^\\.opfs-sahpool-encrypted-[0-9a-f-]{36}$/.test(value));
+  value === DIRECTORY || (typeof value === 'string' && /^\.opfs-sahpool-encrypted-[0-9a-f-]{36}$/.test(value));
 const WRAP_INFO = 'spp.browser.storage-key-wrap.v1';
 const encoder = new TextEncoder();
 
