@@ -15,8 +15,10 @@ import {
   parseSppContractConfig,
 } from '@solanym/wallet-core/src/stellar/spp/sppContractConfig.js';
 import {
+  SPP_AUTO_PREPARE_INTENT_KEY,
   SPP_CONTRACT_CONFIG_KEY,
   SPP_PREPARE_STATUS_KEY,
+  type SppAutoPrepareIntent,
   type SppPrepareStatus,
 } from '../../shared/sppPrepareStatus.js';
 import type {
@@ -53,9 +55,17 @@ export function createSppKeyDerivationApprovalHandler(deps: {
       );
     }
 
-    const storedStatus = await browser.storage.local.get(SPP_PREPARE_STATUS_KEY);
+    const [storedStatus, storedIntent] = await Promise.all([
+      browser.storage.local.get(SPP_PREPARE_STATUS_KEY),
+      browser.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY),
+    ]);
     const status = storedStatus[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
-    if (payload.prepareGeneration !== status?.generation) {
+    const intent = storedIntent[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+    if (
+      payload.prepareGeneration !== status?.generation ||
+      intent?.autoRun !== true ||
+      intent.generation !== payload.prepareGeneration
+    ) {
       throw Object.assign(new Error('KDF approval belongs to a stale SPP preparation.'), { name: 'UNAUTHORIZED' });
     }
     if (status?.phase !== 'initializing_write_pool' || !Number.isSafeInteger(status.generation) || status.generation <= 0) {
@@ -79,15 +89,19 @@ export function createSppKeyDerivationApprovalHandler(deps: {
     }
 
     const { address } = await resolveActiveStellarAddress(deps.keyManager);
-    const [latest, latestNym, latestAccount] = await Promise.all([
+    const [latest, latestIntent, latestNym, latestAccount] = await Promise.all([
       browser.storage.local.get(SPP_PREPARE_STATUS_KEY),
+      browser.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY),
       Promise.resolve(getNymRuntimeController().getSnapshot()),
       resolveActiveStellarAddress(deps.keyManager),
     ]);
     const latestStatus = latest[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+    const activeIntent = latestIntent[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
     if (
       latestStatus?.phase !== 'initializing_write_pool' ||
       latestStatus.generation !== status.generation ||
+      activeIntent?.autoRun !== true ||
+      activeIntent.generation !== status.generation ||
       latestNym.mode !== 'nym' ||
       !latestNym.connected ||
       latestAccount.address !== address
