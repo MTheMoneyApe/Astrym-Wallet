@@ -13,6 +13,22 @@ import {
 import { clearSppPrivatePool } from '../spp/sppPrivatePoolRegistry.js';
 import { revokeSppSignApprovals } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 
+function notifySppHostCleared(message: string): void {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      void chrome.runtime.sendMessage({
+        channel: SPP_HOST_BRIDGE_CHANNEL,
+        type: 'SPP_HOST_POOL_LIFECYCLE',
+        generation: Date.now(),
+        state: 'cleared',
+        message,
+      });
+    }
+  } catch {
+    // Host may already be closed; the worker-side registry is still cleared.
+  }
+}
+
 function toSnapshot(snap: NymRuntimeUiSnapshot): ValidatedResponsePayload<'NYM_STATUS'> {
   return {
     state: snap.state,
@@ -63,22 +79,11 @@ export function createNymDisconnectHandler() {
   ): Promise<ValidatedResponsePayload<'NYM_DISCONNECT'>> => {
     // Revoke in-memory one-shot KDF permits synchronously before async Nym teardown.
     revokeSppSignApprovals();
-    // Fail-closed SPP: drop SW registry and tell spp-host to drop write pools.
+    // Revoke one-shot KDF permits before asynchronous Nym teardown begins.
+    revokeSppSignApprovals();
     clearSppPrivatePool();
-    void clearSppAutoPrepareOnNymDisconnect();
-    try {
-      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-        void chrome.runtime.sendMessage({
-          channel: SPP_HOST_BRIDGE_CHANNEL,
-          type: 'SPP_HOST_POOL_LIFECYCLE',
-          generation: Date.now(),
-          state: 'cleared',
-          message: 'Nym disconnected',
-        });
-      }
-    } catch {
-      // Host may be closed; registry clear already happened.
-    }
+    await clearSppAutoPrepareOnNymDisconnect();
+    notifySppHostCleared('Nym disconnected');
     const snap = await getNymRuntimeController().disconnect();
     return toSnapshot(snap);
   };
@@ -107,16 +112,24 @@ export function createNymSetModeHandler() {
     payload: ValidatedRequestPayload<'NYM_SET_MODE'>,
   ): Promise<ValidatedResponsePayload<'NYM_SET_MODE'>> => {
     const ctrl = getNymRuntimeController();
-    // Leaving Nym invalidates key-derivation and payment-sign permits synchronously.
-    if (payload.mode !== 'nym') {
+    const previous = ctrl.getSnapshot();
+    // Leaving Nym invalidates approvals and clears both the SW registry and host pool.
+    if (payload.mode !== 'nym' && previous.mode === 'nym') {
       revokeSppSignApprovals();
       clearSppPrivatePool();
-      void clearSppAutoPrepareOnNymDisconnect();
+      await clearSppAutoPrepareOnNymDisconnect();
+      notifySppHostCleared('Nym mode disabled; SPP paused');
     }
     // Direct is the default Horizon path. Nym mode stays fail-closed (no silent clearnet).
     ctrl.setMode(payload.mode);
     await ctrl.syncGatewayConfigUi();
-    return toSnapshot(ctrl.getSnapshot());
+    const snapshot = ctrl.getSnapshot();
+    if (payload.mode === 'nym' && snapshot.connected && previous.mode !== 'nym') {
+      void ensureSppAutoPrepareIfNeeded({ nymConnected: true, nymMode: 'nym' }).catch(() => {
+        /* prepare status publisher records failure */
+      });
+    }
+    return toSnapshot(snapshot);
   };
 }
 
