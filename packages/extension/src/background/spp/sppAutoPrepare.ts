@@ -15,6 +15,7 @@ import {
 } from '../../shared/sppPrepareStatus.js';
 import { openSppHostInternal } from '../../spp-host/openSppHost.js';
 import { revokeSppSignApprovals } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { revokeSppStorageUnlockApprovals } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 
 /** Phases that mean prepare is already running — do not start a duplicate. */
 const IN_FLIGHT_PHASES: ReadonlySet<SppPreparePhase> = new Set([
@@ -154,6 +155,7 @@ export async function startSppAutoPrepareAfterNymConnect(): Promise<void> {
   // A new prepare owns a new generation. Revoke any leftover one-shot SPP/KDF
   // approvals synchronously before publishing or opening the next host intent.
   revokeSppSignApprovals();
+  revokeSppStorageUnlockApprovals();
   const poolContract = await readStoredPoolContract();
   const openingStatus = await publishSppPrepareStatus({
     phase: 'opening_host',
