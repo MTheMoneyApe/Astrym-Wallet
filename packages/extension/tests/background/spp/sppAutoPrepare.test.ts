@@ -6,7 +6,7 @@ type StorageChangeListener = (
   areaName: string,
 ) => void;
 const storageChangeListeners: StorageChangeListener[] = [];
-let localSet: ReturnType<typeof vi.fn>;
+let localSet: (items: Record<string, unknown>) => Promise<void>;
 
 vi.mock('../../../src/spp-host/openSppHost.js', () => ({
   openSppHostInternal: vi.fn(),
@@ -20,7 +20,6 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
     localSet = vi.fn(async (items: Record<string, unknown>) => {
       for (const [k, v] of Object.entries(items)) storage.set(k, v);
     });
-    // @ts-expect-error test chrome stub
     globalThis.chrome = {
       storage: {
         onChanged: {
