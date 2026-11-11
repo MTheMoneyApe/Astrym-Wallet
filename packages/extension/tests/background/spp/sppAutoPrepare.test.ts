@@ -115,6 +115,27 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
     expect(intent.generation).toBe(status.generation);
   });
 
+  it('coalesces simultaneous Nym-ready requests into one prepare generation', async () => {
+    const { ensureSppAutoPrepareIfNeeded, resetSppAutoPrepareEnsureLockForTests } =
+      await import('../../../src/background/spp/sppAutoPrepare.js');
+    const { openSppHostInternal } = await import('../../../src/spp-host/openSppHost.js');
+    resetSppAutoPrepareEnsureLockForTests();
+
+    const input = { nymConnected: true, nymMode: 'nym' as const };
+    const [first, second] = await Promise.all([
+      ensureSppAutoPrepareIfNeeded(input),
+      ensureSppAutoPrepareIfNeeded(input),
+    ]);
+
+    expect(openSppHostInternal).toHaveBeenCalledTimes(1);
+    expect(first?.phase).toBe('opening_host');
+    expect(second?.generation).toBe(first?.generation);
+    expect(storage.get('astrym_spp_auto_prepare_intent')).toMatchObject({
+      autoRun: true,
+      generation: first?.generation,
+    });
+  });
+
   it('skips duplicate start while prepare is in flight', async () => {
     const { ensureSppAutoPrepareIfNeeded, resetSppAutoPrepareEnsureLockForTests } =
       await import('../../../src/background/spp/sppAutoPrepare.js');

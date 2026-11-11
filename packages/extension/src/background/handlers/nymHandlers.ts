@@ -8,7 +8,6 @@ import {
 import {
   clearSppAutoPrepareOnNymDisconnect,
   ensureSppAutoPrepareIfNeeded,
-  startSppAutoPrepareAfterNymConnect,
 } from '../spp/sppAutoPrepare.js';
 import { clearSppPrivatePool } from '../spp/sppPrivatePoolRegistry.js';
 import { revokeSppSignApprovals } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
@@ -65,10 +64,16 @@ export function createNymConnectHandler() {
       connectOpts.preferredGateway = payload.preferredGateway;
     }
     const snap = await ctrl.connect(connectOpts);
-    // Background SPP prepare (host internal). Failures stay in prepare status — never fake ready.
-    void startSppAutoPrepareAfterNymConnect().catch(() => {
-      /* status publisher records failure */
-    });
+    // Start SPP only after a successful Nym connection. The idempotent ensure
+    // path preserves an active generation and coalesces repeated Connect calls.
+    if (snap.connected && snap.mode === 'nym') {
+      void ensureSppAutoPrepareIfNeeded({
+        nymConnected: true,
+        nymMode: 'nym',
+      }).catch(() => {
+        /* prepare status publisher records failure */
+      });
+    }
     return toSnapshot(snap);
   };
 }
