@@ -3,7 +3,7 @@
  * Uses real IPC (SPP_ACCOUNT_*). Never invents readiness or success.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StrKey } from '@solanym/wallet-core';
 import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
 import { sppKeyDerivationMessage } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
@@ -72,6 +72,13 @@ export function SppAccountPanel({
   const derivationAwaiting = nymConnected && preparePhase === 'initializing_write_pool';
 
   const gateClosed = !nymConnected || !writeReady;
+
+  // A failed/restarted prepare flow must never inherit a previous consent UI state.
+  // The one-shot token itself lives in the background signer and is never reused.
+  useEffect(() => {
+    setConfirmDerivation(false);
+    setDerivationNote(null);
+  }, [preparePhase, kdfDomain, nymConnected]);
 
   const refresh = () => {
     setError(null);
