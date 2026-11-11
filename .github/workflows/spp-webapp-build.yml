@@ -70,6 +70,7 @@ jobs:
         continue-on-error: true
         env:
           CC_ENABLE_DEBUG_OUTPUT: "1"
+          CARGO_TERM_VERBOSE: "true"
         run: |
           set -o pipefail
           pnpm build:webapp 2>&1 | tee "$RUNNER_TEMP/spp-logs/build-webapp.txt"
@@ -93,7 +94,7 @@ jobs:
           done
           {
             echo "=== native compiler commands (cc-rs) ==="
-            for tool in cc clang clang-18 clang-19 wasm-ld wasm-ld-18 llvm-ar ar; do
+            for tool in cc clang clang-18 clang-19 wasm-ld wasm-ld-18 llvm-ar llvm-ranlib ar ranlib; do
               if command -v "$tool" >/dev/null 2>&1; then
                 echo "--- $tool: $(command -v "$tool")"
                 "$tool" --version 2>&1 | sed -n '1,4p' || true
