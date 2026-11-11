@@ -357,8 +357,18 @@ export async function openSppEncryptedStorage(input: {
       } else {
         storage = await open(false);
       }
-      record.pending = false;
-      localStorage.setItem(SPP_STORAGE_UNLOCK_RECORD_KEY, JSON.stringify(record));
+      try {
+        record.pending = false;
+        localStorage.setItem(SPP_STORAGE_UNLOCK_RECORD_KEY, JSON.stringify(record));
+      } catch (cause) {
+        // Do not strand an OPFS worker when persisting the completed marker fails.
+        try {
+          await storage.close();
+        } catch {
+          /* preserve the metadata persistence error */
+        }
+        throw cause;
+      }
       return storage;
     } catch (cause) {
       throw cause;
