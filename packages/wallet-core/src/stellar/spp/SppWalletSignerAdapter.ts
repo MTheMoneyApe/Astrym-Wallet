@@ -38,6 +38,7 @@ import {
 import {
   SppSignerError,
   assertSppSignatureStillPermitted,
+  assertSppKeyDerivationSignatureStillPermitted,
   assertStellarTestnetPassphrase,
   authorizeSppKeyDerivationSignature,
   authorizeSppSignature,
@@ -129,7 +130,9 @@ export class SppWalletSignerAdapter implements WalletSigner {
   async signKeyDerivationMessage(
     message: string,
     approvalToken: string,
-    opts?: SignOptions,
+    prepareGeneration: number,
+    opts: SignOptions | undefined,
+    assertApprovalCurrent: () => Promise<void>,
   ): Promise<SignMessageResult> {
     this._assertOptionalAddress(opts?.address);
     this._assertNetworkOption(opts?.networkPassphrase);
@@ -141,14 +144,21 @@ export class SppWalletSignerAdapter implements WalletSigner {
       boundAccount: this._stellarAddress,
       networkPassphrase: this._networkPassphrase,
       approvalToken,
+      prepareGeneration,
     });
     this._permissionEpoch = authorization.permissionEpoch;
     return this._withAuthorization(
       'message',
       authorization.digest,
       async (assertBeforeSign) => {
+        await assertApprovalCurrent();
         assertBeforeSign();
-        const signature = await this._signDigest(authorization.digest, 'message', true);
+        const signature = await this._signDigest(
+          authorization.digest,
+          'message',
+          true,
+          authorization.keyDerivationEpoch,
+        );
         return {
           signedMessage: uint8ArrayToBase64(signature),
           signerAddress: this._stellarAddress,
@@ -276,14 +286,21 @@ export class SppWalletSignerAdapter implements WalletSigner {
     digest: Uint8Array,
     kind: SignatureKind,
     allowApprovedKeyDerivation = false,
+    keyDerivationEpoch?: number,
   ): Promise<Uint8Array> {
     assertSppSignatureStillPermitted(this._permissionEpoch, allowApprovedKeyDerivation);
+    if (allowApprovedKeyDerivation) {
+      assertSppKeyDerivationSignatureStillPermitted(keyDerivationEpoch);
+    }
     const signature = this._digestSigner
       ? await this._digestSigner.signDigest(digest)
       : kind === 'message'
         ? await this._signer.signMessage(digest, this._accountIndex)
         : await this._signer.signTransaction(digest, this._accountIndex);
     assertSppSignatureStillPermitted(this._permissionEpoch, allowApprovedKeyDerivation);
+    if (allowApprovedKeyDerivation) {
+      assertSppKeyDerivationSignatureStillPermitted(keyDerivationEpoch);
+    }
     return signature;
   }
 
