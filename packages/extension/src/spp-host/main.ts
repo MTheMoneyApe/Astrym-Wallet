@@ -25,6 +25,7 @@ import { installSppHostBridgeListener } from './sppHostBridgeListener.js';
 import { runSppHostAutoPrepareIfRequested } from './sppHostAutoPrepare.js';
 import { readHostLabSppIntegrationSnapshot } from './sppIntegrationProbe.js';
 import { STORAGE_LAB_EXECUTION_AUTHORIZED } from './storageLabPrep.js';
+import { SPP_PREPARE_STATUS_KEY, type SppPrepareStatus } from '../shared/sppPrepareStatus.js';
 
 // SW ↔ host private-payment bridge (no secrets on the channel).
 installSppHostBridgeListener();
@@ -429,12 +430,22 @@ function main(): void {
         statusBoot.textContent = 'Introduce un poolContract C… válido (56 chars).';
         return;
       }
+      const storedPrepare = await chrome.storage.local.get(SPP_PREPARE_STATUS_KEY);
+      const prepareStatus = storedPrepare[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+      if (
+        prepareStatus?.phase !== 'initializing_write_pool' ||
+        !Number.isSafeInteger(prepareStatus.generation) ||
+        prepareStatus.generation <= 0
+      ) {
+        throw new Error('Write pool solo puede iniciarse dentro de una preparación SPP vigente.');
+      }
       statusBoot.textContent = 'Inicializando write PrivatePool (Nym + vault signer)…';
       const snapshot = await controller.initializeWritePoolForNym({
         nymActive: true,
         poolContract,
         userAddress: account.publicKey,
         networkPassphrase: 'Test SDF Network ; September 2015',
+        prepareGeneration: prepareStatus.generation,
       });
       render(snapshot, { resolvedFacadeHint: facadeHint });
       statusBoot.textContent = 'Write pool listo (o ver error). Deposit/transfer/withdraw usan este pool.';
