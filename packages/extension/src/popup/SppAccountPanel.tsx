@@ -13,6 +13,7 @@ import { sendIpcMessage } from './ipc.js';
 export type SppAccountPanelProps = {
   preparePhase: string;
   nymConnected: boolean;
+  kdfDomain?: string;
   defaultLookupAddress?: string;
 };
 
@@ -48,6 +49,7 @@ function stroopsToXlm(stroops: string | null): string {
 export function SppAccountPanel({
   preparePhase,
   nymConnected,
+  kdfDomain = getNethermindPublicTestnetContractConfig().kdf_domain,
   defaultLookupAddress = '',
 }: SppAccountPanelProps) {
   const writeReady = preparePhase === 'ready';
@@ -58,13 +60,16 @@ export function SppAccountPanel({
   const [error, setError] = useState<string | null>(null);
   const [registerNote, setRegisterNote] = useState<string | null>(null);
   const [confirmRegister, setConfirmRegister] = useState(false);
+  const [confirmDerivation, setConfirmDerivation] = useState(false);
+  const [derivationNote, setDerivationNote] = useState<string | null>(null);
   const [noteKeyHex, setNoteKeyHex] = useState('');
   const [encryptionKeyHex, setEncryptionKeyHex] = useState('');
   const [noteKeyProofHex, setNoteKeyProofHex] = useState('');
   const [encryptionKeySignatureHex, setEncryptionKeySignatureHex] = useState('');
   const [ownerSignatureHex, setOwnerSignatureHex] = useState('');
   const contractConfig = getNethermindPublicTestnetContractConfig();
-  const derivationMessage = sppKeyDerivationMessage(contractConfig.kdf_domain);
+  const derivationMessage = sppKeyDerivationMessage(kdfDomain);
+  const derivationAwaiting = nymConnected && preparePhase === 'initializing_write_pool';
 
   const gateClosed = !nymConnected || !writeReady;
 
@@ -109,6 +114,32 @@ export function SppAccountPanel({
         setError(cause instanceof Error ? cause.message : 'Lookup de destinatario falló');
       })
       .finally(() => setBusy(null));
+  };
+
+  const approveDerivation = () => {
+    setError(null);
+    setDerivationNote(null);
+    if (!confirmDerivation) {
+      setConfirmDerivation(true);
+      return;
+    }
+    setBusy('derive');
+    void sendIpcMessage('SPP_AUTHORIZE_KEY_DERIVATION', {
+      acknowledgeHighRisk: true,
+      kdfDomain,
+    })
+      .then(() => {
+        setDerivationNote(
+          'Consentimiento de un solo uso entregado al host. La firma solo deriva las claves privadas SPP; no activa broadcasts.',
+        );
+      })
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : 'No se pudo autorizar la derivación SPP');
+      })
+      .finally(() => {
+        setBusy(null);
+        setConfirmDerivation(false);
+      });
   };
 
   const registerKeys = () => {
@@ -177,6 +208,61 @@ export function SppAccountPanel({
         <p className="text-secondary" style={{ margin: 0, fontSize: '0.75rem' }} data-testid="spp-account-gate">
           Requiere Nym conectado y prepare.phase = ready (write_pool_ready).
         </p>
+      ) : null}
+      {derivationAwaiting ? (
+        <div
+          className="card"
+          data-testid="spp-kdf-approval"
+          style={{ display: 'grid', gap: 8, padding: 12 }}
+        >
+          <strong>Preparación: falta consentimiento para derivar las claves privadas</strong>
+          <p className="text-secondary" style={{ margin: 0, fontSize: '0.75rem' }}>
+            El host está esperando esta autorización. Se firmará únicamente el mensaje SEP-53
+            v3 de abajo, para derivar y guardar las claves note/encryption de SPP. No se transmite
+            una transacción ni se habilitan pagos.
+          </p>
+          {confirmDerivation ? (
+            <div
+              data-testid="spp-kdf-review"
+              style={{ display: 'grid', gap: 6, fontSize: '0.76rem' }}
+            >
+              <strong>Revisa el mensaje exacto que se firmará:</strong>
+              <pre
+                className="address-wrap"
+                data-testid="spp-kdf-message"
+                style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: 0 }}
+              >
+                {derivationMessage}
+              </pre>
+              <strong style={{ color: 'var(--danger, #c44)' }}>
+                Aviso del SDK: firmarlo da control total de los fondos privados derivados.
+                Nunca firmes este mensaje fuera de Astrym / la app oficial SPP.
+              </strong>
+              <span className="text-secondary">
+                Permiso único, limitado a la cuenta activa, este dominio KDF y este texto exacto.
+                Expira en 2 minutos. No autoriza deposit, transfer, withdraw ni register.
+              </span>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="btn-secondary"
+            data-testid="spp-kdf-approve"
+            disabled={busy !== null}
+            onClick={approveDerivation}
+          >
+            {busy === 'derive'
+              ? 'Autorizando…'
+              : confirmDerivation
+                ? 'Confirmar firma KDF única'
+                : 'Revisar y autorizar derivación'}
+          </button>
+          {derivationNote ? (
+            <p role="status" className="text-secondary" style={{ margin: 0, fontSize: '0.75rem' }}>
+              {derivationNote}
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
