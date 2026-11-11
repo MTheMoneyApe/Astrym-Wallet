@@ -24,7 +24,7 @@ describe('SPP storage unlock gate', () => {
       `Origin: ${ORIGIN}`,
       `Account: ${ACCOUNT}`,
       `Salt: ${SALT}`,
-    ].join('\\n'));
+    ].join('\n'));
     const token = approveSppStorageUnlockRequest({ account: ACCOUNT, message, prepareGeneration: 4, uses: 2 });
     expect(token).toBeTruthy();
     const first = authorizeSppStorageUnlockSignature({
