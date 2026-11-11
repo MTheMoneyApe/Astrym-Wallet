@@ -3,6 +3,7 @@ import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.
 import {
   approveSppStorageUnlockRequest,
   parseSppStorageUnlockMessage,
+  sppStorageUnlockOriginFromUrl,
 } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 import {
   SPP_AUTO_PREPARE_INTENT_KEY,
@@ -33,7 +34,12 @@ export function createSppStorageUnlockApprovalHandler(deps: { keyManager: KeyMan
     }
 
     const challenge = parseSppStorageUnlockMessage(payload.message);
-    const senderOrigin = sender.url ? new URL(sender.url).origin : null;
+    let senderOrigin: string | null = null;
+    try {
+      senderOrigin = sender.url ? sppStorageUnlockOriginFromUrl(sender.url) : null;
+    } catch {
+      senderOrigin = null;
+    }
     if (!challenge || challenge.origin !== senderOrigin) {
       throw Object.assign(new Error('Storage unlock message is malformed or belongs to another origin.'), {
         name: 'INVALID_REQUEST',
