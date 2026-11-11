@@ -269,9 +269,35 @@ export async function handleSppHostSignRequest(
     let signatureBase64: string;
     switch (kind) {
       case 'message': {
-        const result = storageUnlockToken
-          ? await adapter.signStorageUnlockMessage(input, storageUnlockToken, request.payload.prepareGeneration, { address, networkPassphrase })
-          : kdfApprovalToken
+        let result;
+        if (storageUnlockToken) {
+          result = await adapter.signStorageUnlockMessage(
+            input,
+            storageUnlockToken,
+            request.payload.prepareGeneration,
+            { address, networkPassphrase },
+          );
+          const [latestStatusRaw, latestIntentRaw, latestNym, latestAccount] = await Promise.all([
+            browser.storage.local.get(SPP_PREPARE_STATUS_KEY),
+            browser.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY),
+            Promise.resolve(getNymRuntimeController().getSnapshot()),
+            resolveActiveStellarAddress(deps.keyManager),
+          ]);
+          const latestStatus = latestStatusRaw[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+          const latestIntent = latestIntentRaw[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+          if (
+            latestStatus?.phase !== 'initializing_session' ||
+            latestStatus.generation !== request.payload.prepareGeneration ||
+            latestIntent?.autoRun !== true ||
+            latestIntent.generation !== request.payload.prepareGeneration ||
+            latestNym.mode !== 'nym' ||
+            !latestNym.connected ||
+            latestAccount.address !== address
+          ) {
+            throw new Error('SPP storage unlock was invalidated before its signature could be returned.');
+          }
+        } else {
+          result = kdfApprovalToken
           ? await adapter.signKeyDerivationMessage(
               input, kdfApprovalToken, request.payload.prepareGeneration,
               { address, networkPassphrase },
@@ -298,6 +324,7 @@ export async function handleSppHostSignRequest(
               },
             )
           : await adapter.signMessage(input, { address, networkPassphrase });
+        }
         signatureBase64 =
           typeof result === 'string' ? result : result.signedMessage;
         break;
