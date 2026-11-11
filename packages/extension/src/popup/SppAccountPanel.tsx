@@ -12,7 +12,7 @@ import { sendIpcMessage } from './ipc.js';
 
 export type SppAccountPanelProps = {
   preparePhase: string;
-  prepareGeneration: number;
+  prepareGeneration?: number;
   nymConnected: boolean;
   kdfDomain?: string;
   defaultLookupAddress?: string;
@@ -49,7 +49,7 @@ function stroopsToXlm(stroops: string | null): string {
 
 export function SppAccountPanel({
   preparePhase,
-  prepareGeneration,
+  prepareGeneration = 0,
   nymConnected,
   kdfDomain = getNethermindPublicTestnetContractConfig().kdf_domain,
   defaultLookupAddress = '',
@@ -71,7 +71,7 @@ export function SppAccountPanel({
   const [ownerSignatureHex, setOwnerSignatureHex] = useState('');
   const contractConfig = getNethermindPublicTestnetContractConfig();
   const derivationMessage = sppKeyDerivationMessage(kdfDomain);
-  const derivationAwaiting = nymConnected && preparePhase === 'initializing_write_pool';
+  const derivationAwaiting = nymConnected && preparePhase === 'initializing_write_pool' && Number.isSafeInteger(prepareGeneration) && prepareGeneration > 0;
 
   const gateClosed = !nymConnected || !writeReady;
 
@@ -80,7 +80,7 @@ export function SppAccountPanel({
   useEffect(() => {
     setConfirmDerivation(false);
     setDerivationNote(null);
-  }, [preparePhase, kdfDomain, nymConnected]);
+  }, [preparePhase, prepareGeneration, kdfDomain, nymConnected]);
 
   const refresh = () => {
     setError(null);
