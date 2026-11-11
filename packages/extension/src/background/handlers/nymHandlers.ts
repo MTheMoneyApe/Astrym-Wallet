@@ -11,6 +11,7 @@ import {
   startSppAutoPrepareAfterNymConnect,
 } from '../spp/sppAutoPrepare.js';
 import { clearSppPrivatePool } from '../spp/sppPrivatePoolRegistry.js';
+import { revokeSppSignApprovals } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 
 function toSnapshot(snap: NymRuntimeUiSnapshot): ValidatedResponsePayload<'NYM_STATUS'> {
   return {
@@ -60,6 +61,8 @@ export function createNymDisconnectHandler() {
   return async (
     _payload: ValidatedRequestPayload<'NYM_DISCONNECT'>,
   ): Promise<ValidatedResponsePayload<'NYM_DISCONNECT'>> => {
+    // Revoke in-memory one-shot KDF permits synchronously before async Nym teardown.
+    revokeSppSignApprovals();
     // Fail-closed SPP: drop SW registry and tell spp-host to drop write pools.
     clearSppPrivatePool();
     void clearSppAutoPrepareOnNymDisconnect();
@@ -104,6 +107,12 @@ export function createNymSetModeHandler() {
     payload: ValidatedRequestPayload<'NYM_SET_MODE'>,
   ): Promise<ValidatedResponsePayload<'NYM_SET_MODE'>> => {
     const ctrl = getNymRuntimeController();
+    // Leaving Nym invalidates key-derivation and payment-sign permits synchronously.
+    if (payload.mode !== 'nym') {
+      revokeSppSignApprovals();
+      clearSppPrivatePool();
+      void clearSppAutoPrepareOnNymDisconnect();
+    }
     // Direct is the default Horizon path. Nym mode stays fail-closed (no silent clearnet).
     ctrl.setMode(payload.mode);
     await ctrl.syncGatewayConfigUi();
