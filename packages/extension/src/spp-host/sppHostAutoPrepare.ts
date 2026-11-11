@@ -137,16 +137,29 @@ function ownershipFields(config: SppContractConfigInput, poolContract: string | 
 /**
  * Consume auto-prepare intent once per host load. Safe to call after controller is constructed.
  */
-export async function runSppHostAutoPrepareIfRequested(
+async function runSppHostAutoPrepareForIntent(
   controller: SppHostController,
+  intent: SppAutoPrepareIntent,
 ): Promise<void> {
-  const intent = await readIntent();
-  if (!intent) return;
-
   const storedStatusRaw = await chrome.storage.local.get(SPP_PREPARE_STATUS_KEY);
-  const storedStatus = storedStatusRaw[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
-  if (
-    storedStatus?.generation !== intent.generation ||
+  let storedStatus = storedStatusRaw[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+  if (!storedStatus || storedStatus.generation > intent.generation) {
+    await removeIntentIfOwned(intent.generation);
+    return;
+  }
+  // A newer service-worker intent is authoritative. Repair a status overwritten
+  // by a late older host before beginning the new generation.
+  if (storedStatus.generation < intent.generation) {
+    storedStatus = {
+      ...createIdleSppPrepareStatus(),
+      phase: 'opening_host',
+      message: 'Recuperando preparación SPP vigente…',
+      poolContract: intent.poolContract ?? null,
+      generation: intent.generation,
+      updatedAt: Date.now(),
+    };
+    await chrome.storage.local.set({ [SPP_PREPARE_STATUS_KEY]: storedStatus });
+  } else if (
     storedStatus.phase === 'idle' ||
     storedStatus.phase === 'failed' ||
     storedStatus.phase === 'ready'
@@ -422,5 +435,47 @@ export async function runSppHostAutoPrepareIfRequested(
     }
   } finally {
     await removeIntentIfOwned(intent.generation);
+  }
+}
+
+let activePrepareGeneration: number | null = null;
+let activePreparePromise: Promise<void> | null = null;
+
+/**
+ * Process one host intent at a time. If a newer generation arrives while the
+ * previous async run is unwinding, re-read storage and run the latest intent.
+ */
+export async function runSppHostAutoPrepareIfRequested(
+  controller: SppHostController,
+): Promise<void> {
+  const intent = await readIntent();
+  if (!intent) return;
+  if (activePrepareGeneration === intent.generation) return;
+
+  if (activePreparePromise) {
+    await activePreparePromise.catch(() => undefined);
+    const latest = await readIntent();
+    if (latest && latest.generation !== intent.generation) {
+      return runSppHostAutoPrepareIfRequested(controller);
+    }
+    return;
+  }
+
+  activePrepareGeneration = intent.generation;
+  const running = runSppHostAutoPrepareForIntent(controller, intent);
+  activePreparePromise = running;
+  try {
+    await running;
+  } finally {
+    if (activePreparePromise === running) {
+      activePreparePromise = null;
+      activePrepareGeneration = null;
+    }
+    const latest = await readIntent();
+    if (latest && latest.generation !== intent.generation) {
+      void runSppHostAutoPrepareIfRequested(controller).catch(() => {
+        /* host status publisher records non-superseded failures */
+      });
+    }
   }
 }
