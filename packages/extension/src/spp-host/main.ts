@@ -1,15 +1,18 @@
 /**
- * Solanym SPP isolated host page entry (Fase 4B–5D).
+ * Solanym SPP isolated host page entry.
  * Extension page only — not the service worker, popup React tree, or dapp provider.
  *
- * Actions (button only, never on load):
- * 1) Comprobar SDK — import packaged facade + inspect exports
- * 2) Inicializar WASM — default({ module_or_path: local .wasm URL })
- * 3) Storage lab prep — evaluate gates
- * 4) Storage open — only when phase-authorized + ready-for-lab + explicit click
- * 5) Storage free — explicit only when a private handle exists
+ * A current service-worker auto-prepare intent may run the packaged facade probe,
+ * WASM initialization, and an SPP read-only session on host load. Opening the
+ * encrypted OPFS database requires the separate, visible wallet-unlock consent
+ * dialog and a one-shot vault signature bound to the active account/generation.
  *
- * Default build: STORAGE_LAB_EXECUTION_AUTHORIZED=false → run button stays disabled.
+ * Manual lab controls remain separate:
+ * - Storage lab prep only evaluates operator gates.
+ * - Lab Storage.open remains phase-authorized + explicit-click only.
+ * - Storage.free remains explicit only when a private handle exists.
+ *
+ * Default build: STORAGE_LAB_EXECUTION_AUTHORIZED=false → lab run stays disabled.
  */
 
 import {
@@ -265,7 +268,7 @@ function main(): void {
   }
 
   statusBoot.textContent =
-    'Idle — Nothing runs on load. Open limit = one per page instance (reload resets). Auth gate false by default.';
+    'Host listo — el auto-prepare puede ejecutar una intención Nym activa. El desbloqueo cifrado requiere consentimiento explícito. Storage Lab sigue bloqueado.';
   render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
 
   (window as unknown as { __SOLANYM_SPP_HOST__?: unknown }).__SOLANYM_SPP_HOST__ = {
@@ -290,11 +293,12 @@ function main(): void {
         },
         { getSession: () => controller.readBoundSessionStatus() },
       ),
-    initializeSessionDisabled: true,
-    storageOpenDisabled: !STORAGE_LAB_EXECUTION_AUTHORIZED,
-    probeOnlyOnButton: true,
-    wasmInitOnlyOnButton: true,
-    storageLabPrepOnly: true,
+    initializeSessionDisabled: false,
+    sessionStorageUnlockRequiresExplicitConsent: true,
+    storageLabOpenDisabled: !STORAGE_LAB_EXECUTION_AUTHORIZED,
+    probeMayRunFromAutoPrepareIntent: true,
+    wasmInitMayRunFromAutoPrepareIntent: true,
+    storageLabPrepIsSeparate: true,
   };
 
   probeBtn.addEventListener('click', () => {
@@ -515,7 +519,7 @@ function main(): void {
       .then(() => {
         render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
         statusBoot.textContent =
-          'Host listo (auto-prepare consumido o ausente). Lab manual sigue disponible.';
+          'Auto-prepare finalizó; revisa el estado de sesión y cualquier error. Storage Lab sigue bloqueado por separado.';
       })
       .catch((err: unknown) => {
         statusBoot.textContent =
