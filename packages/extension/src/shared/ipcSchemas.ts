@@ -709,6 +709,17 @@ export const MessageSchemas = {
       approved: z.literal(true),
     }),
   },
+  SPP_AUTHORIZE_STORAGE_UNLOCK: {
+    request: z.object({
+      message: z.string().min(1).max(2_000),
+      prepareGeneration: z.number().int().positive(),
+      uses: z.union([z.literal(1), z.literal(2)]),
+    }),
+    response: z.object({
+      approved: z.literal(true),
+      approvalToken: z.string().uuid(),
+    }),
+  },
   SPP_PRIVATE_PAYMENT: {
     request: z.object({
       enabled: z.literal(true),
