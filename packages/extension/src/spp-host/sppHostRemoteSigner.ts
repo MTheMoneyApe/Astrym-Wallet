@@ -30,6 +30,7 @@ export type SppHostRemoteSignerOptions = {
   /** Bound G… address expected for this session. */
   stellarAddress: string;
   networkPassphrase: string;
+  prepareGeneration: number;
   send?: (message: SppHostSignRequest) => Promise<unknown>;
 };
 
@@ -43,12 +44,15 @@ async function defaultSend(message: SppHostSignRequest): Promise<unknown> {
 export class SppHostRemoteSigner implements WalletSigner {
   private readonly _stellarAddress: string;
   private readonly _networkPassphrase: string;
+  private readonly _prepareGeneration: number;
   private readonly _send: (message: SppHostSignRequest) => Promise<unknown>;
 
   constructor(options: SppHostRemoteSignerOptions) {
     assertStellarTestnetPassphrase(options.networkPassphrase);
     this._stellarAddress = options.stellarAddress;
+    if (!Number.isSafeInteger(options.prepareGeneration) || options.prepareGeneration <= 0) throw new Error('SPP remote signer requires a valid prepare generation');
     this._networkPassphrase = options.networkPassphrase;
+    this._prepareGeneration = options.prepareGeneration;
     this._send = options.send ?? defaultSend;
   }
 
@@ -109,6 +113,7 @@ export class SppHostRemoteSigner implements WalletSigner {
         input,
         address: this._stellarAddress,
         networkPassphrase: this._networkPassphrase,
+        prepareGeneration: this._prepareGeneration,
       },
     };
 
