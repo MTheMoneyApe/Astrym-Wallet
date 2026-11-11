@@ -26,6 +26,7 @@ import {
 } from '../../shared/sppHostBridge.js';
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
 import { isSppHostDocumentSender } from '../trustedWalletOrigin.js';
+import { parseSppStorageUnlockMessage } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 import { resolveActiveStellarAddress } from './sppBoundAccount.js';
 import {
   SPP_AUTO_PREPARE_INTENT_KEY,
@@ -192,6 +193,33 @@ export async function handleSppHostSignRequest(
     }
 
     const { kind, input } = request.payload;
+    const storageUnlockToken = request.payload.authorization === 'storage_unlock'
+      ? request.payload.storageUnlockApprovalToken
+      : undefined;
+    if (request.payload.authorization === 'storage_unlock') {
+      const challenge = kind === 'message' ? parseSppStorageUnlockMessage(input) : null;
+      const senderOrigin = sender?.url ? new URL(sender.url).origin : null;
+      const [stored, storedIntent] = await Promise.all([
+        browser.storage.local.get(SPP_PREPARE_STATUS_KEY),
+        browser.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY),
+      ]);
+      const current = stored[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+      const activeIntent = storedIntent[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+      if (
+        !storageUnlockToken ||
+        !challenge ||
+        challenge.account !== address ||
+        challenge.origin !== senderOrigin ||
+        current?.phase !== 'initializing_session' ||
+        current.generation !== request.payload.prepareGeneration ||
+        activeIntent?.autoRun !== true ||
+        activeIntent.generation !== request.payload.prepareGeneration
+      ) {
+        throw new Error('SPP storage unlock requires the exact active account, origin and initialization generation');
+      }
+    } else if (request.payload.storageUnlockApprovalToken !== undefined) {
+      throw new Error('Storage unlock approval token requires storage_unlock authorization mode');
+    }
     // Only the exact upstream v3 key-derivation message can use the separate
     // user-consent path. Every other message/transaction/auth entry still
     // requires the Testnet broadcast gate and the normal single-use intent.
@@ -217,7 +245,7 @@ export async function handleSppHostSignRequest(
           return waitForSppKeyDerivationApproval(address, kdfDomain, request.payload.prepareGeneration);
         })()
       : null;
-    if (!kdfApprovalToken && !isSppTestnetBroadcastAuthorized()) {
+    if (!kdfApprovalToken && !storageUnlockToken && !isSppTestnetBroadcastAuthorized()) {
       const revoked = revokeSppSignApprovals();
       return {
         channel: SPP_HOST_BRIDGE_CHANNEL,
@@ -241,7 +269,9 @@ export async function handleSppHostSignRequest(
     let signatureBase64: string;
     switch (kind) {
       case 'message': {
-        const result = kdfApprovalToken
+        const result = storageUnlockToken
+          ? await adapter.signStorageUnlockMessage(input, storageUnlockToken, request.payload.prepareGeneration, { address, networkPassphrase })
+          : kdfApprovalToken
           ? await adapter.signKeyDerivationMessage(
               input, kdfApprovalToken, request.payload.prepareGeneration,
               { address, networkPassphrase },
