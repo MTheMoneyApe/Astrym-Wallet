@@ -50,6 +50,7 @@ import {
   createSppRegisterPublicKeysHandler,
 } from './handlers/sppAccountHandlers.js';
 import { noteSppHostLifecycle } from './spp/sppPrivatePoolRegistry.js';
+import { installSppPrepareGenerationGuard } from './spp/sppAutoPrepare.js';
 import { isSppHostDocumentSender } from './trustedWalletOrigin.js';
 import {
   handleSppHostNymFetchRequest,
@@ -91,6 +92,7 @@ import {
 } from './handlers/transactionHandlers.js';
 
 function initBackgroundSynchronous() {
+  installSppPrepareGenerationGuard();
   // 1. Initialize Chrome Adapters synchronously
   const alarmService = new ChromeAlarmService((lock) => stateCoordinator.runLockOperation(lock));
   const persistentStorage = new ChromePersistentStorage(browser.storage.local);
