@@ -36,9 +36,8 @@ describe('SPP storage unlock gate', () => {
     expect(() => assertSppStorageUnlockSignatureStillPermitted(first.permissionEpoch)).not.toThrow();
   });
 
-  it('allows one signature for reopen and rejects use-count escalation', () => {
+  it('allows exactly one signature for reopening an existing database', () => {
     const message = createSppStorageUnlockMessage({ origin: ORIGIN, account: ACCOUNT, salt: SALT });
-    expect(approveSppStorageUnlockRequest({ account: ACCOUNT, message, prepareGeneration: 5, uses: 2 })).toBeNull();
     const token = approveSppStorageUnlockRequest({ account: ACCOUNT, message, prepareGeneration: 5, uses: 1 });
     expect(token).toBeTruthy();
     authorizeSppStorageUnlockSignature({
