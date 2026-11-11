@@ -21,6 +21,8 @@ import {
   assertSppAssembledFees,
   assertStellarTestnetPassphrase,
   assertSppPoolPaymentEconomicsBound,
+  approveSppKeyDerivationRequest,
+  authorizeSppKeyDerivationSignature,
   authorizeSppSignature,
   bindSppRegistrationBeforeMint,
   mintSppSignApproval,
@@ -28,6 +30,9 @@ import {
   setSppPaymentIdentityChecksForTests,
   signDigestWithSppGate,
   sppSignApprovalCount,
+  sppKeyDerivationMessage,
+  waitForSppKeyDerivationApproval,
+  assertSppSignatureStillPermitted,
   sppEncryptionKeyChallenge,
   sppKeyDerivationMessage,
   sppRegistrationDigest,
@@ -652,6 +657,50 @@ describe('SPP sign gate attack cases', () => {
       networkPassphrase: Networks.TESTNET,
     })).toThrow(/SPP_BROADCAST_AWAITING_APPROVAL/);
     expect(sppSignApprovalCount()).toBe(0);
+  });
+
+  it('allows only a separately approved exact v3 KDF signature while broadcasts stay off', async () => {
+    setSppTestnetBroadcastAuthorized(false);
+    const message = sppKeyDerivationMessage('Nethermind');
+    const waiting = waitForSppKeyDerivationApproval(ACCOUNT, 'Nethermind');
+    expect(approveSppKeyDerivationRequest(ACCOUNT, 'Nethermind')).toBe(true);
+    const token = await waiting;
+
+    const authorization = authorizeSppKeyDerivationSignature({
+      input: message,
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+      approvalToken: token,
+    });
+    expect(authorization.broadcastIndependent).toBe(true);
+    expect(authorization.kind).toBe('message');
+    expect(() => assertSppSignatureStillPermitted(authorization.permissionEpoch, true)).not.toThrow();
+    expect(() => authorizeSppKeyDerivationSignature({
+      input: message,
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+      approvalToken: token,
+    })).toThrow(/missing, expired, or bound/);
+
+    // The normal signer remains blocked, even for the same message.
+    expect(() => authorizeSppSignature({
+      kind: 'message',
+      input: message,
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/SPP_BROADCAST_AWAITING_APPROVAL/);
+    expect(() => authorizeSppKeyDerivationSignature({
+      input: message,
+      boundAccount: OTHER,
+      networkPassphrase: Networks.TESTNET,
+      approvalToken: token,
+    })).toThrow(/missing, expired, or bound/);
+    expect(() => sppKeyDerivationMessage('Nethermind') && authorizeSppKeyDerivationSignature({
+      input: message + ' altered',
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+      approvalToken: token,
+    })).toThrow(/exact upstream v3 KDF message/);
   });
 
   it('allowlists Testnet and rejects Public and Futurenet', () => {
