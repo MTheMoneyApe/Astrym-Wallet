@@ -109,6 +109,11 @@ export type SppSdkRuntimeDeps = {
   Storage: {
     open: (options?: StorageOpenOptions | null) => Promise<Storage>;
   };
+  /** Wallet-authorized encrypted OPFS open; no unapproved direct Storage.open path. */
+  openEncryptedStorage: (input: {
+    storageOpen: (options: StorageOpenOptions) => Promise<Storage>;
+    workerUrl: string;
+  }) => Promise<Storage>;
   Client: {
     new: (options: ClientNewOptions) => Promise<Client>;
   };
@@ -138,7 +143,14 @@ export function createSppSdkRuntime(deps: SppSdkRuntimeDeps): SppSessionRuntime 
   return {
     async createReadOnlyClient(args: SppCreateClientArgs): Promise<SppReadOnlyClient> {
       await deps.initWasm(args.assets.wasmUrl);
-      const storage = await deps.Storage.open({
+      if (typeof deps.openEncryptedStorage !== 'function') {
+        throw new SppSessionError(
+          'INVALID_CONFIG',
+          'Encrypted SPP storage requires the explicit wallet unlock provider',
+        );
+      }
+      const storage = await deps.openEncryptedStorage({
+        storageOpen: deps.Storage.open.bind(deps.Storage),
         workerUrl: args.assets.storageWorkerUrl,
       });
       let bootnodeUrl = args.bootnodeUrl;
