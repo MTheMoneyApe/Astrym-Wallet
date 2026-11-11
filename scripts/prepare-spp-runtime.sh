@@ -460,28 +460,59 @@ export SPP_WASM_BINDGEN_TRACE="$DIAGNOSTIC_DIR/wasm-bindgen.jsonl"
 export WASM_OPT="$WRAPPER_DIR/wasm-opt"
 export PATH="$WRAPPER_DIR:$PATH"
 
-python3 - "$DIAGNOSTIC_DIR/toolchain.json" "$REAL_WASM_OPT" "$REAL_WASM_BINDGEN" <<'PY'
+python3 - "$DIAGNOSTIC_DIR/toolchain.json" "$REAL_WASM_OPT" "$REAL_WASM_BINDGEN" "$RUST_CHANNEL" <<'PY'
 import hashlib, json, shutil, subprocess, sys
 from pathlib import Path
 
 output = Path(sys.argv[1])
+rust_channel = sys.argv[4]
+rustc_proxy = shutil.which("rustc")
 tools = {
     "wasm-opt": sys.argv[2],
     "wasm-bindgen": sys.argv[3],
-    "rustc": shutil.which("rustc"),
-    "cargo": shutil.which("cargo"),
-    "cc": shutil.which("cc"),
-    "clang": shutil.which("clang"),
+    "rustc-rustup-proxy": rustc_proxy,
+    "cargo-rustup-proxy": shutil.which("cargo"),
+    "host-cc": shutil.which("cc"),
+    # cc-rs selects this compiler for its actual wasm32 C invocations.
+    "clang-wasm-target": shutil.which("clang"),
     "clang-18": shutil.which("clang-18"),
     "ar": shutil.which("ar"),
     "llvm-ar": shutil.which("llvm-ar"),
     "wasm-ld": shutil.which("wasm-ld"),
     "wasm-ld-18": shutil.which("wasm-ld-18"),
 }
+if rustc_proxy:
+    try:
+        sysroot_run = subprocess.run(
+            [rustc_proxy, f"+{rust_channel}", "--print", "sysroot"],
+            capture_output=True, text=True, check=True, timeout=30,
+        )
+        version_run = subprocess.run(
+            [rustc_proxy, f"+{rust_channel}", "-vV"],
+            capture_output=True, text=True, check=True, timeout=30,
+        )
+        sysroot = Path(sysroot_run.stdout.strip())
+        host = next(
+            (line.split(":", 1)[1].strip() for line in version_run.stdout.splitlines()
+             if line.startswith("host:")),
+            None,
+        )
+        tools["rustc"] = str(sysroot / "bin" / "rustc")
+        tools["cargo"] = str(sysroot / "bin" / "cargo")
+        if host:
+            tools["rust-lld"] = str(sysroot / "lib" / "rustlib" / host / "bin" / "rust-lld")
+        tools["rustc-sysroot"] = str(sysroot)
+        tools["rustc-host"] = host
+    except Exception as exc:
+        tools["rustc-resolution-error"] = str(exc)
+
 result = {}
 for name, raw in tools.items():
     if not raw:
         result[name] = None
+        continue
+    if name in ("rustc-sysroot", "rustc-host", "rustc-resolution-error"):
+        result[name] = raw
         continue
     path = Path(raw)
     item = {"path": str(path.resolve())}
@@ -497,7 +528,7 @@ for name, raw in tools.items():
         item["versionError"] = str(exc)
     result[name] = item
 output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
-print("recorded toolchain identities:", output)
+print("recorded resolved compiler/linker and toolchain identities:", output)
 PY
 
 capture_spp_build_evidence() {
