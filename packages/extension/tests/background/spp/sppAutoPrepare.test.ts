@@ -42,7 +42,7 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
             for (const key of list) storage.delete(key);
           }),
         },
-      },
+      } as unknown as typeof chrome.storage,
     };
   });
 
