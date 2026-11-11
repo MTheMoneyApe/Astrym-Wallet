@@ -65,16 +65,83 @@ async function obtainApproval(input: {
   return token;
 }
 
-function confirmStorageUnlock(details: {
+async function confirmStorageUnlock(details: {
   account: string;
   origin: string;
   message: string;
   fresh: boolean;
-}): boolean {
-  const action = details.fresh ? 'CREATE a new encrypted SPP database' : 'UNLOCK the existing encrypted SPP database';
-  return globalThis.confirm(
-    `${action}\n\nAccount: ${details.account}\nOrigin: ${details.origin}\nDatabase: ${SPP_STORAGE_DATABASE_ID}\n\nThe wallet will sign this exact message only to wrap or recover a random database key. It does not derive SPP privacy keys, authorize transactions, enable payments, or broadcast.\n\n${details.message}\n\nContinue?`,
-  );
+}): Promise<boolean> {
+  if (typeof document === 'undefined' || !document.body) {
+    throw new Error('SPP storage unlock requires an interactive extension page.');
+  }
+  return new Promise<boolean>((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.setAttribute('aria-labelledby', 'spp-storage-unlock-title');
+    dialog.setAttribute('aria-describedby', 'spp-storage-unlock-description');
+    dialog.style.cssText = [
+      'max-width:min(680px,calc(100vw - 32px))',
+      'width:calc(100vw - 48px)',
+      'max-height:calc(100vh - 48px)',
+      'overflow:auto',
+      'border:1px solid #64748b',
+      'border-radius:16px',
+      'padding:24px',
+      'color:#e5e7eb',
+      'background:#111827',
+      'box-shadow:0 24px 80px rgba(0,0,0,.55)',
+    ].join(';');
+    const title = document.createElement('h2');
+    title.id = 'spp-storage-unlock-title';
+    title.textContent = details.fresh
+      ? 'Crear almacenamiento privado SPP cifrado'
+      : 'Desbloquear almacenamiento privado SPP';
+    const description = document.createElement('p');
+    description.id = 'spp-storage-unlock-description';
+    description.textContent = [
+      `Cuenta Stellar: ${details.account}`,
+      `Origen: ${details.origin}`,
+      `Base de datos: ${SPP_STORAGE_DATABASE_ID}`,
+      details.fresh
+        ? 'Se creará una clave aleatoria cifrada para esta base de datos.'
+        : 'Se recuperará la clave cifrada existente para esta cuenta.',
+      'La firma solo envuelve o recupera la clave local. No deriva claves privadas SPP, no autoriza pagos y no transmite transacciones.',
+    ].join('\n\n');
+    description.style.whiteSpace = 'pre-wrap';
+    const exactMessage = document.createElement('pre');
+    exactMessage.textContent = details.message;
+    exactMessage.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;border-radius:10px;background:#030712;font-size:12px;max-height:240px;overflow:auto';
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;justify-content:flex-end;gap:12px;margin-top:20px';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancelar';
+    const authorize = document.createElement('button');
+    authorize.type = 'button';
+    authorize.textContent = 'Autorizar firma de desbloqueo';
+    authorize.style.cssText = 'padding:10px 16px;border-radius:10px;background:#155e75;color:white;font-weight:600';
+    const finish = (accepted: boolean) => {
+      if (!dialog.isConnected) return;
+      dialog.close();
+      dialog.remove();
+      resolve(accepted);
+    };
+    cancel.addEventListener('click', () => finish(false));
+    authorize.addEventListener('click', () => finish(true));
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      finish(false);
+    });
+    actions.append(cancel, authorize);
+    dialog.append(title, description, exactMessage, actions);
+    document.body.append(dialog);
+    try {
+      dialog.showModal();
+      window.focus();
+    } catch {
+      dialog.remove();
+      resolve(false);
+    }
+  });
 }
 
 type StorageKeyRecord = {
@@ -128,6 +195,7 @@ export async function openSppEncryptedStorage(input: {
   signer: Pick<SppHostRemoteSigner, 'signStorageUnlockMessage'>;
   activeStellarAddress: string;
   prepareGeneration: number;
+  confirmUnlock?: (details: { account: string; origin: string; message: string; fresh: boolean }) => Promise<boolean>;
 }): Promise<Storage> {
   if (typeof navigator.locks?.request !== 'function') {
     throw new Error('SPP encrypted storage requires Web Locks; no signature or storage operation was started.');
@@ -166,7 +234,7 @@ export async function openSppEncryptedStorage(input: {
       account: record.address,
       salt: record.salt,
     });
-    if (!confirmStorageUnlock({
+    if (!await (input.confirmUnlock ?? confirmStorageUnlock)({
       account: record.address,
       origin,
       message,
