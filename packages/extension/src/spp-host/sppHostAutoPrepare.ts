@@ -336,6 +336,16 @@ async function runSppHostAutoPrepareForIntent(
         contractConfig.networkPassphrase.trim()) ||
       'Test SDF Network ; September 2015';
     const bootnodeUrl = await readStoredBootnodeUrl();
+    const userAddress = await resolveActiveStellarAddress();
+    if (!userAddress) {
+      await publish({
+        ...base(poolContract, ownership),
+        phase: 'failed',
+        message: 'Desbloquea una cuenta Stellar activa en Astrym antes de inicializar el almacenamiento SPP.',
+        updatedAt: Date.now(),
+      });
+      return;
+    }
 
     await publish({
       ...base(poolContract, ownership),
@@ -350,6 +360,10 @@ async function runSppHostAutoPrepareForIntent(
         contractConfig,
         circuitLock,
         ...(bootnodeUrl ? { bootnodeUrl } : {}),
+        storageUnlock: {
+          userAddress,
+          prepareGeneration: intent.generation,
+        },
       });
     }
     snap = await controller.initializeBoundSessionForNym(true);
@@ -369,18 +383,6 @@ async function runSppHostAutoPrepareForIntent(
       message: 'Sesión solo lectura lista. Preparando PrivatePool de escritura…',
       updatedAt: Date.now(),
     });
-
-    const userAddress = await resolveActiveStellarAddress();
-    if (!userAddress) {
-      await publish({
-        ...base(poolContract, ownership),
-        phase: 'read_only',
-        message:
-          'Sesión RO lista. Desbloquea una cuenta Stellar activa (Testnet) para el write pool.',
-        updatedAt: Date.now(),
-      });
-      return;
-    }
 
     await publish({
       ...base(poolContract, ownership),
