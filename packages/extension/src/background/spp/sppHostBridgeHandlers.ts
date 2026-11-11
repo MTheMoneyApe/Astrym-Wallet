@@ -195,10 +195,15 @@ export async function handleSppHostSignRequest(
       ? await (async () => {
           const stored = await browser.storage.local.get(SPP_PREPARE_STATUS_KEY);
           const current = stored[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
-          if (current?.phase !== 'initializing_write_pool' || !Number.isSafeInteger(current.generation) || current.generation <= 0) {
-            throw new Error('SPP KDF signing requires the current write-pool preparation');
+          if (
+            current?.phase !== 'initializing_write_pool' ||
+            !Number.isSafeInteger(current.generation) ||
+            current.generation <= 0 ||
+            current.generation !== request.payload.prepareGeneration
+          ) {
+            throw new Error('SPP KDF signing requires the exact current write-pool preparation');
           }
-          return waitForSppKeyDerivationApproval(address, kdfDomain, current.generation);
+          return waitForSppKeyDerivationApproval(address, kdfDomain, request.payload.prepareGeneration);
         })()
       : null;
     if (!kdfApprovalToken && !isSppTestnetBroadcastAuthorized()) {
