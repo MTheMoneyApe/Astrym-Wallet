@@ -65,6 +65,15 @@ export class SppHostRemoteSigner implements WalletSigner {
     return { signedMessage: signed.signatureBase64, signerAddress: signed.signerAddress };
   }
 
+  async signStorageUnlockMessage(
+    message: string,
+    approvalToken: string,
+    opts?: SignOptions,
+  ): Promise<SignMessageResult> {
+    const signed = await this._sign('message', message, opts, 'storage_unlock', approvalToken);
+    return { signedMessage: signed.signatureBase64, signerAddress: signed.signerAddress };
+  }
+
   async signTransaction(xdr: string, opts?: SignOptions): Promise<SignTransactionResult> {
     this._assertHostTransaction(xdr);
     const signed = await this._sign('transaction', xdr, opts);
@@ -95,6 +104,8 @@ export class SppHostRemoteSigner implements WalletSigner {
     kind: 'message' | 'transaction' | 'auth_entry',
     input: string,
     opts?: SignOptions,
+    authorization: 'standard' | 'storage_unlock' = 'standard',
+    storageUnlockApprovalToken?: string,
   ): Promise<{ signatureBase64: string; signerAddress: string }> {
     if (opts?.address && opts.address !== this._stellarAddress) {
       throw new Error('Remote signer address mismatch');
@@ -114,6 +125,9 @@ export class SppHostRemoteSigner implements WalletSigner {
         address: this._stellarAddress,
         networkPassphrase: this._networkPassphrase,
         prepareGeneration: this._prepareGeneration,
+        ...(authorization === 'storage_unlock'
+          ? { authorization, storageUnlockApprovalToken }
+          : {}),
       },
     };
 
