@@ -426,6 +426,7 @@ async function runSppHostAutoPrepareForIntent(
       });
     }
   }
+}
 
 let activePrepareGeneration: number | null = null;
 let activePreparePromise: Promise<void> | null = null;
