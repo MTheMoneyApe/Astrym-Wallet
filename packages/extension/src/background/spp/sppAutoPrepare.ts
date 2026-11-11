@@ -30,6 +30,68 @@ const IN_FLIGHT_PHASES: ReadonlySet<SppPreparePhase> = new Set([
 const OPENING_HOST_STALL_MS = 45_000;
 
 let ensureInFlight: Promise<SppPrepareStatus | null> | null = null;
+let prepareGenerationGuardInstalled = false;
+
+/**
+ * Service-worker-owned lease guard. Host status writes are asynchronous and
+ * chrome.storage has no compare-and-swap; any late write from an older host is
+ * repaired to the current intent generation. Every subsequent stale write
+ * emits another change event and is repaired again.
+ */
+export function installSppPrepareGenerationGuard(): void {
+  if (prepareGenerationGuardInstalled || typeof chrome === 'undefined' ||
+      !chrome.storage?.local || !chrome.storage.onChanged) return;
+  prepareGenerationGuardInstalled = true;
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local' ||
+        (!changes[SPP_PREPARE_STATUS_KEY] && !changes[SPP_AUTO_PREPARE_INTENT_KEY])) return;
+    void (async () => {
+      const area = storageLocal();
+      if (!area) return;
+      const current = await area.get([SPP_PREPARE_STATUS_KEY, SPP_AUTO_PREPARE_INTENT_KEY]);
+      const intent = current[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+      const status = current[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+      if (
+        intent?.autoRun !== true ||
+        !Number.isSafeInteger(intent.generation) ||
+        intent.generation <= 0 ||
+        !status ||
+        !Number.isSafeInteger(status.generation) ||
+        status.generation >= intent.generation
+      ) return;
+
+      const recovered: SppPrepareStatus = {
+        ...createIdleSppPrepareStatus(),
+        phase: 'opening_host',
+        message: 'Recuperando estado de la generación SPP vigente…',
+        poolContract: intent.poolContract ?? status.poolContract ?? null,
+        generation: intent.generation,
+        updatedAt: Date.now(),
+      };
+
+      // Re-read before writing. This is not atomic, so the next storage event
+      // also passes through this guard and repairs any later stale write.
+      const latest = await area.get([SPP_PREPARE_STATUS_KEY, SPP_AUTO_PREPARE_INTENT_KEY]);
+      const latestIntent = latest[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+      const latestStatus = latest[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+      if (
+        latestIntent?.autoRun === true &&
+        latestIntent.generation === intent.generation &&
+        latestStatus?.generation !== intent.generation
+      ) {
+        await area.set({ [SPP_PREPARE_STATUS_KEY]: recovered });
+      }
+    })().catch(() => {
+      // The KDF and signing paths still fail closed on status/intent mismatch.
+    });
+  });
+}
+
+/** Test helper */
+export function resetSppPrepareGenerationGuardForTests(): void {
+  prepareGenerationGuardInstalled = false;
+}
 
 function storageLocal(): chrome.storage.LocalStorageArea | null {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return null;
