@@ -10,6 +10,8 @@ import type { SppHostRemoteSigner } from './sppHostRemoteSigner.js';
 
 const DIRECTORY = '.opfs-sahpool-encrypted';
 const DIRECTORY_PREFIX = `${DIRECTORY}-`;
+const validDirectory = (value: unknown): value is string =>
+  value === DIRECTORY || (typeof value === 'string' && /^\\.opfs-sahpool-encrypted-[0-9a-f-]{36}$/.test(value));
 const WRAP_INFO = 'spp.browser.storage-key-wrap.v1';
 const encoder = new TextEncoder();
 
@@ -200,6 +202,7 @@ function readRecord(): StorageKeyRecord | null {
       typeof record.salt === 'string' &&
       decode(record.salt).byteLength === 32 &&
       typeof record.pending === 'boolean' &&
+      (record.directory === undefined || validDirectory(record.directory)) &&
       (record.pending === true ||
         (typeof record.iv === 'string' && decode(record.iv).byteLength === 12 &&
          typeof record.envelope === 'string' && decode(record.envelope).byteLength === 48));
@@ -359,6 +362,7 @@ export async function openSppEncryptedStorage(input: {
         workerUrl: input.workerUrl,
         createNew,
         keyProvider,
+        ...(record!.directory ? { directory: record!.directory } : {}),
       });
 
       let storage: Storage;
@@ -373,6 +377,7 @@ export async function openSppEncryptedStorage(input: {
           storage = await input.storageOpen({
             workerUrl: input.workerUrl,
             createNew: false,
+            ...(record.directory ? { directory: record.directory } : {}),
             keyProvider: async (databaseId, purpose) => {
               if (databaseId !== SPP_STORAGE_DATABASE_ID || purpose !== 'open') {
                 throw new Error('SPP storage recovery refused an unexpected database context.');
