@@ -188,7 +188,7 @@ describe('openSppEncryptedStorage', () => {
       locks: fakeLockManager(),
       storage: {
         getDirectory: async () => asyncEntries([
-          ['.opfs-sahpool-encrypted', { kind: 'directory', entries: asyncEntries([['data.db', {}]]) }],
+          ['.opfs-sahpool-encrypted', { kind: 'directory', entries: asyncEntries([['data.db', {}]]).entries }],
         ]),
       },
     });
