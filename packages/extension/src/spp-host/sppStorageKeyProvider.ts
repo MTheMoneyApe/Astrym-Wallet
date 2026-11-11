@@ -6,6 +6,7 @@ import {
   SPP_STORAGE_DATABASE_ID,
   SPP_STORAGE_UNLOCK_RECORD_KEY,
   SPP_STORAGE_UNLOCK_TTL_MS,
+  sppStorageUnlockOriginFromUrl,
 } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 import type { SppHostRemoteSigner } from './sppHostRemoteSigner.js';
 
@@ -193,7 +194,7 @@ type StorageKeyRecord = {
   directory?: string;
 };
 
-function readRecord(): StorageKeyRecord | null {
+function readRecord(expectedOrigin: string): StorageKeyRecord | null {
   let raw: unknown;
   try {
     raw = JSON.parse(localStorage.getItem(SPP_STORAGE_UNLOCK_RECORD_KEY) || 'null');
@@ -207,7 +208,7 @@ function readRecord(): StorageKeyRecord | null {
     valid = record.version === 1 &&
       typeof record.address === 'string' &&
       StrKey.isValidEd25519PublicKey(record.address) &&
-      record.origin === location.origin &&
+      record.origin === expectedOrigin &&
       typeof record.salt === 'string' &&
       decode(record.salt).byteLength === 32 &&
       typeof record.pending === 'boolean' &&
@@ -240,7 +241,7 @@ export async function openSppEncryptedStorage(input: {
     throw new Error('SPP encrypted storage requires Web Locks; no signature or storage operation was started.');
   }
   return navigator.locks.request(SPP_STORAGE_UNLOCK_RECORD_KEY, { mode: 'exclusive' }, async () => {
-    const origin = location.origin;
+    const origin = sppStorageUnlockOriginFromUrl(location.href);
     if (!/^chrome-extension:\/\/[a-p]{32}$/.test(origin)) {
       throw new Error('SPP storage unlock requires the exact packaged extension origin.');
     }
@@ -248,7 +249,7 @@ export async function openSppEncryptedStorage(input: {
       throw new Error('Unlock the Stellar vault before opening SPP storage.');
     }
 
-    let record = readRecord();
+    let record = readRecord(origin);
     const fresh = record === null;
     if (fresh && await hasExistingEncryptedDatabase()) {
       throw Object.assign(
