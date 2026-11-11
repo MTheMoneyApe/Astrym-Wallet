@@ -140,8 +140,8 @@ jobs:
           CC_ENABLE_DEBUG_OUTPUT: "1"
           CARGO_TERM_VERBOSE: "true"
           SPP_DIAGNOSTIC_LABEL: clean-rebuild
-          SPP_BUILD_ROOT: "\${{ github.workspace }}/.cache/spp-upstream"
-          CARGO_TARGET_DIR: "\${{ github.workspace }}/.cache/spp-upstream/clean-repro-target"
+          SPP_BUILD_ROOT: "${{ github.workspace }}/.cache/spp-upstream"
+          CARGO_TARGET_DIR: "${{ github.workspace }}/.cache/spp-upstream/clean-repro-target"
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/spp-logs"
