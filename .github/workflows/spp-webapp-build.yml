@@ -73,6 +73,26 @@ jobs:
           mkdir -p "$RUNNER_TEMP/spp-logs"
           pnpm install --frozen-lockfile 2>&1 | tee "$RUNNER_TEMP/spp-logs/install.txt"
 
+      - name: Typecheck wallet-core and extension
+        id: typecheck
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          {
+            pnpm --filter @solanym/wallet-core typecheck
+            pnpm --filter @solanym/extension typecheck
+          } 2>&1 | tee "$RUNNER_TEMP/spp-logs/typecheck.txt"
+
+      - name: Run focused SPP signer tests
+        id: spp_tests
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          pnpm --filter @solanym/wallet-core exec vitest run \
+            tests/stellar/spp/sppSignGate.test.ts \
+            tests/stellar/spp/SppWalletSignerAdapter.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/spp-logs/spp-signer-tests.txt"
+
       - name: Build
         id: spp_build
         continue-on-error: true
@@ -83,6 +103,13 @@ jobs:
         run: |
           set -o pipefail
           pnpm build:webapp 2>&1 | tee "$RUNNER_TEMP/spp-logs/build-webapp.txt"
+
+      - name: Build MV3 extension and background worker
+        id: mv3_build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pnpm --filter @solanym/extension build 2>&1 | tee "$RUNNER_TEMP/spp-logs/build-mv3-extension.txt"
 
       - name: Extract actual cc-rs compiler evidence from the SPP build
         if: always()
@@ -250,12 +277,23 @@ jobs:
         if: always()
         env:
           SPP_BUILD_OUTCOME: ${{ steps.spp_build.outcome }}
+          SPP_TYPECHECK_OUTCOME: ${{ steps.typecheck.outcome }}
+          SPP_TEST_OUTCOME: ${{ steps.spp_tests.outcome }}
+          SPP_MV3_BUILD_OUTCOME: ${{ steps.mv3_build.outcome }}
         run: |
           set -euo pipefail
-          if [ "$SPP_BUILD_OUTCOME" != "success" ]; then
-            echo "SPP webapp Build step concluded: $SPP_BUILD_OUTCOME" >&2
-            exit 1
-          fi
+          for check in \
+            "wallet-core/extension typecheck:$SPP_TYPECHECK_OUTCOME" \
+            "focused SPP signer tests:$SPP_TEST_OUTCOME" \
+            "MV3 extension build:$SPP_MV3_BUILD_OUTCOME" \
+            "SPP webapp build:$SPP_BUILD_OUTCOME"; do
+            name="${check%%:*}"
+            outcome="${check#*:}"
+            if [ "$outcome" != "success" ]; then
+              echo "$name concluded: $outcome" >&2
+              exit 1
+            fi
+          done
           python3 - "$RUNNER_TEMP/spp-proof/manifest/comparison.json" <<'PY'
           import json, sys
           from pathlib import Path
