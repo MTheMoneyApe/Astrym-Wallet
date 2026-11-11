@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Keypair, StrKey } from '@stellar/stellar-sdk';
+import { Keypair } from '@stellar/stellar-sdk';
 import { hashSep53Message } from '@solanym/wallet-core/src/stellar/spp/sep53.js';
 import { SPP_STORAGE_DATABASE_ID, SPP_STORAGE_UNLOCK_RECORD_KEY } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 import { openSppEncryptedStorage } from '../../src/spp-host/sppStorageKeyProvider.js';
