@@ -230,13 +230,13 @@ export const SPP_KEY_DERIVATION_V3_WARNING =
 
 export function sppKeyDerivationMessage(kdfDomain: string): string {
   const domain = assertKdfDomain(kdfDomain);
-  return \`Privacy Pool Key Derivation [v3] (\${domain})\n\${SPP_KEY_DERIVATION_V3_WARNING}\`;
+  return `Privacy Pool Key Derivation [v3] (${domain})\n${SPP_KEY_DERIVATION_V3_WARNING}`;
 }
 
 /** Return the domain only when the input is byte-exactly the upstream v3 KDF message. */
 export function sppKeyDerivationDomainFromMessage(message: string): string | null {
   const prefix = 'Privacy Pool Key Derivation [v3] (';
-  const suffix = \`)\n\${SPP_KEY_DERIVATION_V3_WARNING}\`;
+  const suffix = `)\n${SPP_KEY_DERIVATION_V3_WARNING}`;
   if (!message.startsWith(prefix) || !message.endsWith(suffix)) return null;
   const domain = message.slice(prefix.length, -suffix.length);
   try {
