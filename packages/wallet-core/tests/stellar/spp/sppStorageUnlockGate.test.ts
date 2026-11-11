@@ -5,6 +5,7 @@ import {
   assertSppStorageUnlockSignatureStillPermitted,
   authorizeSppStorageUnlockSignature,
   createSppStorageUnlockMessage,
+  sppStorageUnlockOriginFromUrl,
   resetSppStorageUnlockApprovalsForTests,
   revokeSppStorageUnlockApprovals,
 } from '../../../src/stellar/spp/sppStorageUnlockGate.js';
@@ -80,6 +81,12 @@ describe('SPP storage unlock gate', () => {
     });
     revokeSppStorageUnlockApprovals();
     expect(() => assertSppStorageUnlockSignatureStillPermitted(authorized.permissionEpoch)).toThrow(/revoked/);
+  });
+
+  it('canonicalizes a full chrome-extension document URL without URL.origin', () => {
+    expect(sppStorageUnlockOriginFromUrl(`${ORIGIN}/spp-host.html`)).toBe(ORIGIN);
+    expect(sppStorageUnlockOriginFromUrl(`${ORIGIN}/popup.html?x=1`)).toBe(ORIGIN);
+    expect(() => sppStorageUnlockOriginFromUrl('https://example.test/spp-host.html')).toThrow(/origin/);
   });
 
   it('rejects invalid origin, salt and database context before minting', () => {
