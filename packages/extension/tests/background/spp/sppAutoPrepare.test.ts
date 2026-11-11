@@ -1,4 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  ensureSppAutoPrepareIfNeeded,
+  installSppPrepareGenerationGuard,
+  resetSppAutoPrepareEnsureLockForTests,
+  resetSppPrepareGenerationGuardForTests,
+} from '../../../src/background/spp/sppAutoPrepare.js';
+import { openSppHostInternal } from '../../../src/spp-host/openSppHost.js';
 
 const storage = new Map<string, unknown>();
 type StorageChangeListener = (
@@ -16,7 +23,8 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
   beforeEach(() => {
     storage.clear();
     storageChangeListeners.length = 0;
-    vi.resetModules();
+    resetSppAutoPrepareEnsureLockForTests();
+    resetSppPrepareGenerationGuardForTests();
     localSet = vi.fn(async (items: Record<string, unknown>) => {
       for (const [k, v] of Object.entries(items)) storage.set(k, v);
     });
@@ -51,9 +59,6 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
   });
 
   it('repairs a stale host status write to the current service-worker intent generation', async () => {
-    const {
-      installSppPrepareGenerationGuard,
-    } = await import('../../../src/background/spp/sppAutoPrepare.js');
     const statusKey = 'astrym_spp_prepare_status';
     const intentKey = 'astrym_spp_auto_prepare_intent';
     const poolContract = 'CAMWBUWHYXEGBM3Q7M5DBGW7LLJL3I4QGANQEZFEWLRNTOJMTT2WG24U';
@@ -91,19 +96,11 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
   });
 
   it('does not start prepare when Nym is not connected', async () => {
-    const { ensureSppAutoPrepareIfNeeded, resetSppAutoPrepareEnsureLockForTests } =
-      await import('../../../src/background/spp/sppAutoPrepare.js');
-    const { openSppHostInternal } = await import('../../../src/spp-host/openSppHost.js');
-    resetSppAutoPrepareEnsureLockForTests();
     await ensureSppAutoPrepareIfNeeded({ nymConnected: false, nymMode: 'direct' });
     expect(openSppHostInternal).not.toHaveBeenCalled();
   });
 
   it('starts prepare when idle and Nym is ready', async () => {
-    const { ensureSppAutoPrepareIfNeeded, resetSppAutoPrepareEnsureLockForTests } =
-      await import('../../../src/background/spp/sppAutoPrepare.js');
-    const { openSppHostInternal } = await import('../../../src/spp-host/openSppHost.js');
-    resetSppAutoPrepareEnsureLockForTests();
     await ensureSppAutoPrepareIfNeeded({ nymConnected: true, nymMode: 'nym' });
     expect(openSppHostInternal).toHaveBeenCalledTimes(1);
     const status = storage.get('astrym_spp_prepare_status') as { generation: number };
@@ -114,10 +111,6 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
   });
 
   it('coalesces simultaneous Nym-ready requests into one prepare generation', async () => {
-    const { ensureSppAutoPrepareIfNeeded, resetSppAutoPrepareEnsureLockForTests } =
-      await import('../../../src/background/spp/sppAutoPrepare.js');
-    const { openSppHostInternal } = await import('../../../src/spp-host/openSppHost.js');
-    resetSppAutoPrepareEnsureLockForTests();
 
     const input = { nymConnected: true, nymMode: 'nym' as const };
     const [first, second] = await Promise.all([
@@ -135,10 +128,6 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
   });
 
   it('skips duplicate start while prepare is in flight', async () => {
-    const { ensureSppAutoPrepareIfNeeded, resetSppAutoPrepareEnsureLockForTests } =
-      await import('../../../src/background/spp/sppAutoPrepare.js');
-    const { openSppHostInternal } = await import('../../../src/spp-host/openSppHost.js');
-    resetSppAutoPrepareEnsureLockForTests();
     storage.set('astrym_spp_prepare_status', {
       phase: 'probing_assets',
       message: 'working',
@@ -151,10 +140,6 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
   });
 
   it('skips when write_pool_ready already verified', async () => {
-    const { ensureSppAutoPrepareIfNeeded, resetSppAutoPrepareEnsureLockForTests } =
-      await import('../../../src/background/spp/sppAutoPrepare.js');
-    const { openSppHostInternal } = await import('../../../src/spp-host/openSppHost.js');
-    resetSppAutoPrepareEnsureLockForTests();
     storage.set('astrym_spp_prepare_status', {
       phase: 'ready',
       message: 'ready',
@@ -167,10 +152,6 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
   });
 
   it('retries when opening_host is stalled', async () => {
-    const { ensureSppAutoPrepareIfNeeded, resetSppAutoPrepareEnsureLockForTests } =
-      await import('../../../src/background/spp/sppAutoPrepare.js');
-    const { openSppHostInternal } = await import('../../../src/spp-host/openSppHost.js');
-    resetSppAutoPrepareEnsureLockForTests();
     storage.set('astrym_spp_prepare_status', {
       phase: 'opening_host',
       message: 'stuck',
