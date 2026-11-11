@@ -19,6 +19,12 @@ afterEach(() => resetSppStorageUnlockApprovalsForTests());
 describe('SPP storage unlock gate', () => {
   it('binds creation consent to account, origin, exact message and two deterministic signatures', () => {
     const message = createSppStorageUnlockMessage({ origin: ORIGIN, account: ACCOUNT, salt: SALT });
+    expect(message).toBe([
+      'Stellar Private Payments storage unlock v1',
+      `Origin: ${ORIGIN}`,
+      `Account: ${ACCOUNT}`,
+      `Salt: ${SALT}`,
+    ].join('\\n'));
     const token = approveSppStorageUnlockRequest({ account: ACCOUNT, message, prepareGeneration: 4, uses: 2 });
     expect(token).toBeTruthy();
     const first = authorizeSppStorageUnlockSignature({
