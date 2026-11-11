@@ -104,6 +104,7 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
   it('starts prepare when idle and Nym is ready', async () => {
     await ensureSppAutoPrepareIfNeeded({ nymConnected: true, nymMode: 'nym' });
     expect(openSppHostInternal).toHaveBeenCalledTimes(1);
+    expect(openSppHostInternal).toHaveBeenCalledWith({ active: true });
     const status = storage.get('astrym_spp_prepare_status') as { generation: number };
     const intent = storage.get('astrym_spp_auto_prepare_intent') as { generation: number };
     expect(status).toMatchObject({ phase: 'opening_host' });
