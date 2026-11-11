@@ -101,6 +101,18 @@ jobs:
             tests/stellar/spp/SppWalletSignerAdapter.test.ts \
             2>&1 | tee "$RUNNER_TEMP/spp-logs/spp-signer-tests.txt"
 
+      - name: Run focused SPP extension bridge tests
+        id: spp_extension_tests
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          pnpm --filter @solanym/extension exec vitest run \
+            tests/background/spp/sppHostBridgeHandlers.test.ts \
+            tests/background/spp/sppSignGate.test.ts \
+            tests/background/spp/sppAutoPrepare.test.ts \
+            tests/spp-host/sppHostRemoteSigner.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/spp-logs/spp-extension-bridge-tests.txt"
+
       - name: Build
         id: spp_build
         continue-on-error: true
@@ -288,12 +300,14 @@ jobs:
           SPP_CORE_TYPECHECK_OUTCOME: ${{ steps.core_typecheck.outcome }}
           SPP_EXTENSION_TYPECHECK_OUTCOME: ${{ steps.extension_typecheck.outcome }}
           SPP_TEST_OUTCOME: ${{ steps.spp_tests.outcome }}
+          SPP_EXTENSION_TEST_OUTCOME: ${{ steps.spp_extension_tests.outcome }}
           SPP_MV3_BUILD_OUTCOME: ${{ steps.mv3_build.outcome }}
         run: |
           set -euo pipefail
           for check in \
             "wallet-core production typecheck:$SPP_CORE_TYPECHECK_OUTCOME" \
             "focused SPP signer tests:$SPP_TEST_OUTCOME" \
+            "focused SPP extension bridge tests:$SPP_EXTENSION_TEST_OUTCOME" \
             "MV3 extension build:$SPP_MV3_BUILD_OUTCOME" \
             "SPP webapp build:$SPP_BUILD_OUTCOME"; do
             name="${check%%:*}"
