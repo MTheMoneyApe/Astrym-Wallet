@@ -84,7 +84,6 @@ export function createSppStorageUnlockMessage(input: SppStorageUnlockChallenge):
   if (salt.byteLength !== 32) throw new Error('Storage unlock salt must be 32 bytes');
   return [
     'Stellar Private Payments storage unlock v1',
-    `Database: ${SPP_STORAGE_DATABASE_ID}`,
     `Origin: ${origin}`,
     `Account: ${input.account}`,
     `Salt: ${input.salt}`,
@@ -95,13 +94,12 @@ export function parseSppStorageUnlockMessage(message: string): SppStorageUnlockC
   if (typeof message !== 'string' || message.length > 2_000) return null;
   const lines = message.split('\n');
   if (
-    lines.length !== 5 ||
-    lines[0] !== 'Stellar Private Payments storage unlock v1' ||
-    lines[1] !== `Database: ${SPP_STORAGE_DATABASE_ID}`
+    lines.length !== 4 ||
+    lines[0] !== 'Stellar Private Payments storage unlock v1'
   ) return null;
-  const origin = lines[2]?.slice('Origin: '.length);
-  const account = lines[3]?.slice('Account: '.length);
-  const salt = lines[4]?.slice('Salt: '.length);
+  const origin = lines[1]?.slice('Origin: '.length);
+  const account = lines[2]?.slice('Account: '.length);
+  const salt = lines[3]?.slice('Salt: '.length);
   if (!origin || !account || !salt || !StrKey.isValidEd25519PublicKey(account)) return null;
   try {
     const canonical = createSppStorageUnlockMessage({ origin, account, salt });
