@@ -26,7 +26,7 @@ import {
 } from '../../shared/sppHostBridge.js';
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
 import { isSppHostDocumentSender } from '../trustedWalletOrigin.js';
-import { parseSppStorageUnlockMessage } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
+import { parseSppStorageUnlockMessage, sppStorageUnlockOriginFromUrl } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 import { resolveActiveStellarAddress } from './sppBoundAccount.js';
 import {
   SPP_AUTO_PREPARE_INTENT_KEY,
@@ -198,7 +198,12 @@ export async function handleSppHostSignRequest(
       : undefined;
     if (request.payload.authorization === 'storage_unlock') {
       const challenge = kind === 'message' ? parseSppStorageUnlockMessage(input) : null;
-      const senderOrigin = sender?.url ? new URL(sender.url).origin : null;
+      let senderOrigin: string | null = null;
+      try {
+        senderOrigin = sender?.url ? sppStorageUnlockOriginFromUrl(sender.url) : null;
+      } catch {
+        senderOrigin = null;
+      }
       const [stored, storedIntent] = await Promise.all([
         browser.storage.local.get(SPP_PREPARE_STATUS_KEY),
         browser.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY),
