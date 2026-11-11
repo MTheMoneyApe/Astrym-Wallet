@@ -38,9 +38,15 @@ function fakeLockManager() {
 
 function fixture() {
   const values = new Map<string, string>();
+  let failCompletedRecordWrite = false;
   const records = {
     getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => values.set(key, value),
+    setItem: (key: string, value: string) => {
+      if (failCompletedRecordWrite && JSON.parse(value).pending === false) {
+        throw new Error('storage metadata quota failure');
+      }
+      values.set(key, value);
+    },
   };
   const directory = asyncEntries();
   vi.stubGlobal('navigator', {
@@ -66,7 +72,7 @@ function fixture() {
   };
   let databaseKey: Uint8Array | null = null;
   const opened: Array<{ createNew: boolean; key: Uint8Array }> = [];
-  const storage = { fork: () => storage, call: async () => null };
+  const storage = { fork: () => storage, call: async () => null, close: vi.fn(async () => undefined) };
   const storageOpen = vi.fn(async (options: {
     workerUrl?: string;
     createNew?: boolean;
@@ -82,7 +88,7 @@ function fixture() {
     else databaseKey = new Uint8Array(key);
     return storage as never;
   });
-  return { values, sendMessage, signer, signatures, storageOpen, opened, storage, confirmUnlock };
+  return { values, sendMessage, signer, signatures, storageOpen, opened, storage, confirmUnlock, failCompletedRecordWrite: (value: boolean) => { failCompletedRecordWrite = value; } };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -130,6 +136,34 @@ describe('openSppEncryptedStorage', () => {
       payload: expect.objectContaining({ uses: 1, prepareGeneration: 11 }),
     }));
     expect(f.signer.signStorageUnlockMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it('closes the worker when final metadata persistence fails and can recover pending creation', async () => {
+    const f = fixture();
+    f.failCompletedRecordWrite(true);
+    await expect(openSppEncryptedStorage({
+      storageOpen: f.storageOpen as never,
+      workerUrl: `${ORIGIN}/spp/dist/workers/storage-worker.js`,
+      signer: f.signer,
+      activeStellarAddress: ACCOUNT,
+      prepareGeneration: 15,
+      confirmUnlock: f.confirmUnlock,
+    })).rejects.toThrow(/metadata quota failure/);
+    expect(f.storage.close).toHaveBeenCalledOnce();
+    expect(JSON.parse(f.values.get(SPP_STORAGE_UNLOCK_RECORD_KEY)!).pending).toBe(true);
+    const key = f.opened[0]!.key;
+
+    f.failCompletedRecordWrite(false);
+    await openSppEncryptedStorage({
+      storageOpen: f.storageOpen as never,
+      workerUrl: `${ORIGIN}/spp/dist/workers/storage-worker.js`,
+      signer: f.signer,
+      activeStellarAddress: ACCOUNT,
+      prepareGeneration: 16,
+      confirmUnlock: f.confirmUnlock,
+    });
+    expect(f.opened[1]!.key).toEqual(key);
+    expect(JSON.parse(f.values.get(SPP_STORAGE_UNLOCK_RECORD_KEY)!).pending).toBe(false);
   });
 
   it('does not sign or open storage when the user cancels', async () => {
