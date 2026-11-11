@@ -17,7 +17,7 @@ afterEach(() => resetSppStorageUnlockApprovalsForTests());
 
 describe('SPP storage unlock gate', () => {
   it('binds creation consent to account, origin, exact message and two deterministic signatures', () => {
-    const message = createSppStorageUnlockMessage({ origin: ORIGIN, account: ACCOUNT, salt: SALT, purpose: 'create' });
+    const message = createSppStorageUnlockMessage({ origin: ORIGIN, account: ACCOUNT, salt: SALT });
     const token = approveSppStorageUnlockRequest({ account: ACCOUNT, message, prepareGeneration: 4, uses: 2 });
     expect(token).toBeTruthy();
     const first = authorizeSppStorageUnlockSignature({
@@ -37,7 +37,7 @@ describe('SPP storage unlock gate', () => {
   });
 
   it('allows one signature for reopen and rejects use-count escalation', () => {
-    const message = createSppStorageUnlockMessage({ origin: ORIGIN, account: ACCOUNT, salt: SALT, purpose: 'open' });
+    const message = createSppStorageUnlockMessage({ origin: ORIGIN, account: ACCOUNT, salt: SALT });
     expect(approveSppStorageUnlockRequest({ account: ACCOUNT, message, prepareGeneration: 5, uses: 2 })).toBeNull();
     const token = approveSppStorageUnlockRequest({ account: ACCOUNT, message, prepareGeneration: 5, uses: 1 });
     expect(token).toBeTruthy();
@@ -52,7 +52,7 @@ describe('SPP storage unlock gate', () => {
   });
 
   it('rejects cross-account, stale-generation, altered-message and non-Testnet use', () => {
-    const message = createSppStorageUnlockMessage({ origin: ORIGIN, account: ACCOUNT, salt: SALT, purpose: 'open' });
+    const message = createSppStorageUnlockMessage({ origin: ORIGIN, account: ACCOUNT, salt: SALT });
     const token = approveSppStorageUnlockRequest({ account: ACCOUNT, message, prepareGeneration: 6, uses: 1 })!;
     expect(() => authorizeSppStorageUnlockSignature({
       account: 'G' + 'A'.repeat(55), message, prepareGeneration: 6, approvalToken: token,
@@ -73,7 +73,7 @@ describe('SPP storage unlock gate', () => {
   });
 
   it('revokes permits across preparation epochs', () => {
-    const message = createSppStorageUnlockMessage({ origin: ORIGIN, account: ACCOUNT, salt: SALT, purpose: 'open' });
+    const message = createSppStorageUnlockMessage({ origin: ORIGIN, account: ACCOUNT, salt: SALT });
     const token = approveSppStorageUnlockRequest({ account: ACCOUNT, message, prepareGeneration: 8, uses: 1 })!;
     const authorized = authorizeSppStorageUnlockSignature({
       account: ACCOUNT, message, prepareGeneration: 8, approvalToken: token,
@@ -85,10 +85,10 @@ describe('SPP storage unlock gate', () => {
 
   it('rejects invalid origin, salt and database context before minting', () => {
     expect(() => createSppStorageUnlockMessage({
-      origin: 'https://example.test', account: ACCOUNT, salt: SALT, purpose: 'open',
+      origin: 'https://example.test', account: ACCOUNT, salt: SALT,
     })).toThrow(/origin/);
     expect(() => createSppStorageUnlockMessage({
-      origin: ORIGIN, account: ACCOUNT, salt: 'AA==', purpose: 'open',
+      origin: ORIGIN, account: ACCOUNT, salt: 'AA==',
     })).toThrow(/32 bytes/);
   });
 });
