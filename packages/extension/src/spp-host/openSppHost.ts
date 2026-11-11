@@ -77,7 +77,7 @@ function openOrFocusExtensionSppHost(active: boolean): Promise<void> {
       existingTabId = contexts.find(
         (context) => Number.isInteger(context.tabId),
       )?.tabId;
-    } else {
+    } else if (typeof chrome.tabs.query === 'function') {
       // Older Chrome fallback: only reuse when the URL is actually readable.
       // Never trust a URL query filter by itself; it can be ignored without tabs
       // or matching host permission. Fail closed rather than opening duplicates.
