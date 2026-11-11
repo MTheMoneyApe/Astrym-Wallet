@@ -9,8 +9,6 @@ export type SppStorageUnlockChallenge = {
   origin: string;
   account: string;
   salt: string;
-  /** UI-only context; deliberately not signed so pending DB creation can be recovered. */
-  purpose: 'create' | 'open';
 };
 
 export type SppStorageUnlockAuthorization = {
@@ -50,6 +48,11 @@ function assertOrigin(origin: string): string {
   return origin;
 }
 
+/**
+ * Purpose is intentionally excluded from the signed message. A crash after the
+ * wrapped key is persisted but before OPFS creation must be recoverable with the
+ * same wallet signature and envelope.
+ */
 export function createSppStorageUnlockMessage(input: SppStorageUnlockChallenge): string {
   if (!StrKey.isValidEd25519PublicKey(input.account)) {
     throw new Error('Storage unlock account must be a valid Stellar G… address');
@@ -57,13 +60,9 @@ export function createSppStorageUnlockMessage(input: SppStorageUnlockChallenge):
   const origin = assertOrigin(input.origin);
   const salt = decodeBase64(input.salt);
   if (salt.byteLength !== 32) throw new Error('Storage unlock salt must be 32 bytes');
-  if (input.purpose !== 'create' && input.purpose !== 'open') {
-    throw new Error('Storage unlock purpose is invalid');
-  }
   return [
     'Stellar Private Payments storage unlock v1',
     `Database: ${SPP_STORAGE_DATABASE_ID}`,
-    `Purpose: ${input.purpose}`,
     `Origin: ${origin}`,
     `Account: ${input.account}`,
     `Salt: ${input.salt}`,
@@ -78,23 +77,13 @@ export function parseSppStorageUnlockMessage(message: string): SppStorageUnlockC
     lines[0] !== 'Stellar Private Payments storage unlock v1' ||
     lines[1] !== `Database: ${SPP_STORAGE_DATABASE_ID}`
   ) return null;
-  const purpose = lines[2]?.slice('Purpose: '.length);
-  const origin = lines[3]?.slice('Origin: '.length);
-  const account = lines[4]?.slice('Account: '.length);
-  const salt = lines[5]?.slice('Salt: '.length);
-  if (
-    (purpose !== 'create' && purpose !== 'open') ||
-    !origin || !account || !salt ||
-    !StrKey.isValidEd25519PublicKey(account)
-  ) return null;
+  const origin = lines[2]?.slice('Origin: '.length);
+  const account = lines[3]?.slice('Account: '.length);
+  const salt = lines[4]?.slice('Salt: '.length);
+  if (!origin || !account || !salt || !StrKey.isValidEd25519PublicKey(account)) return null;
   try {
-    const canonical = createSppStorageUnlockMessage({
-      origin,
-      account,
-      salt,
-      purpose,
-    });
-    return canonical === message ? { origin, account, salt, purpose } : null;
+    const canonical = createSppStorageUnlockMessage({ origin, account, salt });
+    return canonical === message ? { origin, account, salt } : null;
   } catch {
     return null;
   }
@@ -116,8 +105,7 @@ export function approveSppStorageUnlockRequest(input: {
   if (!Number.isSafeInteger(input.prepareGeneration) || input.prepareGeneration <= 0) return null;
   const challenge = parseSppStorageUnlockMessage(input.message);
   if (!challenge || challenge.account !== input.account) return null;
-  const expectedUses = challenge.purpose === 'create' ? 2 : 1;
-  if (input.uses !== expectedUses) return null;
+  if (input.uses !== 1 && input.uses !== 2) return null;
   const key = approvalKey(input.account, input.message, input.prepareGeneration);
   if (reserved.has(key)) return null;
   const token = crypto.randomUUID();
