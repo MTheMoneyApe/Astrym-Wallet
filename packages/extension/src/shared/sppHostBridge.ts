@@ -106,6 +106,8 @@ export const SppHostSignRequestSchema = z.object({
     address: z.string().min(56).max(56).optional(),
     networkPassphrase: z.string().min(1).max(200).optional(),
     prepareGeneration: z.number().int().positive(),
+    authorization: z.enum(['standard', 'storage_unlock']).optional(),
+    storageUnlockApprovalToken: z.string().uuid().optional(),
   }),
 });
 
