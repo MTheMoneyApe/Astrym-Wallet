@@ -525,8 +525,12 @@ function main(): void {
   };
   if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
     chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName !== 'local' || !changes[SPP_AUTO_PREPARE_INTENT_KEY]?.newValue) return;
-      processAutoPrepareIntent();
+      if (areaName !== 'local') return;
+      const newIntent = changes[SPP_AUTO_PREPARE_INTENT_KEY]?.newValue;
+      const newStatus = changes[SPP_PREPARE_STATUS_KEY]?.newValue as SppPrepareStatus | undefined;
+      if (newIntent || newStatus?.phase === 'opening_host') {
+        processAutoPrepareIntent();
+      }
     });
   }
   processAutoPrepareIntent();
