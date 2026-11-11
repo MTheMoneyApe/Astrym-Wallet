@@ -79,11 +79,22 @@ export function createSppKeyDerivationApprovalHandler(deps: {
     }
 
     const { address } = await resolveActiveStellarAddress(deps.keyManager);
-    const latest = await browser.storage.local.get(SPP_PREPARE_STATUS_KEY);
+    const [latest, latestNym, latestAccount] = await Promise.all([
+      browser.storage.local.get(SPP_PREPARE_STATUS_KEY),
+      Promise.resolve(getNymRuntimeController().getSnapshot()),
+      resolveActiveStellarAddress(deps.keyManager),
+    ]);
     const latestStatus = latest[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
-    const latestNym = getNymRuntimeController().getSnapshot();
-    if (latestStatus?.phase !== 'initializing_write_pool' || latestStatus.generation !== status.generation || latestNym.mode !== 'nym' || !latestNym.connected) {
-      throw Object.assign(new Error('SPP preparation changed before KDF approval.'), { name: 'UNAUTHORIZED' });
+    if (
+      latestStatus?.phase !== 'initializing_write_pool' ||
+      latestStatus.generation !== status.generation ||
+      latestNym.mode !== 'nym' ||
+      !latestNym.connected ||
+      latestAccount.address !== address
+    ) {
+      throw Object.assign(new Error('SPP preparation or active account changed before KDF approval.'), {
+        name: 'UNAUTHORIZED',
+      });
     }
     const accepted = approveSppKeyDerivationRequest(address, kdfDomain, status.generation);
     if (!accepted) {
