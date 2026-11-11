@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   storageGet: vi.fn(),
@@ -23,8 +23,10 @@ vi.mock('../../../src/background/trustedWalletOrigin.js', () => ({
   isSppHostDocumentSender: mocks.trustedHost,
 }));
 
-import { Networks } from '@stellar/stellar-sdk';
-import { createSppStorageUnlockMessage } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
+import {
+  createSppStorageUnlockMessage,
+  resetSppStorageUnlockApprovalsForTests,
+} from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 import { createSppStorageUnlockApprovalHandler } from '../../../src/background/handlers/sppStorageUnlockApprovalHandler.js';
 import {
   SPP_AUTO_PREPARE_INTENT_KEY,
@@ -37,6 +39,8 @@ const GENERATION = 24;
 const SALT = Buffer.alloc(32, 12).toString('base64');
 
 describe('SPP storage unlock approval handler', () => {
+  afterEach(() => resetSppStorageUnlockApprovalsForTests());
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.nymSnapshot.mockReturnValue({ mode: 'nym', connected: true });
