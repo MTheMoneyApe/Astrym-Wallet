@@ -388,6 +388,7 @@ export class SppHostController {
       // Publish the actual SppSession error state and lastErrorMessage even
       // when initialize rejects; otherwise popup storage remains stale.
       this._sessionInitializeEnabled = false;
+      this._sessionConstructError = bound.lastErrorMessage ?? sanitizeError(cause);
       this._emitBoundSessionChange();
       throw cause;
     }
