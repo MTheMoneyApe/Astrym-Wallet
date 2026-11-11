@@ -49,6 +49,11 @@ function isAndroidWebappRuntime(): boolean {
  */
 let extensionSppHostOpenInFlight: Promise<void> | null = null;
 
+/** Test helper: clear the in-flight lease after each isolated test. */
+export function resetSppHostOpenLockForTests(): void {
+  extensionSppHostOpenInFlight = null;
+}
+
 /**
  * Reuse an existing spp-host tab when possible (keeps OPFS / write-pool alive).
  *
