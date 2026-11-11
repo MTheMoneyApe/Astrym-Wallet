@@ -10,6 +10,14 @@ permissions:
 jobs:
   vercel-build:
     runs-on: ubuntu-24.04
+    # Keep the historical, content-addressed cc-rs input path stable. cc-rs
+    # hashes the absolute SQLite amalgamation source path into its .o filename;
+    # the archive member name then affects the linked WASM even when .o bytes
+    # are identical. These are the exact paths used by the approved T3 Build A.
+    env:
+      SPP_BUILD_ROOT: /tmp/spp-path-a/cache
+      CARGO_HOME: /tmp/spp-path-a/cargo
+      RUSTUP_HOME: /tmp/spp-path-a/rustup
     steps:
       # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -117,155 +125,15 @@ jobs:
           print(f"Wrote actual cc-rs build excerpts to {destination}")
           PY
 
-      - name: Repeat SPP build with a fresh Cargo target
-        if: always()
-        continue-on-error: true
-        env:
-          CC_ENABLE_DEBUG_OUTPUT: "1"
-          CARGO_TERM_VERBOSE: "true"
-          SPP_DIAGNOSTIC_LABEL: clean-rebuild
-          SPP_BUILD_ROOT: "${{ github.workspace }}/.cache/spp-upstream"
-          CARGO_TARGET_DIR: "${{ github.workspace }}/.cache/spp-upstream/clean-repro-target"
-        run: |
-          set -o pipefail
-          mkdir -p "$RUNNER_TEMP/spp-logs"
-          bash scripts/prepare-spp-runtime.sh 2>&1 | tee "$RUNNER_TEMP/spp-logs/clean-rebuild.txt"
-
-      - name: Repeat SPP build with isolated Cargo and Rustup homes
-        if: always()
-        continue-on-error: true
-        env:
-          CC_ENABLE_DEBUG_OUTPUT: "1"
-          CARGO_TERM_VERBOSE: "true"
-          SPP_DIAGNOSTIC_LABEL: isolated-homes
-        run: |
-          set -o pipefail
-          root="$GITHUB_WORKSPACE/.cache/spp-isolated-homes"
-          mkdir -p "$RUNNER_TEMP/spp-logs"
-          SPP_BUILD_ROOT="$root/cache" \
-          CARGO_HOME="$root/cargo" \
-          RUSTUP_HOME="$root/rustup" \
-          bash scripts/prepare-spp-runtime.sh 2>&1 | tee "$RUNNER_TEMP/spp-logs/isolated-homes.txt"
-
-      - name: Compare primary, clean-target, and isolated-home SPP builds
-        if: always()
-        continue-on-error: true
-        run: |
-          mkdir -p "$RUNNER_TEMP/spp-proof/manifest"
-          python3 - "$GITHUB_WORKSPACE/.cache/spp-upstream/diagnostics" "$RUNNER_TEMP/spp-proof/manifest/reproducibility.json" <<'PY'
-          import json, sys
-          from pathlib import Path
-
-          root, destination = Path(sys.argv[1]), Path(sys.argv[2])
-          labels = ("primary", "clean-rebuild", "isolated-homes")
-
-          def read_json(path):
-              return json.loads(path.read_text()) if path.is_file() else None
-
-          def trace_map(path, field):
-              rows = []
-              if path.is_file():
-                  for line in path.read_text().splitlines():
-                      event = json.loads(line)
-                      for item in event.get(field, []):
-                          if item.get("sha256"):
-                              rows.append((Path(item["path"]).name, item["sha256"], item["size"]))
-              return {name: {"sha256": sha, "size": size} for name, sha, size in rows}
-
-          def compare_maps(a, b):
-              if not a or not b:
-                  return {"status": "MISSING", "primary": a, "cleanRebuild": b}
-              return {
-                  "status": "MATCH" if a == b else "DIFFERENT",
-                  "primary": a,
-                  "cleanRebuild": b,
-              }
-
-          result = {"labels": {}, "comparisons": {}}
-          for label in labels:
-              folder = root / label
-              result["labels"][label] = {
-                  "wasmBindgen": read_json(folder / "raw-wasm.json"),
-                  "sqliteBuild": read_json(folder / "sqlite-build-report.json"),
-              }
-          for label in ("clean-rebuild", "isolated-homes"):
-              for tool in ("wasm-bindgen", "wasm-opt"):
-                  result["comparisons"][f"{tool}-primary-vs-{label}"] = compare_maps(
-                      trace_map(root / "primary" / f"{tool}.jsonl", "output_after"),
-                      trace_map(root / label / f"{tool}.jsonl", "output_after"),
-                  )
-              result["comparisons"][f"raw-rust-wasm-primary-vs-{label}"] = compare_maps(
-                  {
-                      k: {"sha256": v["sha256"], "size": v["size"]}
-                      for k, v in (read_json(root / "primary" / "raw-wasm.json") or {}).items()
-                      if isinstance(v, dict) and v.get("sha256") and v.get("size") is not None
-                  },
-                  {
-                      k: {"sha256": v["sha256"], "size": v["size"]}
-                      for k, v in (read_json(root / label / "raw-wasm.json") or {}).items()
-                      if isinstance(v, dict) and v.get("sha256") and v.get("size") is not None
-                  },
-              )
-              primary_toolchain = read_json(root / "primary" / "toolchain.json") or {}
-              other_toolchain = read_json(root / label / "toolchain.json") or {}
-              fields = ("sha256", "size", "version")
-              tool_names = ("rustc", "cargo", "rust-lld", "clang-wasm-target", "wasm-opt", "wasm-bindgen")
-              def stable_identity(report):
-                  return {
-                      name: {field: report.get(name, {}).get(field) for field in fields}
-                      for name in tool_names
-                      if isinstance(report.get(name), dict)
-                  }
-              result["comparisons"][f"toolchain-primary-vs-{label}"] = compare_maps(
-                  stable_identity(primary_toolchain),
-                  stable_identity(other_toolchain),
-              )
-              result["comparisons"][f"sqlite-static-archives-primary-vs-{label}"] = compare_maps(
-                  {
-                      Path(x["name"]).name: {"sha256": x["sha256"], "size": x["size"]}
-                      for x in (result["labels"]["primary"].get("sqliteBuild") or {}).get("archives", [])
-                  },
-                  {
-                      Path(x["name"]).name: {"sha256": x["sha256"], "size": x["size"]}
-                      for x in (result["labels"][label].get("sqliteBuild") or {}).get("archives", [])
-                  },
-              )
-          for name in ("raw-wasm.json", "sqlite-build-report.json"):
-              a = result["labels"]["primary"].get("wasmBindgen" if name == "raw-wasm.json" else "sqliteBuild")
-              b = result["labels"]["clean-rebuild"].get("wasmBindgen" if name == "raw-wasm.json" else "sqliteBuild")
-              if name == "raw-wasm.json":
-                  amap = {
-                      k: {"sha256": v["sha256"], "size": v["size"]}
-                      for k, v in (a or {}).items()
-                      if isinstance(v, dict) and v.get("sha256") and v.get("size") is not None
-                  }
-                  bmap = {
-                      k: {"sha256": v["sha256"], "size": v["size"]}
-                      for k, v in (b or {}).items()
-                      if isinstance(v, dict) and v.get("sha256") and v.get("size") is not None
-                  }
-                  result["comparisons"]["raw-rust-wasm"] = compare_maps(amap, bmap)
-              else:
-                  amap = {Path(x["name"]).name: {"sha256": x["sha256"], "size": x["size"]} for x in (a or {}).get("archives", [])}
-                  bmap = {Path(x["name"]).name: {"sha256": x["sha256"], "size": x["size"]} for x in (b or {}).get("archives", [])}
-                  result["comparisons"]["sqlite-static-archives"] = compare_maps(amap, bmap)
-          destination.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
-          print(json.dumps(result["comparisons"], indent=2, sort_keys=True))
-          PY
-
       - name: Capture all built SPP hashes before asserting pins
         if: always()
         run: |
           set -euo pipefail
           proof="$RUNNER_TEMP/spp-proof"
-          runtime=".cache/spp-upstream/stellar-private-payments/sdk/web"
+          runtime="$SPP_BUILD_ROOT/stellar-private-payments/sdk/web"
           mkdir -p "$proof/wasm" "$proof/manifest"
-          if [ -d ".cache/spp-upstream/diagnostics" ]; then
-            cp -a ".cache/spp-upstream/diagnostics" "$proof/"
-          fi
-          if [ -d ".cache/spp-isolated-homes/cache/diagnostics/isolated-homes" ]; then
-            mkdir -p "$proof/diagnostics/isolated-homes"
-            cp -a ".cache/spp-isolated-homes/cache/diagnostics/isolated-homes/." "$proof/diagnostics/isolated-homes/"
+          if [ -d "$SPP_BUILD_ROOT/diagnostics" ]; then
+            cp -a "$SPP_BUILD_ROOT/diagnostics" "$proof/"
           fi
           for entry in \
             "dist/stellar_private_payments_web_bg.wasm:main.wasm" \
@@ -290,11 +158,11 @@ jobs:
               printf '%s=%s\n' "$name" "${value:-<unset>}"
             done
             echo "=== rust toolchain ==="
-            if [ -x "$HOME/.cargo/bin/rustc" ]; then
-              "$HOME/.cargo/bin/rustc" +1.97.1 --version --verbose
-              "$HOME/.cargo/bin/cargo" +1.97.1 --version --verbose
+            if [ -x "$CARGO_HOME/bin/rustc" ]; then
+              "$CARGO_HOME/bin/rustc" +1.97.1 --version --verbose
+              "$CARGO_HOME/bin/cargo" +1.97.1 --version --verbose
             fi
-            wasm_opt="$runtime/../../target/tmp/binaryen/binaryen-version_131/bin/wasm-opt"
+            wasm_opt="$SPP_BUILD_ROOT/stellar-private-payments/target/tmp/binaryen/binaryen-version_131/bin/wasm-opt"
             if [ -x "$wasm_opt" ]; then "$wasm_opt" --version; fi
           } > "$proof/wasm/toolchain.txt"
           python3 - \
