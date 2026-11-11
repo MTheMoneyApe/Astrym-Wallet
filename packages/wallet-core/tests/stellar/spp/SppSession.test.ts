@@ -243,6 +243,8 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
     const runtime = createSppSdkRuntime({
       initWasm,
       Storage: { open },
+      openEncryptedStorage: ({ storageOpen, workerUrl }) =>
+        storageOpen({ workerUrl, keyProvider: async () => new Uint8Array(32) }),
       Client: { new: create as never },
     });
 
@@ -254,7 +256,7 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
     });
 
     expect(initWasm).toHaveBeenCalledWith(ASSETS.wasmUrl);
-    expect(open).toHaveBeenCalledWith({ workerUrl: ASSETS.storageWorkerUrl });
+    expect(open).toHaveBeenCalledWith({ workerUrl: ASSETS.storageWorkerUrl, keyProvider: expect.any(Function) });
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         rpcUrl: 'http://127.0.0.1:9/rpc',
@@ -278,6 +280,8 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
     const runtime = createSppSdkRuntime({
       initWasm: async () => undefined,
       Storage: { open: async () => storage as never },
+      openEncryptedStorage: ({ storageOpen, workerUrl }) =>
+        storageOpen({ workerUrl, keyProvider: async () => new Uint8Array(32) }),
       Client: { new: create as never },
       bootnodeRequired: async () => true,
     });
@@ -311,6 +315,8 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
     const runtime = createSppSdkRuntime({
       initWasm: async () => undefined,
       Storage: { open: async () => storage as never },
+      openEncryptedStorage: ({ storageOpen, workerUrl }) =>
+        storageOpen({ workerUrl, keyProvider: async () => new Uint8Array(32) }),
       Client: { new: create as never },
       bootnodeRequired: async () => true,
     });
