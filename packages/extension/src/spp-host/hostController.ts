@@ -382,7 +382,15 @@ export class SppHostController {
     if (!bound) {
       throw new Error('Construye la sesión SPP antes de inicializarla');
     }
-    await bound.initialize();
+    try {
+      await bound.initialize();
+    } catch (cause) {
+      // Publish the actual SppSession error state and lastErrorMessage even
+      // when initialize rejects; otherwise popup storage remains stale.
+      this._sessionInitializeEnabled = false;
+      this._emitBoundSessionChange();
+      throw cause;
+    }
     this._sessionInitializeEnabled = bound.state === 'ready';
     this._emitBoundSessionChange();
     // RO session is ready in this page. Write PrivatePool still requires
