@@ -5,6 +5,7 @@ import {
   createSppStorageUnlockMessage,
   SPP_STORAGE_DATABASE_ID,
   SPP_STORAGE_UNLOCK_RECORD_KEY,
+  SPP_STORAGE_UNLOCK_TTL_MS,
 } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 import type { SppHostRemoteSigner } from './sppHostRemoteSigner.js';
 
@@ -148,9 +149,11 @@ async function confirmStorageUnlock(details: {
     authorize.type = 'button';
     authorize.textContent = 'Autorizar firma de desbloqueo';
     authorize.style.cssText = 'padding:10px 16px;border-radius:10px;background:#155e75;color:white;font-weight:600';
+    let timeoutId: number | null = null;
     const finish = (accepted: boolean) => {
       if (!dialog.isConnected) return;
-      dialog.close();
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (dialog.open) dialog.close();
       dialog.remove();
       resolve(accepted);
     };
@@ -166,9 +169,9 @@ async function confirmStorageUnlock(details: {
     try {
       dialog.showModal();
       window.focus();
+      timeoutId = window.setTimeout(() => finish(false), SPP_STORAGE_UNLOCK_TTL_MS);
     } catch {
-      dialog.remove();
-      resolve(false);
+      finish(false);
     }
   });
 }
