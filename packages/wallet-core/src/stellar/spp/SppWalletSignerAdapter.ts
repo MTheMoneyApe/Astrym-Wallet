@@ -39,6 +39,7 @@ import {
   SppSignerError,
   assertSppSignatureStillPermitted,
   assertStellarTestnetPassphrase,
+  authorizeSppKeyDerivationSignature,
   authorizeSppSignature,
   type SppDigestSigner,
 } from './sppSignGate.js';
@@ -120,6 +121,43 @@ export class SppWalletSignerAdapter implements WalletSigner {
     });
   }
 
+  /**
+   * Sign only the exact upstream v3 privacy-key derivation message, after a
+   * separate one-shot approval from the trusted wallet UI. This path does not
+   * authorize transactions or turn on the broadcast gate.
+   */
+  async signKeyDerivationMessage(
+    message: string,
+    approvalToken: string,
+    opts?: SignOptions,
+  ): Promise<SignMessageResult> {
+    this._assertOptionalAddress(opts?.address);
+    this._assertNetworkOption(opts?.networkPassphrase);
+    if (typeof message !== 'string' || message.length === 0) {
+      throw new SppSignerError('KDF derivation message is required', 'INVALID_REQUEST');
+    }
+    const authorization = authorizeSppKeyDerivationSignature({
+      input: message,
+      boundAccount: this._stellarAddress,
+      networkPassphrase: this._networkPassphrase,
+      approvalToken,
+    });
+    this._permissionEpoch = authorization.permissionEpoch;
+    return this._withAuthorization(
+      'message',
+      authorization.digest,
+      async (assertBeforeSign) => {
+        assertBeforeSign();
+        const signature = await this._signDigest(authorization.digest, 'message', true);
+        return {
+          signedMessage: uint8ArrayToBase64(signature),
+          signerAddress: this._stellarAddress,
+        };
+      },
+      authorization.broadcastIndependent === true,
+    );
+  }
+
   async signTransaction(xdrInput: string, opts?: SignOptions): Promise<SignTransactionResult> {
     this._assertOptionalAddress(opts?.address);
     this._assertNetworkOption(opts?.networkPassphrase);
@@ -188,6 +226,7 @@ export class SppWalletSignerAdapter implements WalletSigner {
     kind: SignatureKind,
     digest: Uint8Array,
     fn: (assertBeforeSign: () => void) => Promise<T>,
+    allowApprovedKeyDerivation = false,
   ): Promise<T> {
     const context = this._buildContext(kind, digest);
     const approvable = this._gate as Partial<ContextualSignatureGate>;
@@ -207,7 +246,7 @@ export class SppWalletSignerAdapter implements WalletSigner {
       await this._assertBoundAccount();
       const assertBeforeSign = (): void => {
         this._gate.assertActive(lease, context);
-        assertSppSignatureStillPermitted(this._permissionEpoch);
+        assertSppSignatureStillPermitted(this._permissionEpoch, allowApprovedKeyDerivation);
       };
       return await fn(assertBeforeSign);
     } finally {
@@ -233,14 +272,18 @@ export class SppWalletSignerAdapter implements WalletSigner {
     return encoded;
   }
 
-  private async _signDigest(digest: Uint8Array, kind: SignatureKind): Promise<Uint8Array> {
-    assertSppSignatureStillPermitted(this._permissionEpoch);
+  private async _signDigest(
+    digest: Uint8Array,
+    kind: SignatureKind,
+    allowApprovedKeyDerivation = false,
+  ): Promise<Uint8Array> {
+    assertSppSignatureStillPermitted(this._permissionEpoch, allowApprovedKeyDerivation);
     const signature = this._digestSigner
       ? await this._digestSigner.signDigest(digest)
       : kind === 'message'
         ? await this._signer.signMessage(digest, this._accountIndex)
         : await this._signer.signTransaction(digest, this._accountIndex);
-    assertSppSignatureStillPermitted(this._permissionEpoch);
+    assertSppSignatureStillPermitted(this._permissionEpoch, allowApprovedKeyDerivation);
     return signature;
   }
 
