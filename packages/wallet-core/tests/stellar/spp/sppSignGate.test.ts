@@ -684,6 +684,7 @@ describe('SPP sign gate attack cases', () => {
       boundAccount: ACCOUNT,
       networkPassphrase: Networks.TESTNET,
       approvalToken: token,
+      prepareGeneration: generation,
     })).toThrow(/missing, expired, or bound/);
     expect(() => approveSppKeyDerivationRequest(ACCOUNT, 'Nethermind', generation)).toBe(false);
     expect(() => authorizeSppKeyDerivationSignature({
