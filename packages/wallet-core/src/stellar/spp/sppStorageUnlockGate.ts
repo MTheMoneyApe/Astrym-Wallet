@@ -35,17 +35,41 @@ function decodeBase64(value: string): Uint8Array {
   return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
 }
 
-function assertOrigin(origin: string): string {
+function parseExtensionOrigin(value: string): string {
   let parsed: URL;
   try {
-    parsed = new URL(origin);
+    parsed = new URL(value);
   } catch {
     throw new Error('Storage unlock origin is invalid');
   }
-  if (parsed.protocol !== 'chrome-extension:' || parsed.origin !== origin || parsed.pathname !== '/') {
+  // URL.origin serializes non-HTTP schemes such as chrome-extension: as
+  // "null" in standard URL implementations. Bind using the validated scheme
+  // and extension host instead of URL.origin.
+  if (
+    parsed.protocol !== 'chrome-extension:' ||
+    !/^[a-p]{32}$/.test(parsed.hostname) ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.port !== '' ||
+    parsed.search !== '' ||
+    parsed.hash !== ''
+  ) {
     throw new Error('Storage unlock is restricted to the exact Astrym extension origin');
   }
-  return origin;
+  return `chrome-extension://${parsed.hostname}`;
+}
+
+function assertOrigin(origin: string): string {
+  const canonical = parseExtensionOrigin(origin);
+  if (canonical !== origin) {
+    throw new Error('Storage unlock origin must be canonical');
+  }
+  return canonical;
+}
+
+/** Canonical extension origin from a full extension document URL. */
+export function sppStorageUnlockOriginFromUrl(url: string): string {
+  return parseExtensionOrigin(url);
 }
 
 /**
