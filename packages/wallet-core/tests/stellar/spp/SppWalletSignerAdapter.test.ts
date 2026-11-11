@@ -522,6 +522,41 @@ describe('SppWalletSignerAdapter hardening (offline)', () => {
     await vault.lock();
   });
 
+  it('discards a KDF signature if preparation is cancelled during signing', async () => {
+    const { signer, vault } = await unlockedStellarSigner();
+    const adapter = makeAdapter(signer);
+    setSppTestnetBroadcastAuthorized(false);
+    const prepareGeneration = 2026111106;
+    const waiting = waitForSppKeyDerivationApproval(
+      SEP0005_TV1_G,
+      NETHERMIND_PUBLIC_KDF_DOMAIN,
+      prepareGeneration,
+    );
+    expect(approveSppKeyDerivationRequest(
+      SEP0005_TV1_G,
+      NETHERMIND_PUBLIC_KDF_DOMAIN,
+      prepareGeneration,
+    )).toBe(true);
+    const token = await waiting;
+    const signSpy = vi.spyOn(signer, 'signMessage');
+    const validate = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new SppSignerError(
+        'SPP KDF preparation was invalidated',
+        'UNAUTHORIZED',
+      ));
+    await expect(adapter.signKeyDerivationMessage(
+      DERIVATION_MESSAGE,
+      token,
+      prepareGeneration,
+      { address: SEP0005_TV1_G, networkPassphrase: Networks.TESTNET },
+      validate,
+    )).rejects.toThrow(/preparation was invalidated/);
+    expect(validate).toHaveBeenCalledTimes(2);
+    expect(signSpy).toHaveBeenCalledOnce();
+    await vault.lock();
+  });
+
   it('signTransaction: extracts signature from XDR and verifies independently', async () => {
     const { signer, vault } = await unlockedStellarSigner();
     const adapter = makeAdapter(signer);
