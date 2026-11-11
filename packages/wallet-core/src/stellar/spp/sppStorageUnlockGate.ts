@@ -5,13 +5,12 @@ export const SPP_STORAGE_DATABASE_ID = 'spp.encrypted.db' as const;
 export const SPP_STORAGE_UNLOCK_RECORD_KEY = 'poolstellar_encrypted_storage_v1' as const;
 export const SPP_STORAGE_UNLOCK_TTL_MS = 120_000 as const;
 
-export type SppStorageUnlockPurpose = 'create' | 'open';
-
 export type SppStorageUnlockChallenge = {
   origin: string;
   account: string;
   salt: string;
-  purpose: SppStorageUnlockPurpose;
+  /** UI-only context; deliberately not signed so pending DB creation can be recovered. */
+  purpose: 'create' | 'open';
 };
 
 export type SppStorageUnlockAuthorization = {
@@ -75,7 +74,7 @@ export function parseSppStorageUnlockMessage(message: string): SppStorageUnlockC
   if (typeof message !== 'string' || message.length > 2_000) return null;
   const lines = message.split('\n');
   if (
-    lines.length !== 6 ||
+    lines.length !== 5 ||
     lines[0] !== 'Stellar Private Payments storage unlock v1' ||
     lines[1] !== `Database: ${SPP_STORAGE_DATABASE_ID}`
   ) return null;
@@ -127,7 +126,7 @@ export function approveSppStorageUnlockRequest(input: {
     account: input.account,
     message: input.message,
     generation: input.prepareGeneration,
-    usesRemaining: expectedUses,
+    usesRemaining: input.uses,
     expiresAtMs: (input.nowMs ?? Date.now()) + SPP_STORAGE_UNLOCK_TTL_MS,
   });
   return token;
