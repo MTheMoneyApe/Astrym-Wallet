@@ -136,6 +136,7 @@ export type SppSessionPrepInput = {
   contractConfig: unknown;
   circuitLock: unknown;
   bootnodeUrl?: string;
+  storageUnlock?: { userAddress: string; prepareGeneration: number };
 };
 
 export type ValidatedSppSessionPrep = {
@@ -143,6 +144,7 @@ export type ValidatedSppSessionPrep = {
   contractConfig: object;
   circuitLock: object;
   bootnodeUrl?: string;
+  storageUnlock?: { userAddress: string; prepareGeneration: number };
 };
 
 /**
@@ -182,6 +184,19 @@ export function validateSppSessionPrepInput(input: SppSessionPrepInput): Validat
     contractConfig: input.contractConfig,
     circuitLock: input.circuitLock,
   };
+  if (input.storageUnlock !== undefined) {
+    const userAddress = typeof input.storageUnlock.userAddress === 'string'
+      ? input.storageUnlock.userAddress.trim()
+      : '';
+    if (!userAddress || !Number.isSafeInteger(input.storageUnlock.prepareGeneration) ||
+        input.storageUnlock.prepareGeneration <= 0) {
+      throw new Error('storageUnlock requires a valid active Stellar address and prepare generation');
+    }
+    out.storageUnlock = {
+      userAddress,
+      prepareGeneration: input.storageUnlock.prepareGeneration,
+    };
+  }
   if (input.bootnodeUrl !== undefined) {
     const boot = typeof input.bootnodeUrl === 'string' ? input.bootnodeUrl.trim() : '';
     if (!boot) {
