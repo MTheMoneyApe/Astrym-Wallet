@@ -112,6 +112,7 @@ jobs:
             tests/background/spp/sppHostBridgeHandlers.test.ts \
             tests/background/spp/sppSignGate.test.ts \
             tests/background/spp/sppAutoPrepare.test.ts \
+            tests/background/handlers/sppStorageUnlockApprovalHandler.test.ts \
             tests/spp-host/sppHostRemoteSigner.test.ts \
             tests/spp-host/sppStorageKeyProvider.test.ts \
             2>&1 | tee "$RUNNER_TEMP/spp-logs/spp-extension-bridge-tests.txt"
