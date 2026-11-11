@@ -349,14 +349,14 @@ pin_binaryen() {
 pin_binaryen
 
 # Preserve each transformation boundary so a manifest mismatch can be attributed.
-DIAGNOSTIC_LABEL="\${SPP_DIAGNOSTIC_LABEL:-primary}"
+DIAGNOSTIC_LABEL="${SPP_DIAGNOSTIC_LABEL:-primary}"
 case "$DIAGNOSTIC_LABEL" in
   ""|*[!A-Za-z0-9._-]*) die "invalid SPP_DIAGNOSTIC_LABEL: $DIAGNOSTIC_LABEL" ;;
 esac
 DIAGNOSTIC_DIR="$BUILD_ROOT/diagnostics/$DIAGNOSTIC_LABEL"
 WRAPPER_DIR="$BUILD_ROOT/wrappers"
 SPP_WASM_TARGET="wasm32-unknown-unknown"
-SPP_BUILD_PROFILE="\${WASM_PROFILE:-release}"
+SPP_BUILD_PROFILE="${WASM_PROFILE:-release}"
 mkdir -p "$DIAGNOSTIC_DIR" "$WRAPPER_DIR"
 
 REAL_WASM_OPT="$SRC/target/tmp/binaryen/binaryen-version_131/bin/wasm-opt"

@@ -76,62 +76,46 @@ jobs:
           set -o pipefail
           pnpm build:webapp 2>&1 | tee "$RUNNER_TEMP/spp-logs/build-webapp.txt"
 
-      - name: Probe cc-rs 1.5.1 target compiler and archiver
+      - name: Extract actual cc-rs compiler evidence from the SPP build
         if: always()
         continue-on-error: true
-        env:
-          CC_ENABLE_DEBUG_OUTPUT: "1"
-          CARGO_TERM_VERBOSE: "true"
         run: |
           set -eu
-          export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-          export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
-          export PATH="$CARGO_HOME/bin:$PATH"
-          out="$RUNNER_TEMP/spp-proof/wasm/cc-rs-target-probe.txt"
-          mkdir -p "$(dirname "$out")"
-          probe="$RUNNER_TEMP/spp-cc-wasm-probe"
-          mkdir -p "$probe"
-          if [ ! -x "$CARGO_HOME/bin/cargo" ] || [ ! -x "$CARGO_HOME/bin/rustup" ]; then
-            echo "pinned cargo/rustup unavailable at CARGO_HOME=$CARGO_HOME" | tee "$out"
-            exit 1
-          fi
-          "$CARGO_HOME/bin/rustup" toolchain list | tee "$out"
-          "$CARGO_HOME/bin/rustc" +1.97.1 --version --verbose | tee -a "$out"
-          cat > "$probe/Cargo.toml" <<'EOF'
-          [package]
-          name = "spp-cc-wasm-probe"
-          version = "0.1.0"
-          edition = "2021"
-          build = "build.rs"
+          source="$RUNNER_TEMP/spp-logs/build-webapp.txt"
+          destination="$RUNNER_TEMP/spp-proof/wasm/cc-rs-actual-build.txt"
+          mkdir -p "$(dirname "$destination")"
+          python3 - "$source" "$destination" <<'PY'
+          import sys
+          from pathlib import Path
 
-          [build-dependencies]
-          cc = "=1.5.1"
-
-          [lib]
-          path = "lib.rs"
-          crate-type = ["rlib"]
-          EOF
-          cat > "$probe/build.rs" <<'EOF'
-          fn main() {
-              println!("cargo:rerun-if-changed=probe.c");
-              cc::Build::new().file("probe.c").compile("spp_cc_probe");
-          }
-          EOF
-          cat > "$probe/probe.c" <<'EOF'
-          int spp_cc_probe(void) { return 1; }
-          EOF
-          cat > "$probe/lib.rs" <<'EOF'
-          unsafe extern "C" { fn spp_cc_probe() -> i32; }
-          pub fn probe() -> i32 { unsafe { spp_cc_probe() } }
-          EOF
-          export CARGO_TARGET_DIR="$RUNNER_TEMP/spp-cc-wasm-target"
-          export CARGO_TERM_VERBOSE=true
-          export CC_ENABLE_DEBUG_OUTPUT=1
-          "$CARGO_HOME/bin/cargo" +1.97.1 build --offline --manifest-path "$probe/Cargo.toml" --target wasm32-unknown-unknown -vv > "$out" 2>&1
-          result=$?
-          cat "$out"
-          exit "$result"
-
+          source, destination = map(Path, sys.argv[1:])
+          if not source.is_file():
+              destination.write_text("Primary SPP build log is missing.\n")
+              raise SystemExit(0)
+          lines = source.read_text(errors="replace").splitlines()
+          needles = (
+              "sqlite-wasm-rs",
+              "CC_ENABLE_DEBUG_OUTPUT",
+              "cargo:warning=Compiler family detected",
+              "cargo:warning=ToolFamily",
+              "cargo:warning=running:",
+              "cargo:warning=ar:",
+              "Running \`cc\`",
+              "Running \`clang\`",
+              "running: ",
+              "OUT_DIR",
+              "wsqlite3",
+          )
+          selected = set()
+          for index, line in enumerate(lines):
+              if any(needle in line for needle in needles):
+                  selected.update(range(max(0, index - 2), min(len(lines), index + 3)))
+          if not selected:
+              destination.write_text("No cc-rs compiler invocation lines matched; inspect build-webapp.txt.\n")
+          else:
+              destination.write_text("\n".join(f"{i+1}: {lines[i]}" for i in sorted(selected)) + "\n")
+          print(f"Wrote actual cc-rs build excerpts to {destination}")
+          PY
 
       - name: Repeat SPP build with a fresh Cargo target
         if: always()
