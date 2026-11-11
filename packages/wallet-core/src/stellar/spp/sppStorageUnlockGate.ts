@@ -50,9 +50,7 @@ function parseExtensionOrigin(value: string): string {
     !/^[a-p]{32}$/.test(parsed.hostname) ||
     parsed.username !== '' ||
     parsed.password !== '' ||
-    parsed.port !== '' ||
-    parsed.search !== '' ||
-    parsed.hash !== ''
+    parsed.port !== ''
   ) {
     throw new Error('Storage unlock is restricted to the exact Astrym extension origin');
   }
