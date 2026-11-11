@@ -43,6 +43,7 @@ import {
 } from '../shared/sppHostBridge.js';
 import { createSppPrivatePaymentHandler } from './handlers/sppPrivatePaymentHandler.js';
 import { createSppKeyDerivationApprovalHandler } from './handlers/sppKeyDerivationApprovalHandler.js';
+import { createSppStorageUnlockApprovalHandler } from './handlers/sppStorageUnlockApprovalHandler.js';
 import {
   createSppAccountSnapshotHandler,
   createSppAccountSyncHandler,
@@ -192,6 +193,7 @@ function initBackgroundSynchronous() {
 
   router.registerHandler('SPP_PRIVATE_PAYMENT', createSppPrivatePaymentHandler({ keyManager }));
   router.registerHandler('SPP_AUTHORIZE_KEY_DERIVATION', createSppKeyDerivationApprovalHandler({ keyManager }));
+  router.registerHandler('SPP_AUTHORIZE_STORAGE_UNLOCK', createSppStorageUnlockApprovalHandler({ keyManager }));
   router.registerHandler('SPP_ACCOUNT_SNAPSHOT', createSppAccountSnapshotHandler());
   router.registerHandler('SPP_RECIPIENT_LOOKUP', createSppRecipientLookupHandler());
   router.registerHandler('SPP_REGISTER_PUBLIC_KEYS', createSppRegisterPublicKeysHandler({ keyManager }));
