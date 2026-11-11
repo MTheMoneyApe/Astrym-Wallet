@@ -13,6 +13,7 @@ import {
   Keypair,
   Networks,
   Operation,
+  StrKey,
   TransactionBuilder,
   nativeToScVal,
   xdr,
@@ -23,6 +24,7 @@ import { SoftwareSigner } from '../../../src/signer/SoftwareSigner.js';
 import {
   SppSignerError,
   SppWalletSignerAdapter,
+  verifySep53Signature,
 } from '../../../src/stellar/spp/SppWalletSignerAdapter.js';
 import { STELLAR_SIGNED_MESSAGE_PREFIX } from '../../../src/stellar/spp/sep53.js';
 import {
@@ -47,6 +49,11 @@ import {
   setSppTestnetBroadcastAuthorized,
 } from '../../../src/stellar/spp/sppBroadcastGate.js';
 import { NETHERMIND_PUBLIC_KDF_DOMAIN } from '../../../src/stellar/spp/nethermind/nethermindPublicTestnet.js';
+import {
+  approveSppStorageUnlockRequest,
+  createSppStorageUnlockMessage,
+  resetSppStorageUnlockApprovalsForTests,
+} from '../../../src/stellar/spp/sppStorageUnlockGate.js';
 import { PasswordUnlocker } from '../../../src/vault/PasswordUnlocker.js';
 import { VaultService } from '../../../src/vault/VaultService.js';
 import type { IPersistentStorage, ISessionStorage } from '../../../src/vault/IVaultStorage.js';
@@ -380,12 +387,45 @@ function buildPaymentXdr(source: string, networkPassphrase: string, dest?: strin
 describe('SppWalletSignerAdapter hardening (offline)', () => {
   beforeEach(() => {
     resetSppSignApprovalsForTests();
+    resetSppStorageUnlockApprovalsForTests();
     setSppPaymentIdentityChecksForTests(true);
     resetSppBroadcastGateForTests();
     setSppTestnetBroadcastAuthorized(true);
   });
   afterEach(() => {
     resetSppBroadcastGateForTests();
+    resetSppStorageUnlockApprovalsForTests();
+  });
+
+  it('signs the separately approved storage unlock challenge with broadcasts disabled', async () => {
+    const { signer, vault } = await unlockedStellarSigner();
+    const message = createSppStorageUnlockMessage({
+      origin: 'chrome-extension://peanjgnchnfcfaclipankhfkligmlklc',
+      account: SEP0005_TV1_G,
+      salt: Buffer.alloc(32, 4).toString('base64'),
+    });
+    const token = approveSppStorageUnlockRequest({
+      account: SEP0005_TV1_G,
+      message,
+      prepareGeneration: 91,
+      uses: 1,
+    });
+    expect(token).toBeTruthy();
+    setSppTestnetBroadcastAuthorized(false);
+    const adapter = makeAdapter(signer);
+    const result = await adapter.signStorageUnlockMessage(
+      message,
+      token!,
+      91,
+      { address: SEP0005_TV1_G, networkPassphrase: Networks.TESTNET },
+    );
+    expect(result.signerAddress).toBe(SEP0005_TV1_G);
+    expect(verifySep53Signature(
+      message,
+      result.signedMessage,
+      StrKey.decodeEd25519PublicKey(SEP0005_TV1_G),
+    )).toBe(true);
+    await vault.lock();
   });
 
   it('implements the official WalletSigner shape', async () => {
