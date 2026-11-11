@@ -34,7 +34,7 @@ import {
   waitForSppKeyDerivationApproval,
   assertSppSignatureStillPermitted,
   assertSppKeyDerivationSignatureStillPermitted,
-  revokeSppKeyDerivationApprovals,
+  revokeSppSignApprovals,
   sppEncryptionKeyChallenge,
   sppRegistrationDigest,
   sppRegistrationMessage,
@@ -723,7 +723,7 @@ describe('SPP sign gate attack cases', () => {
     const message = sppKeyDerivationMessage('Nethermind');
     const generation = 2026111102;
     const waiting = waitForSppKeyDerivationApproval(ACCOUNT, 'Nethermind', generation);
-    revokeSppKeyDerivationApprovals();
+    revokeSppSignApprovals();
     await expect(waiting).rejects.toThrow(/preparation was invalidated/);
 
     const nextGeneration = generation + 1;
@@ -737,7 +737,7 @@ describe('SPP sign gate attack cases', () => {
       approvalToken: token,
       prepareGeneration: nextGeneration,
     });
-    revokeSppKeyDerivationApprovals();
+    revokeSppSignApprovals();
     expect(() => assertSppKeyDerivationSignatureStillPermitted(authorization.keyDerivationEpoch))
       .toThrow(/preparation was invalidated/);
   });
