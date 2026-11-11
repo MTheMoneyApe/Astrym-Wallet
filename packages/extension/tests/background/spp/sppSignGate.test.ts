@@ -63,6 +63,7 @@ function signRequest(networkPassphrase?: string) {
       input: 'AAAA',
       address: 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6',
       ...(networkPassphrase !== undefined ? { networkPassphrase } : {}),
+      prepareGeneration: 1,
     },
   };
 }
