@@ -71,6 +71,7 @@ jobs:
         env:
           CC_ENABLE_DEBUG_OUTPUT: "1"
           CARGO_TERM_VERBOSE: "true"
+          SPP_DIAGNOSTIC_LABEL: primary
         run: |
           set -o pipefail
           pnpm build:webapp 2>&1 | tee "$RUNNER_TEMP/spp-logs/build-webapp.txt"
@@ -131,6 +132,82 @@ jobs:
           cat "$out"
           exit "$result"
 
+
+      - name: Repeat SPP build with a fresh Cargo target
+        if: always()
+        continue-on-error: true
+        env:
+          CC_ENABLE_DEBUG_OUTPUT: "1"
+          CARGO_TERM_VERBOSE: "true"
+          SPP_DIAGNOSTIC_LABEL: clean-rebuild
+          SPP_BUILD_ROOT: "\${{ github.workspace }}/.cache/spp-upstream"
+          CARGO_TARGET_DIR: "\${{ github.workspace }}/.cache/spp-upstream/clean-repro-target"
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/spp-logs"
+          bash scripts/prepare-spp-runtime.sh 2>&1 | tee "$RUNNER_TEMP/spp-logs/clean-rebuild.txt"
+
+      - name: Compare primary and clean-rebuild WASM stages
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/spp-proof/manifest"
+          python3 - "$GITHUB_WORKSPACE/.cache/spp-upstream/diagnostics" "$RUNNER_TEMP/spp-proof/manifest/reproducibility.json" <<'PY'
+          import json, sys
+          from pathlib import Path
+
+          root, destination = Path(sys.argv[1]), Path(sys.argv[2])
+          labels = ("primary", "clean-rebuild")
+
+          def read_json(path):
+              return json.loads(path.read_text()) if path.is_file() else None
+
+          def trace_map(path, field):
+              rows = []
+              if path.is_file():
+                  for line in path.read_text().splitlines():
+                      event = json.loads(line)
+                      for item in event.get(field, []):
+                          if item.get("sha256"):
+                              rows.append((Path(item["path"]).name, item["sha256"], item["size"]))
+              return {name: {"sha256": sha, "size": size} for name, sha, size in rows}
+
+          def compare_maps(a, b):
+              if not a or not b:
+                  return {"status": "MISSING", "primary": a, "cleanRebuild": b}
+              return {
+                  "status": "MATCH" if a == b else "DIFFERENT",
+                  "primary": a,
+                  "cleanRebuild": b,
+              }
+
+          result = {"labels": {}, "comparisons": {}}
+          for label in labels:
+              folder = root / label
+              result["labels"][label] = {
+                  "wasmBindgen": read_json(folder / "raw-wasm.json"),
+                  "sqliteBuild": read_json(folder / "sqlite-build-report.json"),
+              }
+          for tool in ("wasm-bindgen", "wasm-opt"):
+              result["comparisons"][tool] = compare_maps(
+                  trace_map(root / "primary" / f"{tool}.jsonl", "output_after"),
+                  trace_map(root / "clean-rebuild" / f"{tool}.jsonl", "output_after"),
+              )
+          for name in ("raw-wasm.json", "sqlite-build-report.json"):
+              a = result["labels"]["primary"].get("wasmBindgen" if name == "raw-wasm.json" else "sqliteBuild")
+              b = result["labels"]["clean-rebuild"].get("wasmBindgen" if name == "raw-wasm.json" else "sqliteBuild")
+              if name == "raw-wasm.json":
+                  amap = {k: v for k, v in (a or {}).items() if isinstance(v, dict) and v.get("sha256")}
+                  bmap = {k: v for k, v in (b or {}).items() if isinstance(v, dict) and v.get("sha256")}
+                  result["comparisons"]["raw-rust-wasm"] = compare_maps(amap, bmap)
+              else:
+                  amap = {Path(x["name"]).name: {"sha256": x["sha256"], "size": x["size"]} for x in (a or {}).get("archives", [])}
+                  bmap = {Path(x["name"]).name: {"sha256": x["sha256"], "size": x["size"]} for x in (b or {}).get("archives", [])}
+                  result["comparisons"]["sqlite-static-archives"] = compare_maps(amap, bmap)
+          destination.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+          print(json.dumps(result["comparisons"], indent=2, sort_keys=True))
+          PY
+
       - name: Capture all built SPP hashes before asserting pins
         if: always()
         run: |
@@ -138,6 +215,9 @@ jobs:
           proof="$RUNNER_TEMP/spp-proof"
           runtime=".cache/spp-upstream/stellar-private-payments/sdk/web"
           mkdir -p "$proof/wasm" "$proof/manifest"
+          if [ -d ".cache/spp-upstream/diagnostics" ]; then
+            cp -a ".cache/spp-upstream/diagnostics" "$proof/"
+          fi
           for entry in \
             "dist/stellar_private_payments_web_bg.wasm:main.wasm" \
             "dist/workers/prover-worker-module_bg.wasm:prover-worker.wasm" \
