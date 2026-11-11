@@ -43,10 +43,10 @@ export function installSppPrepareGenerationGuard(): void {
       !chrome.storage?.local || !chrome.storage.onChanged) return;
   prepareGenerationGuardInstalled = true;
 
-  chrome.storage.onChanged.addListener((changes, areaName) => {
+  chrome.storage.onChanged.addListener(async (changes, areaName) => {
     if (areaName !== 'local' ||
         (!changes[SPP_PREPARE_STATUS_KEY] && !changes[SPP_AUTO_PREPARE_INTENT_KEY])) return;
-    void (async () => {
+    try {
       const area = storageLocal();
       if (!area) return;
       const current = await area.get([SPP_PREPARE_STATUS_KEY, SPP_AUTO_PREPARE_INTENT_KEY]);
@@ -82,9 +82,9 @@ export function installSppPrepareGenerationGuard(): void {
       ) {
         await area.set({ [SPP_PREPARE_STATUS_KEY]: recovered });
       }
-    })().catch(() => {
+    } catch {
       // The KDF and signing paths still fail closed on status/intent mismatch.
-    });
+    }
   });
 }
 
