@@ -124,20 +124,19 @@ function openOrFocusExtensionSppHost(active: boolean): Promise<void> {
 }
 
 /** Internal worker open — not a user-facing navigation target. */
-export function openSppHostInternal(options?: OpenSppHostOptions): void {
+export function openSppHostInternal(options?: OpenSppHostOptions): Promise<void> {
   const active = options?.active === true;
   if (isExtensionHost()) {
-    void openOrFocusExtensionSppHost(active).catch(() => {
+    return openOrFocusExtensionSppHost(active).catch(() => {
       // Auto-prepare status remains non-ready; a later retry can safely reopen.
     });
-    return;
   }
 
   // Webapp / PWA: never rely on window.open after async Nym connect (popup blockers).
   // Run the host in-page so IPC shares the standalone wallet process.
   // Static import — dynamic import chunks were easy to miss under Vite webapp splitting.
   if (isAndroidWebappRuntime() || typeof window !== 'undefined') {
-    void ensureWebappSppHostAndPrepare().catch((cause: unknown) => {
+    return ensureWebappSppHostAndPrepare().catch((cause: unknown) => {
       const message =
         cause instanceof Error ? cause.message : 'Webapp SPP host embed failed';
       if (typeof chrome !== 'undefined' && chrome.storage?.local) {
@@ -151,7 +150,6 @@ export function openSppHostInternal(options?: OpenSppHostOptions): void {
         void chrome.storage.local.set({ [SPP_PREPARE_STATUS_KEY]: failed });
       }
     });
-    return;
   }
 
   // Last-resort (non-DOM contexts): named window.
@@ -160,6 +158,7 @@ export function openSppHostInternal(options?: OpenSppHostOptions): void {
     'astrym-spp-host',
     active ? 'noopener' : 'noopener,width=420,height=640',
   );
+  return Promise.resolve();
 }
 
 /** @deprecated Prefer {@link openSppHostInternal}; kept for lab tooling. */
