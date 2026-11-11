@@ -201,6 +201,8 @@ export class SppHostController {
   private _writeClient: Client | null = null;
   /** rpcUrl from last successful session construct (needed for Nym-proxied write init). */
   private _sessionRpcUrl: string | null = null;
+  /** Stellar account whose explicit signature unlocked the encrypted OPFS database. */
+  private _storageUnlockAddress: string | null = null;
   private readonly _deps: SppHostControllerDeps;
   private readonly _storageLab: SppStorageLabPrep;
 
@@ -269,6 +271,7 @@ export class SppHostController {
     this._sessionInitializeEnabled = false;
     this._writeClient = null;
     this._sessionRpcUrl = null;
+    this._storageUnlockAddress = null;
     clearSppHostWritePool('session cleared');
     this._emitBoundSessionChange();
   }
@@ -311,6 +314,7 @@ export class SppHostController {
       const deps = extractSppSdkRuntimeDepsFromLoadedFacade(this._facadeModule);
       this._writeClient = null;
       const storageUnlock = validated.storageUnlock;
+      this._storageUnlockAddress = storageUnlock?.userAddress ?? null;
       const storageSigner = storageUnlock
         ? new SppHostRemoteSigner({
             stellarAddress: storageUnlock.userAddress,
@@ -419,6 +423,11 @@ export class SppHostController {
     }
     if (!this._constructedSession || this._constructedSession.state !== 'ready') {
       throw new Error('Initialize the SPP RO session before creating a write pool');
+    }
+    if (!this._storageUnlockAddress || input.userAddress !== this._storageUnlockAddress) {
+      throw new Error(
+        'The active Stellar account does not match the account that unlocked SPP storage. Switch back to the storage owner before preparing the PrivatePool.',
+      );
     }
     if (!this._writeClient) {
       throw new Error(
