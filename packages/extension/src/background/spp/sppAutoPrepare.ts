@@ -175,7 +175,9 @@ export async function startSppAutoPrepareAfterNymConnect(): Promise<void> {
   }
 
   try {
-    await openSppHostInternal({ active: false });
+    // The host must be visible so its mandatory encrypted-storage consent dialog
+    // can be reviewed. Existing tabs are reused/focused by openSppHostInternal.
+    await openSppHostInternal({ active: true });
   } catch (cause) {
     await publishSppPrepareStatus({
       phase: 'failed',
