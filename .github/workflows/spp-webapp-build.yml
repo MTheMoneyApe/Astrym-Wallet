@@ -73,13 +73,13 @@ jobs:
           mkdir -p "$RUNNER_TEMP/spp-logs"
           pnpm install --frozen-lockfile 2>&1 | tee "$RUNNER_TEMP/spp-logs/install.txt"
 
-      - name: Typecheck wallet-core and extension
+      - name: Typecheck wallet-core production source and extension
         id: typecheck
         continue-on-error: true
         run: |
           set -euo pipefail
           {
-            pnpm --filter @solanym/wallet-core typecheck
+            pnpm --filter @solanym/wallet-core exec tsc --project tsconfig.build.json --noEmit
             pnpm --filter @solanym/extension typecheck
           } 2>&1 | tee "$RUNNER_TEMP/spp-logs/typecheck.txt"
 

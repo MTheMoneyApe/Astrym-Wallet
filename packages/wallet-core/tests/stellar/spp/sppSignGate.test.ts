@@ -34,7 +34,6 @@ import {
   waitForSppKeyDerivationApproval,
   assertSppSignatureStillPermitted,
   sppEncryptionKeyChallenge,
-  sppKeyDerivationMessage,
   sppRegistrationDigest,
   sppRegistrationMessage,
   sppStaleKeyDerivationMessageV2,
