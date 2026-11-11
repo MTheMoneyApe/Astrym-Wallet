@@ -28,6 +28,10 @@ import type { SoftwareSigner } from '../../signer/SoftwareSigner.js';
 import { uint8ArrayToBase64 } from '../transaction/StellarTransactionClient.js';
 import { hashSep53Message } from './sep53.js';
 import {
+  assertSppStorageUnlockSignatureStillPermitted,
+  authorizeSppStorageUnlockSignature,
+} from './sppStorageUnlockGate.js';
+import {
   digestToHex,
   type ContextualSignatureGate,
   type SignatureAuthContext,
@@ -170,6 +174,38 @@ export class SppWalletSignerAdapter implements WalletSigner {
       },
       authorization.broadcastIndependent === true,
     );
+  }
+
+  /**
+   * Sign the exact storage-key wrapping challenge under its own one-shot permit.
+   * This path is independent of KDF and transaction/broadcast approvals.
+   */
+  async signStorageUnlockMessage(
+    message: string,
+    approvalToken: string,
+    prepareGeneration: number,
+    opts?: SignOptions,
+  ): Promise<SignMessageResult> {
+    this._assertOptionalAddress(opts?.address);
+    this._assertNetworkOption(opts?.networkPassphrase);
+    if (typeof message !== 'string' || message.length === 0) {
+      throw new SppSignerError('Storage unlock message is required', 'INVALID_REQUEST');
+    }
+    const authorization = authorizeSppStorageUnlockSignature({
+      account: this._stellarAddress,
+      message,
+      prepareGeneration,
+      approvalToken,
+      networkPassphrase: this._networkPassphrase,
+    });
+    await this._assertBoundAccount();
+    assertSppStorageUnlockSignatureStillPermitted(authorization.permissionEpoch);
+    const signature = await this._signer.signMessage(authorization.digest, this._accountIndex);
+    assertSppStorageUnlockSignatureStillPermitted(authorization.permissionEpoch);
+    return {
+      signedMessage: uint8ArrayToBase64(signature),
+      signerAddress: this._stellarAddress,
+    };
   }
 
   async signTransaction(xdrInput: string, opts?: SignOptions): Promise<SignTransactionResult> {
