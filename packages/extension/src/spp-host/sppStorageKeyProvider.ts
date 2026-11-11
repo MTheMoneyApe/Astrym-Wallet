@@ -1,0 +1,303 @@
+import { ed25519 } from '@noble/curves/ed25519.js';
+import { StrKey } from '@stellar/stellar-sdk';
+import type { Storage, StorageOpenOptions } from 'stellar-private-payments';
+import { hashSep53Message } from '@solanym/wallet-core/src/stellar/spp/sep53.js';
+import {
+  createSppStorageUnlockMessage,
+  SPP_STORAGE_DATABASE_ID,
+  SPP_STORAGE_UNLOCK_RECORD_KEY,
+} from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
+import type { SppHostRemoteSigner } from './sppHostRemoteSigner.js';
+
+const DIRECTORY = '.opfs-sahpool-encrypted';
+const DIRECTORY_PREFIX = `${DIRECTORY}-`;
+const WRAP_INFO = 'spp.browser.storage-key-wrap.v1';
+const encoder = new TextEncoder();
+
+type StorageSignResult = { signedMessage: string; signerAddress: string };
+
+function encode(bytes: Uint8Array): string {
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 8_192) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 8_192));
+  }
+  return btoa(binary);
+}
+
+function decode(value: string): Uint8Array {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+    throw new Error('Invalid SPP storage key metadata encoding');
+  }
+  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+}
+
+function verifySignedMessage(account: string, message: string, signature: Uint8Array): boolean {
+  if (!StrKey.isValidEd25519PublicKey(account) || signature.byteLength !== 64) return false;
+  return ed25519.verify(signature, hashSep53Message(message), StrKey.decodeEd25519PublicKey(account));
+}
+
+async function hasExistingEncryptedDatabase(): Promise<boolean> {
+  const root = await navigator.storage.getDirectory();
+  for await (const [name, handle] of root.entries()) {
+    if (handle.kind !== 'directory' || (name !== DIRECTORY && !name.startsWith(DIRECTORY_PREFIX))) continue;
+    for await (const _entry of (handle as FileSystemDirectoryHandle).entries()) return true;
+  }
+  return false;
+}
+
+async function obtainApproval(input: {
+  message: string;
+  prepareGeneration: number;
+  uses: 1 | 2;
+}): Promise<string> {
+  const response = await chrome.runtime.sendMessage({
+    id: crypto.randomUUID(),
+    type: 'SPP_AUTHORIZE_STORAGE_UNLOCK',
+    payload: input,
+  }) as {
+    payload?: { approved?: boolean; approvalToken?: string };
+    error?: { message?: string };
+  } | undefined;
+  const token = response?.payload?.approvalToken;
+  if (response?.payload?.approved !== true || typeof token !== 'string') {
+    throw new Error(response?.error?.message || 'Storage unlock was not approved by the wallet background');
+  }
+  return token;
+}
+
+function confirmStorageUnlock(details: {
+  account: string;
+  origin: string;
+  message: string;
+  fresh: boolean;
+}): boolean {
+  const action = details.fresh ? 'CREATE a new encrypted SPP database' : 'UNLOCK the existing encrypted SPP database';
+  return globalThis.confirm(
+    `${action}\n\nAccount: ${details.account}\nOrigin: ${details.origin}\nDatabase: ${SPP_STORAGE_DATABASE_ID}\n\nThe wallet will sign this exact message only to wrap or recover a random database key. It does not derive SPP privacy keys, authorize transactions, enable payments, or broadcast.\n\n${details.message}\n\nContinue?`,
+  );
+}
+
+type StorageKeyRecord = {
+  version: 1;
+  address: string;
+  origin: string;
+  salt: string;
+  iv?: string;
+  envelope?: string;
+  pending: boolean;
+  directory?: string;
+};
+
+function readRecord(): StorageKeyRecord | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(localStorage.getItem(SPP_STORAGE_UNLOCK_RECORD_KEY) || 'null');
+  } catch (cause) {
+    throw new Error('Invalid SPP storage key metadata. Restore its encrypted backup before continuing.', { cause });
+  }
+  if (raw === null) return null;
+  const record = raw as Partial<StorageKeyRecord>;
+  let valid = false;
+  try {
+    valid = record.version === 1 &&
+      typeof record.address === 'string' &&
+      StrKey.isValidEd25519PublicKey(record.address) &&
+      record.origin === location.origin &&
+      typeof record.salt === 'string' &&
+      decode(record.salt).byteLength === 32 &&
+      typeof record.pending === 'boolean' &&
+      (record.pending === true ||
+        (typeof record.iv === 'string' && decode(record.iv).byteLength === 12 &&
+         typeof record.envelope === 'string' && decode(record.envelope).byteLength === 48));
+  } catch {
+    valid = false;
+  }
+  if (!valid) {
+    throw new Error('Invalid SPP storage key metadata. The existing database was preserved.');
+  }
+  return record as StorageKeyRecord;
+}
+
+/**
+ * Opens the encrypted SDK database using the upstream wallet-wrapped random key
+ * pattern. The key itself exists only in memory and is zeroed after Storage.open.
+ */
+export async function openSppEncryptedStorage(input: {
+  storageOpen: (options: StorageOpenOptions) => Promise<Storage>;
+  workerUrl: string;
+  signer: Pick<SppHostRemoteSigner, 'signStorageUnlockMessage'>;
+  activeStellarAddress: string;
+  prepareGeneration: number;
+}): Promise<Storage> {
+  if (typeof navigator.locks?.request !== 'function') {
+    throw new Error('SPP encrypted storage requires Web Locks; no signature or storage operation was started.');
+  }
+  return navigator.locks.request(SPP_STORAGE_UNLOCK_RECORD_KEY, { mode: 'exclusive' }, async () => {
+    const origin = location.origin;
+    if (!/^chrome-extension:\/\/[a-p]{32}$/.test(origin)) {
+      throw new Error('SPP storage unlock requires the exact packaged extension origin.');
+    }
+    if (!StrKey.isValidEd25519PublicKey(input.activeStellarAddress)) {
+      throw new Error('Unlock the Stellar vault before opening SPP storage.');
+    }
+
+    let record = readRecord();
+    const fresh = record === null;
+    if (fresh && await hasExistingEncryptedDatabase()) {
+      throw Object.assign(
+        new Error('Encrypted SPP data exists but its unlock metadata is missing. Restore the original encrypted metadata; existing data was not changed.'),
+        { code: 'storage-recovery-required' },
+      );
+    }
+    if (!record) {
+      record = {
+        version: 1,
+        address: input.activeStellarAddress,
+        origin,
+        salt: encode(crypto.getRandomValues(new Uint8Array(32))),
+        pending: true,
+      };
+    } else if (record.address !== input.activeStellarAddress) {
+      throw new Error(`Switch to the Stellar account originally used for SPP storage unlock (${record.address}). No signature was requested.`);
+    }
+
+    const message = createSppStorageUnlockMessage({
+      origin: record.origin,
+      account: record.address,
+      salt: record.salt,
+    });
+    if (!confirmStorageUnlock({
+      account: record.address,
+      origin,
+      message,
+      fresh,
+    })) {
+      throw Object.assign(new Error('SPP storage unlock cancelled by the user.'), { code: 'unlock-cancelled' });
+    }
+
+    const approvalToken = await obtainApproval({
+      message,
+      prepareGeneration: input.prepareGeneration,
+      uses: fresh ? 2 : 1,
+    });
+    const signatureResult = await input.signer.signStorageUnlockMessage(
+      message,
+      approvalToken,
+      { address: record.address },
+    );
+    if (signatureResult.signerAddress !== record.address) {
+      throw new Error('SPP storage unlock signature came from a different Stellar account.');
+    }
+    const signature = decode(signatureResult.signedMessage);
+    if (!verifySignedMessage(record.address, message, signature)) {
+      signature.fill(0);
+      throw new Error('SPP storage unlock signature failed local Ed25519 verification.');
+    }
+
+    let repeated: Uint8Array | null = null;
+    let key: Uint8Array | null = null;
+    try {
+      if (fresh) {
+        const repeatedResult: StorageSignResult = await input.signer.signStorageUnlockMessage(
+          message,
+          approvalToken,
+          { address: record.address },
+        );
+        repeated = decode(repeatedResult.signedMessage);
+        if (
+          repeatedResult.signerAddress !== record.address ||
+          !verifySignedMessage(record.address, message, repeated) ||
+          !repeated.every((byte, index) => byte === signature[index])
+        ) {
+          throw new Error('Wallet signatures must be reproducible to initialize encrypted SPP storage.');
+        }
+
+        const material = await crypto.subtle.importKey('raw', signature, 'HKDF', false, ['deriveKey']);
+        const wrappingKey = await crypto.subtle.deriveKey({
+          name: 'HKDF',
+          hash: 'SHA-256',
+          salt: decode(record.salt),
+          info: encoder.encode(WRAP_INFO),
+        }, material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+
+        key = crypto.getRandomValues(new Uint8Array(32));
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        record.iv = encode(iv);
+        record.envelope = encode(new Uint8Array(await crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv, additionalData: encoder.encode(message) },
+          wrappingKey,
+          key,
+        )));
+        record.pending = true;
+        // Persist the wrapped key before the first OPFS create attempt. This is
+        // what makes an interrupted creation recoverable without losing its key.
+        localStorage.setItem(SPP_STORAGE_UNLOCK_RECORD_KEY, JSON.stringify(record));
+      } else {
+        if (!record.iv || !record.envelope) {
+          throw new Error('SPP storage key envelope is incomplete; existing database was preserved.');
+        }
+        const material = await crypto.subtle.importKey('raw', signature, 'HKDF', false, ['deriveKey']);
+        const wrappingKey = await crypto.subtle.deriveKey({
+          name: 'HKDF',
+          hash: 'SHA-256',
+          salt: decode(record.salt),
+          info: encoder.encode(WRAP_INFO),
+        }, material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+        key = new Uint8Array(await crypto.subtle.decrypt({
+          name: 'AES-GCM',
+          iv: decode(record.iv),
+          additionalData: encoder.encode(message),
+        }, wrappingKey, decode(record.envelope)));
+      }
+      if (!key || key.byteLength !== 32) throw new Error('Invalid SPP database key envelope.');
+
+      const keyProvider = async (databaseId: string, purpose: 'create' | 'open') => {
+        if (databaseId !== SPP_STORAGE_DATABASE_ID) {
+          throw new Error('SPP storage key provider refused an unknown database identifier.');
+        }
+        if (purpose !== (record!.pending ? 'create' : 'open')) {
+          throw new Error('SPP storage open purpose does not match the protected database record.');
+        }
+        return key!;
+      };
+      const open = (createNew: boolean) => input.storageOpen({
+        workerUrl: input.workerUrl,
+        createNew,
+        keyProvider,
+      });
+
+      let storage: Storage;
+      if (record.pending) {
+        try {
+          storage = await open(true);
+        } catch (cause) {
+          if (!(cause instanceof Error) ||
+              !cause.message.includes('database create/open purpose does not match existing file')) {
+            throw cause;
+          }
+          storage = await input.storageOpen({
+            workerUrl: input.workerUrl,
+            createNew: false,
+            keyProvider: async (databaseId, purpose) => {
+              if (databaseId !== SPP_STORAGE_DATABASE_ID || purpose !== 'open') {
+                throw new Error('SPP storage recovery refused an unexpected database context.');
+              }
+              return key!;
+            },
+          });
+        }
+      } else {
+        storage = await open(false);
+      }
+      record.pending = false;
+      localStorage.setItem(SPP_STORAGE_UNLOCK_RECORD_KEY, JSON.stringify(record));
+      return storage;
+    } catch (cause) {
+      throw cause;
+    } finally {
+      signature.fill(0);
+      repeated?.fill(0);
+      key?.fill(0);
+    }
+  });
+}
