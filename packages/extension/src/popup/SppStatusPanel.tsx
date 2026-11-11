@@ -96,6 +96,16 @@ export function SppStatusPanel({
     setLocalBootnode(bootnodeUrl);
   }, [bootnodeUrl]);
 
+  const kdfDomain = useMemo(() => {
+    try {
+      const trimmed = localConfig.trim();
+      if (!trimmed) return getNethermindPublicTestnetContractConfig().kdf_domain;
+      return parseSppContractConfig(JSON.parse(trimmed) as unknown).kdf_domain;
+    } catch {
+      return getNethermindPublicTestnetContractConfig().kdf_domain;
+    }
+  }, [localConfig]);
+
   const ownership = useMemo(() => {
     if (prepareStatus?.deploymentOwnership && prepareStatus.deploymentLabel) {
       return {
@@ -292,6 +302,7 @@ export function SppStatusPanel({
           <SppAccountPanel
             preparePhase={prepareStatus?.phase ?? 'idle'}
             nymConnected={nymReady}
+            kdfDomain={kdfDomain}
           />
         </>
       ) : null}
