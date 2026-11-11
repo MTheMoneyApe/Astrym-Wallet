@@ -301,6 +301,9 @@ describe('buildSppSdkRuntimeFromDeps / extractSppSdkRuntimeDepsFromLoadedFacade'
     const runtime = buildSppSdkRuntimeFromDeps({
       initWasm,
       Storage: { open },
+      openEncryptedStorage: async () => {
+        throw new Error('wallet-authorized storage opener must be injected by the host');
+      },
       Client: { new: create },
     });
     expect(typeof runtime.createReadOnlyClient).toBe('function');
