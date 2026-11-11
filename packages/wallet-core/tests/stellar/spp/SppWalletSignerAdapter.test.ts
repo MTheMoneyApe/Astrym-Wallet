@@ -34,9 +34,11 @@ import {
   type SignatureLease,
 } from '../../../src/stellar/spp/signatureGate.js';
 import {
+  approveSppKeyDerivationRequest,
   mintSppSignApproval,
   resetSppSignApprovalsForTests,
   setSppPaymentIdentityChecksForTests,
+  waitForSppKeyDerivationApproval,
   sppKeyDerivationMessage,
   type SppSignIntent,
 } from '../../../src/stellar/spp/sppSignGate.js';
@@ -442,6 +444,36 @@ describe('SppWalletSignerAdapter hardening (offline)', () => {
       false,
     );
     await expect(adapter.signMessage('')).rejects.toThrow(/approval|derivation/i);
+    await vault.lock();
+  });
+
+  it('signs only the separately approved KDF message while the broadcast gate remains off', async () => {
+    const { signer, vault } = await unlockedStellarSigner();
+    const adapter = makeAdapter(signer);
+    const pub = await signer.getPublicKey(0);
+    setSppTestnetBroadcastAuthorized(false);
+
+    const waiting = waitForSppKeyDerivationApproval(SEP0005_TV1_G, NETHERMIND_PUBLIC_KDF_DOMAIN);
+    expect(approveSppKeyDerivationRequest(SEP0005_TV1_G, NETHERMIND_PUBLIC_KDF_DOMAIN)).toBe(true);
+    const token = await waiting;
+    const result = await adapter.signKeyDerivationMessage(DERIVATION_MESSAGE, token, {
+      address: SEP0005_TV1_G,
+      networkPassphrase: Networks.TESTNET,
+    });
+    const { signedMessage, signerAddress } = result as {
+      signedMessage: string;
+      signerAddress?: string;
+    };
+    expect(signerAddress).toBe(SEP0005_TV1_G);
+    expect(ed25519.verify(
+      b64ToBytes(signedMessage),
+      independentSep53Digest(DERIVATION_MESSAGE),
+      pub,
+    )).toBe(true);
+
+    // No general message, Soroban transaction, or auth-entry signature is opened.
+    await expect(adapter.signMessage(DERIVATION_MESSAGE)).rejects.toThrow(/SPP_BROADCAST_AWAITING_APPROVAL/);
+    await expect(adapter.signTransaction(buildTransactXdr())).rejects.toThrow(/SPP_BROADCAST_AWAITING_APPROVAL/);
     await vault.lock();
   });
 
