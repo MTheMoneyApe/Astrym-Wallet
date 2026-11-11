@@ -139,6 +139,14 @@ export type SppSdkRuntimeDeps = {
  * Intended for a browser extension page after dynamic-importing the packaged
  * `js/index.js` + wasm glue — not for Node unit tests.
  */
+async function closeStorageSafely(storage: Storage): Promise<void> {
+  try {
+    await storage.close();
+  } catch {
+    // Best effort only; an already-closed worker must not mask the real failure.
+  }
+}
+
 export function createSppSdkRuntime(deps: SppSdkRuntimeDeps): SppSessionRuntime {
   return {
     async createReadOnlyClient(args: SppCreateClientArgs): Promise<SppReadOnlyClient> {
@@ -192,14 +200,14 @@ export function createSppSdkRuntime(deps: SppSdkRuntimeDeps): SppSessionRuntime 
             } finally {
               // The base Storage handle owns the OPFS worker; Client only holds
               // forks, so release the base handle after disposing the SDK client.
-              void storage.close().catch(() => undefined);
+              void closeStorageSafely(storage);
             }
           },
         };
       } catch (cause) {
         // Failed bootnode checks / Client.new must not strand the encrypted
         // OPFS worker and prevent a later explicit unlock retry.
-        await storage.close().catch(() => undefined);
+        await closeStorageSafely(storage);
         throw cause;
       }
     },
