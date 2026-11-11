@@ -12,6 +12,7 @@ import { sendIpcMessage } from './ipc.js';
 
 export type SppAccountPanelProps = {
   preparePhase: string;
+  prepareGeneration: number;
   nymConnected: boolean;
   kdfDomain?: string;
   defaultLookupAddress?: string;
@@ -48,6 +49,7 @@ function stroopsToXlm(stroops: string | null): string {
 
 export function SppAccountPanel({
   preparePhase,
+  prepareGeneration,
   nymConnected,
   kdfDomain = getNethermindPublicTestnetContractConfig().kdf_domain,
   defaultLookupAddress = '',
@@ -134,6 +136,7 @@ export function SppAccountPanel({
     void sendIpcMessage('SPP_AUTHORIZE_KEY_DERIVATION', {
       acknowledgeHighRisk: true,
       kdfDomain,
+      prepareGeneration,
     })
       .then(() => {
         setDerivationNote(
