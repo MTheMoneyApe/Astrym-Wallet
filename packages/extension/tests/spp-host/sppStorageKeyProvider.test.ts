@@ -49,7 +49,7 @@ function fixture() {
   });
   vi.stubGlobal('location', { origin: ORIGIN });
   vi.stubGlobal('localStorage', records);
-  vi.stubGlobal('confirm', vi.fn(() => true));
+  const confirmUnlock = vi.fn(async () => true);
   const sendMessage = vi.fn(async () => ({
     payload: { approved: true, approvalToken: APPROVAL },
   }));
@@ -82,7 +82,7 @@ function fixture() {
     else databaseKey = new Uint8Array(key);
     return storage as never;
   });
-  return { values, sendMessage, signer, signatures, storageOpen, opened, storage };
+  return { values, sendMessage, signer, signatures, storageOpen, opened, storage, confirmUnlock };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -96,6 +96,7 @@ describe('openSppEncryptedStorage', () => {
       signer: f.signer,
       activeStellarAddress: ACCOUNT,
       prepareGeneration: 10,
+      confirmUnlock: f.confirmUnlock,
     });
     expect(first).toBe(f.storage);
     expect(f.storageOpen).toHaveBeenCalledOnce();
@@ -121,6 +122,7 @@ describe('openSppEncryptedStorage', () => {
       signer: f.signer,
       activeStellarAddress: ACCOUNT,
       prepareGeneration: 11,
+      confirmUnlock: f.confirmUnlock,
     });
     expect(f.opened[1]!.createNew).toBe(false);
     expect(f.opened[1]!.key).toEqual(f.opened[0]!.key);
@@ -132,13 +134,13 @@ describe('openSppEncryptedStorage', () => {
 
   it('does not sign or open storage when the user cancels', async () => {
     const f = fixture();
-    vi.stubGlobal('confirm', vi.fn(() => false));
     await expect(openSppEncryptedStorage({
       storageOpen: f.storageOpen as never,
       workerUrl: `${ORIGIN}/spp/dist/workers/storage-worker.js`,
       signer: f.signer,
       activeStellarAddress: ACCOUNT,
       prepareGeneration: 12,
+      confirmUnlock: async () => false,
     })).rejects.toMatchObject({ code: 'unlock-cancelled' });
     expect(f.sendMessage).not.toHaveBeenCalled();
     expect(f.signer.signStorageUnlockMessage).not.toHaveBeenCalled();
@@ -162,6 +164,7 @@ describe('openSppEncryptedStorage', () => {
       signer: f.signer,
       activeStellarAddress: ACCOUNT,
       prepareGeneration: 13,
+      confirmUnlock: f.confirmUnlock,
     })).rejects.toMatchObject({ code: 'storage-recovery-required' });
     expect(f.storageOpen).not.toHaveBeenCalled();
     expect(f.signer.signStorageUnlockMessage).not.toHaveBeenCalled();
@@ -184,6 +187,7 @@ describe('openSppEncryptedStorage', () => {
       signer: f.signer,
       activeStellarAddress: StrKey.encodeEd25519PublicKey(ed25519.getPublicKey(new Uint8Array(32).fill(24))),
       prepareGeneration: 14,
+      confirmUnlock: f.confirmUnlock,
     })).rejects.toThrow(/Switch to the Stellar account/);
     expect(f.storageOpen).not.toHaveBeenCalled();
     expect(f.signer.signStorageUnlockMessage).not.toHaveBeenCalled();
