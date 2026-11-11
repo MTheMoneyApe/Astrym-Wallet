@@ -25,7 +25,11 @@ import { installSppHostBridgeListener } from './sppHostBridgeListener.js';
 import { runSppHostAutoPrepareIfRequested } from './sppHostAutoPrepare.js';
 import { readHostLabSppIntegrationSnapshot } from './sppIntegrationProbe.js';
 import { STORAGE_LAB_EXECUTION_AUTHORIZED } from './storageLabPrep.js';
-import { SPP_PREPARE_STATUS_KEY, type SppPrepareStatus } from '../shared/sppPrepareStatus.js';
+import {
+  SPP_AUTO_PREPARE_INTENT_KEY,
+  SPP_PREPARE_STATUS_KEY,
+  type SppPrepareStatus,
+} from '../shared/sppPrepareStatus.js';
 
 // SW ↔ host private-payment bridge (no secrets on the channel).
 installSppHostBridgeListener();
@@ -504,18 +508,28 @@ function main(): void {
     })();
   });
 
-  // Wallet-driven auto-prepare (no user navigation). Manual lab buttons remain available.
-  void runSppHostAutoPrepareIfRequested(controller)
-    .then(() => {
-      render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
-      statusBoot.textContent =
-        'Host listo (auto-prepare consumido o ausente). Lab manual sigue disponible.';
-    })
-    .catch((err: unknown) => {
-      statusBoot.textContent =
-        err instanceof Error ? err.message : 'Auto-prepare SPP falló';
-      render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
+  // Wallet-driven auto-prepare (no user navigation). The tab may be reused,
+  // so listen for newer service-worker-owned intents instead of requiring reload.
+  const processAutoPrepareIntent = (): void => {
+    void runSppHostAutoPrepareIfRequested(controller)
+      .then(() => {
+        render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
+        statusBoot.textContent =
+          'Host listo (auto-prepare consumido o ausente). Lab manual sigue disponible.';
+      })
+      .catch((err: unknown) => {
+        statusBoot.textContent =
+          err instanceof Error ? err.message : 'Auto-prepare SPP falló';
+        render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
+      });
+  };
+  if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'local' || !changes[SPP_AUTO_PREPARE_INTENT_KEY]?.newValue) return;
+      processAutoPrepareIntent();
     });
+  }
+  processAutoPrepareIntent();
 }
 
 try {
