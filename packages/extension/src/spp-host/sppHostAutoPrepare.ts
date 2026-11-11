@@ -425,11 +425,7 @@ async function runSppHostAutoPrepareForIntent(
         if (!(publishCause instanceof SppPrepareSupersededError)) throw publishCause;
       });
     }
-  } finally {
-    // Intentionally leave the intent generation in storage. Only the
-    // service worker may replace/clear it, avoiding a racy host-side delete.
   }
-}
 
 let activePrepareGeneration: number | null = null;
 let activePreparePromise: Promise<void> | null = null;
