@@ -77,9 +77,7 @@ export function createNymDisconnectHandler() {
   return async (
     _payload: ValidatedRequestPayload<'NYM_DISCONNECT'>,
   ): Promise<ValidatedResponsePayload<'NYM_DISCONNECT'>> => {
-    // Revoke in-memory one-shot KDF permits synchronously before async Nym teardown.
-    revokeSppSignApprovals();
-    // Revoke one-shot KDF permits before asynchronous Nym teardown begins.
+    // Revoke one-shot SPP/KDF permits synchronously before async Nym teardown.
     revokeSppSignApprovals();
     clearSppPrivatePool();
     await clearSppAutoPrepareOnNymDisconnect();
