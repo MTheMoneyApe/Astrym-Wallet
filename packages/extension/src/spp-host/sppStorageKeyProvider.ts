@@ -344,12 +344,12 @@ export async function openSppEncryptedStorage(input: {
         if (!record.iv || !record.envelope) {
           throw new Error('SPP storage key envelope is incomplete; existing database was preserved.');
         }
-        const material = await crypto.subtle.importKey('raw', signature, 'HKDF', false, ['deriveKey']);
+        const material = await crypto.subtle.importKey('raw', toArrayBuffer(signature), 'HKDF', false, ['deriveKey']);
         const wrappingKey = await crypto.subtle.deriveKey({
           name: 'HKDF',
           hash: 'SHA-256',
-          salt: decode(record.salt),
-          info: encoder.encode(WRAP_INFO),
+          salt: toArrayBuffer(decode(record.salt)),
+          info: toArrayBuffer(encoder.encode(WRAP_INFO)),
         }, material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
         key = new Uint8Array(await crypto.subtle.decrypt({
           name: 'AES-GCM',
