@@ -3,6 +3,7 @@
  * Signatures and HTTP bodies only — never seeds or private keys on the wire.
  */
 
+import browser from 'webextension-polyfill';
 import type { SoftwareSigner } from '@solanym/wallet-core/src/signer/SoftwareSigner.js';
 import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import { SppWalletSignerAdapter } from '@solanym/wallet-core/src/stellar/spp/SppWalletSignerAdapter.js';
@@ -26,6 +27,7 @@ import {
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
 import { isSppHostDocumentSender } from '../trustedWalletOrigin.js';
 import { resolveActiveStellarAddress } from './sppBoundAccount.js';
+import { SPP_PREPARE_STATUS_KEY, type SppPrepareStatus } from '../../shared/sppPrepareStatus.js';
 
 /** Testnet passphrase (keep in sync with Networks.TESTNET). */
 const STELLAR_TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
@@ -190,7 +192,14 @@ export async function handleSppHostSignRequest(
     // requires the Testnet broadcast gate and the normal single-use intent.
     const kdfDomain = kind === 'message' ? sppKeyDerivationDomainFromMessage(input) : null;
     const kdfApprovalToken = kdfDomain
-      ? await waitForSppKeyDerivationApproval(address, kdfDomain)
+      ? await (async () => {
+          const stored = await browser.storage.local.get(SPP_PREPARE_STATUS_KEY);
+          const current = stored[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+          if (current?.phase !== 'initializing_write_pool' || !Number.isSafeInteger(current.generation) || current.generation <= 0) {
+            throw new Error('SPP KDF signing requires the current write-pool preparation');
+          }
+          return waitForSppKeyDerivationApproval(address, kdfDomain, current.generation);
+        })()
       : null;
     if (!kdfApprovalToken && !isSppTestnetBroadcastAuthorized()) {
       const revoked = revokeSppSignApprovals();
@@ -217,7 +226,21 @@ export async function handleSppHostSignRequest(
     switch (kind) {
       case 'message': {
         const result = kdfApprovalToken
-          ? await adapter.signKeyDerivationMessage(input, kdfApprovalToken, { address, networkPassphrase })
+          ? await adapter.signKeyDerivationMessage(
+              input, kdfApprovalToken, request.payload.prepareGeneration,
+              { address, networkPassphrase },
+              async () => {
+                const [stored, nym, active] = await Promise.all([
+                  browser.storage.local.get(SPP_PREPARE_STATUS_KEY),
+                  Promise.resolve(getNymRuntimeController().getSnapshot()),
+                  resolveActiveStellarAddress(deps.keyManager),
+                ]);
+                const current = stored[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+                if (current?.phase !== 'initializing_write_pool' || current.generation !== request.payload.prepareGeneration || nym.mode !== 'nym' || !nym.connected || active.address !== address) {
+                  throw new Error('SPP KDF preparation changed or was cancelled before signing');
+                }
+              },
+            )
           : await adapter.signMessage(input, { address, networkPassphrase });
         signatureBase64 =
           typeof result === 'string' ? result : result.signedMessage;
