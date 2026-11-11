@@ -44,6 +44,9 @@ import {
 import { initializeSppHostWritePool } from './sppHostWritePoolFactory.js';
 import { NETHERMIND_PUBLIC_TESTNET_SOURCE_COMMIT } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import type { Client } from 'stellar-private-payments';
+import { Networks } from '@stellar/stellar-sdk';
+import { SppHostRemoteSigner } from './sppHostRemoteSigner.js';
+import { openSppEncryptedStorage } from './sppStorageKeyProvider.js';
 import {
   SppStorageLabPrep,
   type StorageLabEvidence,
@@ -307,8 +310,28 @@ export class SppHostController {
       const validated = validateSppSessionPrepInput(prep);
       const deps = extractSppSdkRuntimeDepsFromLoadedFacade(this._facadeModule);
       this._writeClient = null;
+      const storageUnlock = validated.storageUnlock;
+      const storageSigner = storageUnlock
+        ? new SppHostRemoteSigner({
+            stellarAddress: storageUnlock.userAddress,
+            networkPassphrase: Networks.TESTNET,
+            prepareGeneration: storageUnlock.prepareGeneration,
+          })
+        : null;
       const runtime = buildSppSdkRuntimeFromDeps({
         ...deps,
+        openEncryptedStorage: async ({ storageOpen, workerUrl }) => {
+          if (!storageSigner || !storageUnlock) {
+            throw new Error('SPP encrypted storage requires an active account and explicit unlock context');
+          }
+          return openSppEncryptedStorage({
+            storageOpen,
+            workerUrl,
+            signer: storageSigner,
+            activeStellarAddress: storageUnlock.userAddress,
+            prepareGeneration: storageUnlock.prepareGeneration,
+          });
+        },
         onClientCreated: (client) => {
           this._writeClient = client;
         },
