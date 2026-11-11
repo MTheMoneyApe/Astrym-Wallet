@@ -81,6 +81,9 @@ export function extractSppSdkRuntimeDepsFromLoadedFacade(
     Storage: {
       open: (options) => StorageNs.open(options),
     },
+    openEncryptedStorage: async () => {
+      throw new Error('SPP host has not configured the wallet-authorized encrypted storage opener');
+    },
     Client: {
       new: (options) => ClientNs.new(options),
     },
