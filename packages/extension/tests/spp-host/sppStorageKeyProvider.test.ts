@@ -53,7 +53,7 @@ function fixture() {
     locks: fakeLockManager(),
     storage: { getDirectory: async () => directory },
   });
-  vi.stubGlobal('location', { origin: ORIGIN });
+  vi.stubGlobal('location', { origin: ORIGIN, href: `${ORIGIN}/spp-host.html` });
   vi.stubGlobal('localStorage', records);
   const confirmUnlock = vi.fn(async () => true);
   const sendMessage = vi.fn(async () => ({
