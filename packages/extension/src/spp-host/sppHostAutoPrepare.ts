@@ -354,6 +354,17 @@ async function runSppHostAutoPrepareForIntent(
       updatedAt: Date.now(),
     });
 
+    const previousSession = controller.snapshot();
+    // A failed or merely constructed session owns a signer bound to the old
+    // preparation generation. Rebuild it before retrying so the storage
+    // unlock permit can only be minted for the current generation.
+    if (
+      previousSession.sessionBound &&
+      (previousSession.sessionState === 'error' || previousSession.sessionState === 'uninitialized')
+    ) {
+      controller.clearBoundSession();
+    }
+
     if (!controller.snapshot().sessionBound) {
       controller.constructAndAttachUninitializedSession({
         rpcUrl,
