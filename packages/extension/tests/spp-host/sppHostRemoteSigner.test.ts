@@ -57,6 +57,7 @@ describe('SppHostRemoteSigner', () => {
     const signer = new SppHostRemoteSigner({
       stellarAddress,
       networkPassphrase: 'Test SDF Network ; September 2015',
+      prepareGeneration: 77,
       send,
     });
 
@@ -73,6 +74,7 @@ describe('SppHostRemoteSigner', () => {
     });
     expect(send).toHaveBeenCalledOnce();
     expect(send.mock.calls[0]![0].payload.kind).toBe('transaction');
+    expect(send.mock.calls[0]![0].payload.prepareGeneration).toBe(77);
   });
 
   it('fails closed when SW refuses', async () => {
@@ -87,6 +89,7 @@ describe('SppHostRemoteSigner', () => {
     const signer = new SppHostRemoteSigner({
       stellarAddress,
       networkPassphrase: 'Test SDF Network ; September 2015',
+      prepareGeneration: 78,
       send,
     });
     await expect(signer.signMessage('hi')).rejects.toThrow(/NYM_REQUIRED/);
@@ -97,6 +100,7 @@ describe('SppHostRemoteSigner', () => {
     const signer = new SppHostRemoteSigner({
       stellarAddress,
       networkPassphrase: Networks.TESTNET,
+      prepareGeneration: 79,
       send,
     });
     await expect(runWithSppHostFeeScope({
