@@ -755,7 +755,7 @@ describe('SPP sign gate attack cases', () => {
       prepareGeneration: generation,
     });
     expect(approveSppKeyDerivationRequest(ACCOUNT, 'Nethermind', generation)).toBe(false);
-    expect(waitForSppKeyDerivationApproval(ACCOUNT, 'Nethermind', generation))
+    await expect(waitForSppKeyDerivationApproval(ACCOUNT, 'Nethermind', generation))
       .rejects.toThrow(/already granted or consumed/);
   });
   it('allowlists Testnet and rejects Public and Futurenet', () => {
