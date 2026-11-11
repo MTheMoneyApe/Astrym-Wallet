@@ -11,6 +11,7 @@ import {
 } from '../spp/sppAutoPrepare.js';
 import { clearSppPrivatePool } from '../spp/sppPrivatePoolRegistry.js';
 import { revokeSppSignApprovals } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { revokeSppStorageUnlockApprovals } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 
 async function notifySppHostCleared(message: string): Promise<void> {
   try {
@@ -84,6 +85,7 @@ export function createNymDisconnectHandler() {
   ): Promise<ValidatedResponsePayload<'NYM_DISCONNECT'>> => {
     // Revoke one-shot SPP/KDF permits synchronously before async Nym teardown.
     revokeSppSignApprovals();
+    revokeSppStorageUnlockApprovals();
     clearSppPrivatePool();
     await clearSppAutoPrepareOnNymDisconnect();
     await notifySppHostCleared('Nym disconnected');
@@ -119,6 +121,7 @@ export function createNymSetModeHandler() {
     // Leaving Nym invalidates approvals and clears both the SW registry and host pool.
     if (payload.mode !== 'nym') {
       revokeSppSignApprovals();
+      revokeSppStorageUnlockApprovals();
       clearSppPrivatePool();
       await clearSppAutoPrepareOnNymDisconnect();
       await notifySppHostCleared('Nym mode disabled; SPP paused');
