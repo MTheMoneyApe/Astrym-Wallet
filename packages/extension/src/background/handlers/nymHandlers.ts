@@ -13,10 +13,10 @@ import {
 import { clearSppPrivatePool } from '../spp/sppPrivatePoolRegistry.js';
 import { revokeSppSignApprovals } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 
-function notifySppHostCleared(message: string): void {
+async function notifySppHostCleared(message: string): Promise<void> {
   try {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-      void chrome.runtime.sendMessage({
+      await chrome.runtime.sendMessage({
         channel: SPP_HOST_BRIDGE_CHANNEL,
         type: 'SPP_HOST_POOL_LIFECYCLE',
         generation: Date.now(),
@@ -83,7 +83,7 @@ export function createNymDisconnectHandler() {
     revokeSppSignApprovals();
     clearSppPrivatePool();
     await clearSppAutoPrepareOnNymDisconnect();
-    notifySppHostCleared('Nym disconnected');
+    await notifySppHostCleared('Nym disconnected');
     const snap = await getNymRuntimeController().disconnect();
     return toSnapshot(snap);
   };
@@ -118,7 +118,7 @@ export function createNymSetModeHandler() {
       revokeSppSignApprovals();
       clearSppPrivatePool();
       await clearSppAutoPrepareOnNymDisconnect();
-      notifySppHostCleared('Nym mode disabled; SPP paused');
+      await notifySppHostCleared('Nym mode disabled; SPP paused');
     }
     // Direct is the default Horizon path. Nym mode stays fail-closed (no silent clearnet).
     ctrl.setMode(payload.mode);
