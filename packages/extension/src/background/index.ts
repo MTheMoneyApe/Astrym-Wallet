@@ -42,6 +42,7 @@ import {
   parseSppHostSignRequest,
 } from '../shared/sppHostBridge.js';
 import { createSppPrivatePaymentHandler } from './handlers/sppPrivatePaymentHandler.js';
+import { createSppKeyDerivationApprovalHandler } from './handlers/sppKeyDerivationApprovalHandler.js';
 import {
   createSppAccountSnapshotHandler,
   createSppAccountSyncHandler,
@@ -188,6 +189,7 @@ function initBackgroundSynchronous() {
   router.registerHandler('CONFIRM_STELLAR_TRANSFER', createConfirmStellarTransferHandler(stellarTransferConfirmationTracker) as any);
 
   router.registerHandler('SPP_PRIVATE_PAYMENT', createSppPrivatePaymentHandler({ keyManager }));
+  router.registerHandler('SPP_AUTHORIZE_KEY_DERIVATION', createSppKeyDerivationApprovalHandler({ keyManager }));
   router.registerHandler('SPP_ACCOUNT_SNAPSHOT', createSppAccountSnapshotHandler());
   router.registerHandler('SPP_RECIPIENT_LOOKUP', createSppRecipientLookupHandler());
   router.registerHandler('SPP_REGISTER_PUBLIC_KEYS', createSppRegisterPublicKeysHandler({ keyManager }));
