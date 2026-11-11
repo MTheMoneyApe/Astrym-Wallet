@@ -99,6 +99,8 @@ jobs:
           pnpm --filter @solanym/wallet-core exec vitest run \
             tests/stellar/spp/sppSignGate.test.ts \
             tests/stellar/spp/SppWalletSignerAdapter.test.ts \
+            tests/stellar/spp/sppStorageUnlockGate.test.ts \
+            tests/stellar/spp/SppSession.test.ts \
             2>&1 | tee "$RUNNER_TEMP/spp-logs/spp-signer-tests.txt"
 
       - name: Run focused SPP extension bridge tests
@@ -111,6 +113,7 @@ jobs:
             tests/background/spp/sppSignGate.test.ts \
             tests/background/spp/sppAutoPrepare.test.ts \
             tests/spp-host/sppHostRemoteSigner.test.ts \
+            tests/spp-host/sppStorageKeyProvider.test.ts \
             2>&1 | tee "$RUNNER_TEMP/spp-logs/spp-extension-bridge-tests.txt"
 
       - name: Build
