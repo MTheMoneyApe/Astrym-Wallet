@@ -114,7 +114,7 @@ export function createNymSetModeHandler() {
     const ctrl = getNymRuntimeController();
     const previous = ctrl.getSnapshot();
     // Leaving Nym invalidates approvals and clears both the SW registry and host pool.
-    if (payload.mode !== 'nym' && previous.mode === 'nym') {
+    if (payload.mode !== 'nym') {
       revokeSppSignApprovals();
       clearSppPrivatePool();
       await clearSppAutoPrepareOnNymDisconnect();
