@@ -703,6 +703,7 @@ export const MessageSchemas = {
     request: z.object({
       acknowledgeHighRisk: z.literal(true),
       kdfDomain: z.string().min(1).max(64),
+      prepareGeneration: z.number().int().positive(),
     }),
     response: z.object({
       approved: z.literal(true),
