@@ -341,3 +341,125 @@ jobs:
               raise SystemExit(f"{len(result['mismatches'])} SPP runtime manifest mismatch(es)")
           print(f"All {len(result['matches'])} versioned SPP runtime files match.")
           PY
+
+      - name: Validate installable MV3 package
+        if: success()
+        run: |
+          set -euo pipefail
+          node --input-type=module - "packages/extension/dist" <<'NODE'
+          import { existsSync, readFileSync, statSync } from 'node:fs';
+          import { resolve, relative, sep } from 'node:path';
+
+          const root = resolve(process.argv[2]);
+          const fail = (message) => {
+            console.error(`MV3 package validation failed: ${message}`);
+            process.exit(1);
+          };
+          const fileAt = (rel, label = rel) => {
+            if (typeof rel !== 'string' || rel.length === 0 || rel.includes('\\0')) {
+              fail(`invalid path for ${label}`);
+            }
+            const path = resolve(root, rel);
+            const fromRoot = relative(root, path);
+            if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || path === root) {
+              fail(`path escapes extension dist: ${rel}`);
+            }
+            if (!existsSync(path) || !statSync(path).isFile()) {
+              fail(`missing ${label}: ${rel}`);
+            }
+            return path;
+          };
+
+          if (!existsSync(root) || !statSync(root).isDirectory()) {
+            fail(`build output directory is missing: ${root}`);
+          }
+          const manifestPath = fileAt('manifest.json');
+          const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+          if (manifest.manifest_version !== 3) fail('manifest_version must be 3');
+          if (manifest.background?.type !== 'module') fail('background service worker must use module type');
+
+          const references = [
+            ['background.service_worker', manifest.background?.service_worker],
+            ['action.default_popup', manifest.action?.default_popup],
+            ...Object.entries(manifest.action?.default_icon ?? {}).map(([size, value]) => [`action.default_icon[${size}]`, value]),
+            ...Object.entries(manifest.icons ?? {}).map(([size, value]) => [`icons[${size}]`, value]),
+          ];
+          for (const [index, item] of (manifest.content_scripts ?? []).entries()) {
+            for (const value of item.js ?? []) references.push([`content_scripts[${index}].js`, value]);
+            for (const value of item.css ?? []) references.push([`content_scripts[${index}].css`, value]);
+          }
+          for (const [index, item] of (manifest.web_accessible_resources ?? []).entries()) {
+            for (const value of item.resources ?? []) {
+              if (!value.includes('*') && !value.includes('?')) {
+                references.push([`web_accessible_resources[${index}]`, value]);
+              }
+            }
+          }
+          for (const [label, rel] of references) fileAt(rel, label);
+
+          for (const rel of [
+            'popup.html',
+            'spp-host.html',
+            'nym-offscreen.html',
+            'background.js',
+            'content.js',
+            'provider.js',
+          ]) fileAt(rel);
+
+          const metaPath = fileAt('spp/SPP_ASSET_META.json');
+          const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
+          if (meta.sourceCommit !== 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120') {
+            fail(`unexpected SPP source commit: ${meta.sourceCommit}`);
+          }
+          if (meta.profile !== 'full') fail(`expected full SPP profile, got ${meta.profile}`);
+          if (!Array.isArray(meta.files) || meta.files.length === 0) fail('SPP asset file inventory is missing');
+
+          const requiredSpp = [
+            'js/index.js',
+            'dist/stellar_private_payments_web.js',
+            'dist/stellar_private_payments_web_bg.wasm',
+            'dist/workers/storage-worker.js',
+            'dist/workers/storage-worker-module.js',
+            'dist/workers/storage-worker-module_bg.wasm',
+            'dist/workers/prover-worker.js',
+            'dist/workers/prover-worker-module.js',
+            'dist/workers/prover-worker-module_bg.wasm',
+            'dist/circuits/circuits.json',
+            'dist/LICENSE.txt',
+          ];
+          const inventory = new Map(meta.files.map((item) => [item.path, item]));
+          for (const rel of requiredSpp) {
+            const item = inventory.get(rel);
+            if (!item) fail(`SPP inventory omits required asset: ${rel}`);
+            const packaged = fileAt(`spp/${rel}`, `SPP asset ${rel}`);
+            if (statSync(packaged).size !== item.size) fail(`SPP asset size changed after packaging: ${rel}`);
+          }
+          for (const item of meta.files) {
+            if (!item || typeof item.path !== 'string' || !Number.isInteger(item.size)) {
+              fail('SPP asset inventory contains an invalid entry');
+            }
+            const packaged = fileAt(`spp/${item.path}`, `SPP inventory asset ${item.path}`);
+            if (statSync(packaged).size !== item.size) fail(`SPP asset size mismatch: ${item.path}`);
+          }
+
+          console.log(JSON.stringify({
+            ok: true,
+            manifestVersion: manifest.manifest_version,
+            serviceWorker: manifest.background.service_worker,
+            profile: meta.profile,
+            sourceCommit: meta.sourceCommit,
+            sppFiles: meta.files.length,
+            requiredSppAssets: requiredSpp.length,
+            extensionRoot: root,
+          }, null, 2));
+          NODE
+
+      - name: Upload installable MV3 extension
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: astrym-wallet-mv3-${{ github.sha }}
+          path: packages/extension/dist/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 7
