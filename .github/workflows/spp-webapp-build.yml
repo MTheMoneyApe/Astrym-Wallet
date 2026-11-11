@@ -75,6 +75,59 @@ jobs:
           set -o pipefail
           pnpm build:webapp 2>&1 | tee "$RUNNER_TEMP/spp-logs/build-webapp.txt"
 
+      - name: Probe cc-rs 1.5.1 target compiler and archiver
+        if: always()
+        continue-on-error: true
+        env:
+          CC_ENABLE_DEBUG_OUTPUT: "1"
+          CARGO_TERM_VERBOSE: "true"
+          CARGO_HOME: ${{ runner.home }}/.cargo
+          RUSTUP_HOME: ${{ runner.home }}/.rustup
+        run: |
+          set -u
+          out="$RUNNER_TEMP/spp-proof/wasm/cc-rs-target-probe.txt"
+          mkdir -p "$(dirname "$out")"
+          probe="$RUNNER_TEMP/spp-cc-wasm-probe"
+          mkdir -p "$probe"
+          if [ ! -x "$CARGO_HOME/bin/cargo" ] || [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+            echo "pinned cargo/rustup unavailable; probe skipped" | tee "$out"
+            exit 0
+          fi
+          cat > "$probe/Cargo.toml" <<'EOF'
+          [package]
+          name = "spp-cc-wasm-probe"
+          version = "0.1.0"
+          edition = "2021"
+          build = "build.rs"
+
+          [build-dependencies]
+          cc = "=1.5.1"
+
+          [lib]
+          path = "lib.rs"
+          crate-type = ["rlib"]
+          EOF
+          cat > "$probe/build.rs" <<'EOF'
+          fn main() {
+              println!("cargo:rerun-if-changed=probe.c");
+              cc::Build::new().file("probe.c").compile("spp_cc_probe");
+          }
+          EOF
+          cat > "$probe/probe.c" <<'EOF'
+          int spp_cc_probe(void) { return 1; }
+          EOF
+          cat > "$probe/lib.rs" <<'EOF'
+          unsafe extern "C" { fn spp_cc_probe() -> i32; }
+          pub fn probe() -> i32 { unsafe { spp_cc_probe() } }
+          EOF
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/spp-cc-wasm-target"
+          export CARGO_TERM_VERBOSE=true
+          export CC_ENABLE_DEBUG_OUTPUT=1
+          "$CARGO_HOME/bin/cargo" +1.97.1 build --offline --manifest-path "$probe/Cargo.toml" --target wasm32-unknown-unknown -vv > "$out" 2>&1
+          result=$?
+          cat "$out"
+          exit "$result"
+
       - name: Capture all built SPP hashes before asserting pins
         if: always()
         run: |
