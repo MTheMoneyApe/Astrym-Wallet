@@ -248,7 +248,7 @@ export function SppAccountPanel({
             type="button"
             className="btn-secondary"
             data-testid="spp-kdf-approve"
-            disabled={busy !== null}
+            disabled={busy !== null || derivationNote !== null}
             onClick={approveDerivation}
           >
             {busy === 'derive'
