@@ -21,6 +21,7 @@ vi.mock('../../../src/spp-host/openSppHost.js', () => ({
 
 describe('ensureSppAutoPrepareIfNeeded', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     storage.clear();
     storageChangeListeners.length = 0;
     resetSppAutoPrepareEnsureLockForTests();
