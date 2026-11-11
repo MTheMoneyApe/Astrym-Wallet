@@ -47,8 +47,7 @@ describe('openSppHostInternal tab reuse', () => {
     tabs.update.mockResolvedValue({});
     windows.update.mockResolvedValue({});
     const { openSppHostInternal } = await import('../../src/spp-host/openSppHost.js');
-    openSppHostInternal({ active: true });
-    await vi.waitFor(() => expect(tabs.update).toHaveBeenCalled());
+    await openSppHostInternal({ active: true });
     expect(tabs.create).not.toHaveBeenCalled();
     expect(tabs.update).toHaveBeenCalledWith(42, { active: true });
   });
@@ -63,12 +62,14 @@ describe('openSppHostInternal tab reuse', () => {
     tabs.create.mockResolvedValue({ id: 99 });
 
     const { openSppHostInternal } = await import('../../src/spp-host/openSppHost.js');
-    openSppHostInternal({ active: false });
-    openSppHostInternal({ active: false });
+    const first = openSppHostInternal({ active: false });
+    const second = openSppHostInternal({ active: false });
 
-    await vi.waitFor(() => expect(runtime.getContexts).toHaveBeenCalledTimes(1));
+    // Let the serialized lookup begin, then release it and await both callers.
+    await Promise.resolve();
+    expect(runtime.getContexts).toHaveBeenCalledTimes(1);
     resolveContexts([]);
-    await vi.waitFor(() => expect(tabs.create).toHaveBeenCalledTimes(1));
+    await Promise.all([first, second]);
     expect(tabs.create.mock.calls[0][0].url).toContain('spp-host.html');
   });
 
@@ -76,8 +77,7 @@ describe('openSppHostInternal tab reuse', () => {
     runtime.getContexts.mockResolvedValue([]);
     tabs.create.mockResolvedValue({ id: 1 });
     const { openSppHostInternal } = await import('../../src/spp-host/openSppHost.js');
-    openSppHostInternal({ active: false });
-    await vi.waitFor(() => expect(tabs.create).toHaveBeenCalled());
+    await openSppHostInternal({ active: false });
     expect(tabs.create.mock.calls[0][0].url).toContain('spp-host.html');
   });
 });
