@@ -1,4 +1,3 @@
-import { ed25519 } from '@noble/curves/ed25519.js';
 import { StrKey } from '@stellar/stellar-sdk';
 import type { Storage, StorageOpenOptions } from 'stellar-private-payments';
 import { hashSep53Message } from '@solanym/wallet-core/src/stellar/spp/sep53.js';
@@ -31,9 +30,29 @@ function decode(value: string): Uint8Array {
   return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
 }
 
-function verifySignedMessage(account: string, message: string, signature: Uint8Array): boolean {
+async function verifySignedMessage(
+  account: string,
+  message: string,
+  signature: Uint8Array,
+): Promise<boolean> {
   if (!StrKey.isValidEd25519PublicKey(account) || signature.byteLength !== 64) return false;
-  return ed25519.verify(signature, hashSep53Message(message), StrKey.decodeEd25519PublicKey(account));
+  try {
+    const publicKey = await crypto.subtle.importKey(
+      'raw',
+      StrKey.decodeEd25519PublicKey(account),
+      { name: 'Ed25519' },
+      false,
+      ['verify'],
+    );
+    return await crypto.subtle.verify(
+      'Ed25519',
+      publicKey,
+      signature,
+      hashSep53Message(message),
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function hasExistingEncryptedDatabase(): Promise<boolean> {
@@ -257,7 +276,7 @@ export async function openSppEncryptedStorage(input: {
       throw new Error('SPP storage unlock signature came from a different Stellar account.');
     }
     const signature = decode(signatureResult.signedMessage);
-    if (!verifySignedMessage(record.address, message, signature)) {
+    if (!await verifySignedMessage(record.address, message, signature)) {
       signature.fill(0);
       throw new Error('SPP storage unlock signature failed local Ed25519 verification.');
     }
@@ -274,7 +293,7 @@ export async function openSppEncryptedStorage(input: {
         repeated = decode(repeatedResult.signedMessage);
         if (
           repeatedResult.signerAddress !== record.address ||
-          !verifySignedMessage(record.address, message, repeated) ||
+          !await verifySignedMessage(record.address, message, repeated) ||
           !repeated.every((byte, index) => byte === signature[index])
         ) {
           throw new Error('Wallet signatures must be reproducible to initialize encrypted SPP storage.');
