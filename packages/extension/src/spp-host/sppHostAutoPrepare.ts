@@ -345,6 +345,7 @@ export async function runSppHostAutoPrepareIfRequested(
       poolContract,
       userAddress,
       networkPassphrase,
+      prepareGeneration: intent.generation,
     });
 
     const writeStatus = getSppHostWritePoolStatus();
