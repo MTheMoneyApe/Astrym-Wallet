@@ -221,7 +221,8 @@ describe('SppSession lifecycle (mocked runtime)', () => {
 describe('createSppSdkRuntime (mocked SDK deps)', () => {
   it('wires initWasm, Storage.open, and Client.new with asset URLs', async () => {
     const initWasm = vi.fn(async () => undefined);
-    const storage = { fork: () => storage, call: async () => null };
+    const close = vi.fn(async () => undefined);
+    const storage = { fork: () => storage, call: async () => null, close };
     const open = vi.fn(async () => storage as never);
     const dispose = vi.fn();
     const aspState = vi.fn(async () => ({ ok: true }) as never);
@@ -270,10 +271,12 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
     client.dispose();
     expect(aspState).toHaveBeenCalled();
     expect(dispose).toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it('fails closed when bootnodeRequired and bootnodeUrl is missing', async () => {
-    const storage = { fork: () => storage, call: async () => null };
+    const close = vi.fn(async () => undefined);
+    const storage = { fork: () => storage, call: async () => null, close };
     const create = vi.fn(async () => {
       throw new Error('Client.new must not run');
     });
@@ -295,10 +298,12 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
       }),
     ).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
     expect(create).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it('forwards operator bootnodeUrl when bootnodeRequired is true', async () => {
-    const storage = { fork: () => storage, call: async () => null };
+    const close = vi.fn(async () => undefined);
+    const storage = { fork: () => storage, call: async () => null, close };
     const create = vi.fn(async () => ({
       aspState: async () => ({}) as never,
       allContractsData: async () => ({}) as never,
@@ -332,6 +337,7 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ bootnodeUrl: 'https://bootnode.example/spp' }),
     );
+    expect(close).not.toHaveBeenCalled();
   });
 });
 
