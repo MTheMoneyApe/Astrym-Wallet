@@ -101,6 +101,13 @@ if [ "$(git -C "$SRC" rev-parse HEAD 2>/dev/null || true)" != "$SOURCE_COMMIT" ]
   git -C "$SRC" checkout --detach FETCH_HEAD
 fi
 [ "$(git -C "$SRC" rev-parse HEAD)" = "$SOURCE_COMMIT" ] || die "upstream HEAD is not $SOURCE_COMMIT"
+# The build writes this provenance file inside the temporary upstream checkout.
+# Remove only our untracked generated copy before a second clean rebuild; never
+# remove or overwrite a file that belongs to the pinned upstream source.
+PROVENANCE_REL="sdk/web/SPP_SOURCE_PROVENANCE.json"
+if [ -f "$SRC/$PROVENANCE_REL" ] && ! git -C "$SRC" ls-files --error-unmatch "$PROVENANCE_REL" >/dev/null 2>&1; then
+  rm -f "$SRC/$PROVENANCE_REL"
+fi
 dirty="$(git -C "$SRC" status --porcelain --untracked-files=all)"
 if [ -n "$dirty" ]; then
   printf '%s\n' "$dirty" >&2
