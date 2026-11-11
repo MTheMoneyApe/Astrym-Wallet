@@ -106,6 +106,9 @@ export function buildSppSdkRuntimeFromDeps(deps: SppSdkRuntimeDeps): SppSessionR
   if (!deps.Storage || typeof deps.Storage.open !== 'function') {
     throw new Error('buildSppSdkRuntimeFromDeps requires deps.Storage.open');
   }
+  if (typeof deps.openEncryptedStorage !== 'function') {
+    throw new Error('buildSppSdkRuntimeFromDeps requires the wallet-authorized encrypted storage opener');
+  }
   if (!deps.Client || typeof deps.Client.new !== 'function') {
     throw new Error('buildSppSdkRuntimeFromDeps requires deps.Client.new');
   }
