@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('webextension-polyfill', () => ({
   default: {
-    runtime: { id: 'extension-id' },
+    runtime: { id: 'peanjgnchnfcfaclipankhfkligmlklc' },
     storage: { local: { get: mocks.storageGet } },
   },
 }));
@@ -34,7 +34,7 @@ import {
 } from '../../../src/shared/sppPrepareStatus.js';
 
 const ACCOUNT = 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6';
-const ORIGIN = 'chrome-extension://extension-id';
+const ORIGIN = 'chrome-extension://peanjgnchnfcfaclipankhfkligmlklc';
 const GENERATION = 24;
 const SALT = Buffer.alloc(32, 12).toString('base64');
 
@@ -79,7 +79,7 @@ describe('SPP storage unlock approval handler', () => {
       prepareGeneration: GENERATION,
       uses: 2,
     } as never, {
-      id: 'extension-id',
+      id: 'peanjgnchnfcfaclipankhfkligmlklc',
       url: `${ORIGIN}/spp-host.html`,
     } as never)).resolves.toMatchObject({
       approved: true,
@@ -101,20 +101,20 @@ describe('SPP storage unlock approval handler', () => {
       prepareGeneration: GENERATION + 1,
       uses: 1,
     } as never, {
-      id: 'extension-id',
+      id: 'peanjgnchnfcfaclipankhfkligmlklc',
       url: `${ORIGIN}/spp-host.html`,
     } as never)).rejects.toThrow(/stale or inactive/);
 
     await expect(handler({
       message: createSppStorageUnlockMessage({
-        origin: 'chrome-extension://another-extension',
+        origin: 'chrome-extension://abcdefghijklmnopabcdefghijklmnop',
         account: ACCOUNT,
         salt: SALT,
       }),
       prepareGeneration: GENERATION,
       uses: 1,
     } as never, {
-      id: 'extension-id',
+      id: 'peanjgnchnfcfaclipankhfkligmlklc',
       url: `${ORIGIN}/spp-host.html`,
     } as never)).rejects.toThrow(/another origin/);
 
@@ -127,7 +127,7 @@ describe('SPP storage unlock approval handler', () => {
       prepareGeneration: GENERATION,
       uses: 1,
     } as never, {
-      id: 'extension-id',
+      id: 'peanjgnchnfcfaclipankhfkligmlklc',
       url: `${ORIGIN}/spp-host.html`,
     } as never)).rejects.toThrow(/active Stellar account/);
   });
@@ -145,7 +145,7 @@ describe('SPP storage unlock approval handler', () => {
       prepareGeneration: GENERATION,
       uses: 1,
     } as never, {
-      id: 'extension-id',
+      id: 'peanjgnchnfcfaclipankhfkligmlklc',
       url: `${ORIGIN}/spp-host.html`,
     } as never)).rejects.toThrow(/Connect Nym/);
 
@@ -156,7 +156,7 @@ describe('SPP storage unlock approval handler', () => {
       prepareGeneration: GENERATION,
       uses: 1,
     } as never, {
-      id: 'extension-id',
+      id: 'peanjgnchnfcfaclipankhfkligmlklc',
       url: `${ORIGIN}/popup.html`,
     } as never)).rejects.toThrow(/Astrym SPP host/);
   });
