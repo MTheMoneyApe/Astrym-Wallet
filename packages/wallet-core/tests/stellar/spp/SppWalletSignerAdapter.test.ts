@@ -453,13 +453,25 @@ describe('SppWalletSignerAdapter hardening (offline)', () => {
     const pub = await signer.getPublicKey(0);
     setSppTestnetBroadcastAuthorized(false);
 
-    const waiting = waitForSppKeyDerivationApproval(SEP0005_TV1_G, NETHERMIND_PUBLIC_KDF_DOMAIN);
-    expect(approveSppKeyDerivationRequest(SEP0005_TV1_G, NETHERMIND_PUBLIC_KDF_DOMAIN)).toBe(true);
+    const prepareGeneration = 2026111104;
+    const waiting = waitForSppKeyDerivationApproval(
+      SEP0005_TV1_G,
+      NETHERMIND_PUBLIC_KDF_DOMAIN,
+      prepareGeneration,
+    );
+    expect(approveSppKeyDerivationRequest(
+      SEP0005_TV1_G,
+      NETHERMIND_PUBLIC_KDF_DOMAIN,
+      prepareGeneration,
+    )).toBe(true);
     const token = await waiting;
-    const result = await adapter.signKeyDerivationMessage(DERIVATION_MESSAGE, token, {
-      address: SEP0005_TV1_G,
-      networkPassphrase: Networks.TESTNET,
-    });
+    const result = await adapter.signKeyDerivationMessage(
+      DERIVATION_MESSAGE,
+      token,
+      prepareGeneration,
+      { address: SEP0005_TV1_G, networkPassphrase: Networks.TESTNET },
+      async () => {},
+    );
     const { signedMessage, signerAddress } = result as {
       signedMessage: string;
       signerAddress?: string;
@@ -474,6 +486,39 @@ describe('SppWalletSignerAdapter hardening (offline)', () => {
     // No general message, Soroban transaction, or auth-entry signature is opened.
     await expect(adapter.signMessage(DERIVATION_MESSAGE)).rejects.toThrow(/SPP_BROADCAST_AWAITING_APPROVAL/);
     await expect(adapter.signTransaction(buildTransactXdr())).rejects.toThrow(/SPP_BROADCAST_AWAITING_APPROVAL/);
+    await vault.lock();
+  });
+
+
+  it('refuses KDF signing when the live preparation validator reports cancellation', async () => {
+    const { signer, vault } = await unlockedStellarSigner();
+    const adapter = makeAdapter(signer);
+    setSppTestnetBroadcastAuthorized(false);
+    const prepareGeneration = 2026111105;
+    const waiting = waitForSppKeyDerivationApproval(
+      SEP0005_TV1_G,
+      NETHERMIND_PUBLIC_KDF_DOMAIN,
+      prepareGeneration,
+    );
+    expect(approveSppKeyDerivationRequest(
+      SEP0005_TV1_G,
+      NETHERMIND_PUBLIC_KDF_DOMAIN,
+      prepareGeneration,
+    )).toBe(true);
+    const token = await waiting;
+    const signSpy = vi.spyOn(signer, 'signMessage');
+    const validate = vi.fn(async () => {
+      throw new SppSignerError('SPP KDF preparation was invalidated', 'UNAUTHORIZED');
+    });
+    await expect(adapter.signKeyDerivationMessage(
+      DERIVATION_MESSAGE,
+      token,
+      prepareGeneration,
+      { address: SEP0005_TV1_G, networkPassphrase: Networks.TESTNET },
+      validate,
+    )).rejects.toThrow(/preparation was invalidated/);
+    expect(validate).toHaveBeenCalledOnce();
+    expect(signSpy).not.toHaveBeenCalled();
     await vault.lock();
   });
 
