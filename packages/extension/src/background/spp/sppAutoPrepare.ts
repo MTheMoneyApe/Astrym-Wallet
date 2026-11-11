@@ -173,7 +173,7 @@ export async function startSppAutoPrepareAfterNymConnect(): Promise<void> {
   }
 
   try {
-    openSppHostInternal({ active: false });
+    await openSppHostInternal({ active: false });
   } catch (cause) {
     await publishSppPrepareStatus({
       phase: 'failed',
