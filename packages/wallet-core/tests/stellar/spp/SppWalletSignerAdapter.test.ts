@@ -2,7 +2,7 @@
  * Offline hardening tests for SppWalletSignerAdapter — no Horizon / Soroban RPC / Friendbot.
  */
 
-import { beforeEach, afterEach, describe, expect, it } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import {
