@@ -11,6 +11,8 @@ import {
   SppSignerError,
   assertStellarTestnetPassphrase,
   revokeSppSignApprovals,
+  sppKeyDerivationDomainFromMessage,
+  waitForSppKeyDerivationApproval,
 } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 import { isSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
 import { STELLAR_SOROBAN_TESTNET_RPC } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
@@ -170,18 +172,6 @@ export async function handleSppHostSignRequest(
       };
     }
 
-    if (!isSppTestnetBroadcastAuthorized()) {
-      const revoked = revokeSppSignApprovals();
-      return {
-        channel: SPP_HOST_BRIDGE_CHANNEL,
-        type: 'SPP_HOST_SIGN_RESULT',
-        id: request.id,
-        ok: false,
-        code: 'UNAUTHORIZED',
-        message: `SPP_BROADCAST_AWAITING_APPROVAL: ${request.payload.kind} signing is disabled (${revoked} approval(s) revoked).`,
-      };
-    }
-
     const { index, address } = await resolveActiveStellarAddress(deps.keyManager);
     if (request.payload.address && request.payload.address !== address) {
       return {
@@ -194,6 +184,26 @@ export async function handleSppHostSignRequest(
       };
     }
 
+    const { kind, input } = request.payload;
+    // Only the exact upstream v3 key-derivation message can use the separate
+    // user-consent path. Every other message/transaction/auth entry still
+    // requires the Testnet broadcast gate and the normal single-use intent.
+    const kdfDomain = kind === 'message' ? sppKeyDerivationDomainFromMessage(input) : null;
+    const kdfApprovalToken = kdfDomain
+      ? await waitForSppKeyDerivationApproval(address, kdfDomain)
+      : null;
+    if (!kdfApprovalToken && !isSppTestnetBroadcastAuthorized()) {
+      const revoked = revokeSppSignApprovals();
+      return {
+        channel: SPP_HOST_BRIDGE_CHANNEL,
+        type: 'SPP_HOST_SIGN_RESULT',
+        id: request.id,
+        ok: false,
+        code: 'UNAUTHORIZED',
+        message: `SPP_BROADCAST_AWAITING_APPROVAL: ${kind} signing is disabled (${revoked} approval(s) revoked).`,
+      };
+    }
+
     const gate = createContextualSignatureGate('require-prior-approval');
     const adapter = new SppWalletSignerAdapter({
       signer: deps.signer,
@@ -203,11 +213,12 @@ export async function handleSppHostSignRequest(
       authorizationGate: gate,
     });
 
-    const { kind, input } = request.payload;
     let signatureBase64: string;
     switch (kind) {
       case 'message': {
-        const result = await adapter.signMessage(input, { address, networkPassphrase });
+        const result = kdfApprovalToken
+          ? await adapter.signKeyDerivationMessage(input, kdfApprovalToken, { address, networkPassphrase })
+          : await adapter.signMessage(input, { address, networkPassphrase });
         signatureBase64 =
           typeof result === 'string' ? result : result.signedMessage;
         break;
