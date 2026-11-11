@@ -63,15 +63,6 @@ async function publish(status: SppPrepareStatus): Promise<void> {
   await chrome.storage.local.set({ [SPP_PREPARE_STATUS_KEY]: status });
 }
 
-async function removeIntentIfOwned(generation: number): Promise<void> {
-  if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
-  const raw = await chrome.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY);
-  const current = raw[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
-  if (current?.generation === generation) {
-    await chrome.storage.local.remove(SPP_AUTO_PREPARE_INTENT_KEY);
-  }
-}
-
 async function readIntent(): Promise<SppAutoPrepareIntent | null> {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return null;
   const raw = await chrome.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY);
@@ -144,7 +135,7 @@ async function runSppHostAutoPrepareForIntent(
   const storedStatusRaw = await chrome.storage.local.get(SPP_PREPARE_STATUS_KEY);
   let storedStatus = storedStatusRaw[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
   if (!storedStatus || storedStatus.generation > intent.generation) {
-    await removeIntentIfOwned(intent.generation);
+    // The service worker owns the intent key; a stale host never deletes it.
     return;
   }
   // A newer service-worker intent is authoritative. Repair a status overwritten
@@ -164,7 +155,8 @@ async function runSppHostAutoPrepareForIntent(
     storedStatus.phase === 'failed' ||
     storedStatus.phase === 'ready'
   ) {
-    await removeIntentIfOwned(intent.generation);
+    // Terminal/current state remains as a generation record until the worker
+    // replaces or removes it. The host never mutates the SW-owned intent key.
     return;
   }
 
@@ -434,7 +426,8 @@ async function runSppHostAutoPrepareForIntent(
       });
     }
   } finally {
-    await removeIntentIfOwned(intent.generation);
+    // Intentionally leave the intent generation in storage. Only the
+    // service worker may replace/clear it, avoiding a racy host-side delete.
   }
 }
 
