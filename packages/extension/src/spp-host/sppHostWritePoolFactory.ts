@@ -22,6 +22,7 @@ export type SppWritePoolInitInput = {
   poolContract: string;
   userAddress: string;
   networkPassphrase: string;
+  prepareGeneration: number;
   /** Optional injected signer (tests). Defaults to SW remote signer. */
   signer?: WalletSigner;
 };
@@ -109,6 +110,7 @@ export async function initializeSppHostWritePool(
     new SppHostRemoteSigner({
       stellarAddress: input.userAddress,
       networkPassphrase: input.networkPassphrase,
+      prepareGeneration: input.prepareGeneration,
     });
 
   return withSppHostNymFetchProxy(input.rpcUrl, async () => {

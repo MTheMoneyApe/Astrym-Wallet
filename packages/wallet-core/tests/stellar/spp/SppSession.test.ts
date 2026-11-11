@@ -221,7 +221,8 @@ describe('SppSession lifecycle (mocked runtime)', () => {
 describe('createSppSdkRuntime (mocked SDK deps)', () => {
   it('wires initWasm, Storage.open, and Client.new with asset URLs', async () => {
     const initWasm = vi.fn(async () => undefined);
-    const storage = { fork: () => storage, call: async () => null };
+    const close = vi.fn(async () => undefined);
+    const storage = { fork: () => storage, call: async () => null, close };
     const open = vi.fn(async () => storage as never);
     const dispose = vi.fn();
     const aspState = vi.fn(async () => ({ ok: true }) as never);
@@ -243,6 +244,8 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
     const runtime = createSppSdkRuntime({
       initWasm,
       Storage: { open },
+      openEncryptedStorage: ({ storageOpen, workerUrl }) =>
+        storageOpen({ workerUrl, keyProvider: async () => new Uint8Array(32) }),
       Client: { new: create as never },
     });
 
@@ -254,7 +257,7 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
     });
 
     expect(initWasm).toHaveBeenCalledWith(ASSETS.wasmUrl);
-    expect(open).toHaveBeenCalledWith({ workerUrl: ASSETS.storageWorkerUrl });
+    expect(open).toHaveBeenCalledWith({ workerUrl: ASSETS.storageWorkerUrl, keyProvider: expect.any(Function) });
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         rpcUrl: 'http://127.0.0.1:9/rpc',
@@ -268,16 +271,20 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
     client.dispose();
     expect(aspState).toHaveBeenCalled();
     expect(dispose).toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it('fails closed when bootnodeRequired and bootnodeUrl is missing', async () => {
-    const storage = { fork: () => storage, call: async () => null };
+    const close = vi.fn(async () => undefined);
+    const storage = { fork: () => storage, call: async () => null, close };
     const create = vi.fn(async () => {
       throw new Error('Client.new must not run');
     });
     const runtime = createSppSdkRuntime({
       initWasm: async () => undefined,
       Storage: { open: async () => storage as never },
+      openEncryptedStorage: ({ storageOpen, workerUrl }) =>
+        storageOpen({ workerUrl, keyProvider: async () => new Uint8Array(32) }),
       Client: { new: create as never },
       bootnodeRequired: async () => true,
     });
@@ -291,10 +298,12 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
       }),
     ).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
     expect(create).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it('forwards operator bootnodeUrl when bootnodeRequired is true', async () => {
-    const storage = { fork: () => storage, call: async () => null };
+    const close = vi.fn(async () => undefined);
+    const storage = { fork: () => storage, call: async () => null, close };
     const create = vi.fn(async () => ({
       aspState: async () => ({}) as never,
       allContractsData: async () => ({}) as never,
@@ -311,6 +320,8 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
     const runtime = createSppSdkRuntime({
       initWasm: async () => undefined,
       Storage: { open: async () => storage as never },
+      openEncryptedStorage: ({ storageOpen, workerUrl }) =>
+        storageOpen({ workerUrl, keyProvider: async () => new Uint8Array(32) }),
       Client: { new: create as never },
       bootnodeRequired: async () => true,
     });
@@ -326,6 +337,7 @@ describe('createSppSdkRuntime (mocked SDK deps)', () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ bootnodeUrl: 'https://bootnode.example/spp' }),
     );
+    expect(close).not.toHaveBeenCalled();
   });
 });
 

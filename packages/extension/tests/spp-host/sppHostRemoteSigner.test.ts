@@ -57,6 +57,7 @@ describe('SppHostRemoteSigner', () => {
     const signer = new SppHostRemoteSigner({
       stellarAddress,
       networkPassphrase: 'Test SDF Network ; September 2015',
+      prepareGeneration: 77,
       send,
     });
 
@@ -73,6 +74,41 @@ describe('SppHostRemoteSigner', () => {
     });
     expect(send).toHaveBeenCalledOnce();
     expect(send.mock.calls[0]![0].payload.kind).toBe('transaction');
+    expect(send.mock.calls[0]![0].payload.prepareGeneration).toBe(77);
+  });
+
+  it('marks storage unlock signatures separately and forwards only the one-shot permit', async () => {
+    const send = vi.fn().mockImplementation(async (message: { id: string }) => ({
+      channel: SPP_HOST_BRIDGE_CHANNEL,
+      type: 'SPP_HOST_SIGN_RESULT',
+      id: message.id,
+      ok: true,
+      kind: 'message',
+      signatureBase64: 'signed-message-base64',
+      signerAddress: stellarAddress,
+    }));
+    const signer = new SppHostRemoteSigner({
+      stellarAddress,
+      networkPassphrase: Networks.TESTNET,
+      prepareGeneration: 80,
+      send,
+    });
+    const result = await signer.signStorageUnlockMessage(
+      'Stellar Private Payments storage unlock v1',
+      '7c1d5f52-8f9d-4b0a-8e3b-76d7b8b7e4d1',
+      { address: stellarAddress, networkPassphrase: Networks.TESTNET },
+    );
+    expect(result).toEqual({
+      signedMessage: 'signed-message-base64',
+      signerAddress: stellarAddress,
+    });
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0]![0].payload).toMatchObject({
+      kind: 'message',
+      authorization: 'storage_unlock',
+      storageUnlockApprovalToken: '7c1d5f52-8f9d-4b0a-8e3b-76d7b8b7e4d1',
+      prepareGeneration: 80,
+    });
   });
 
   it('fails closed when SW refuses', async () => {
@@ -87,6 +123,7 @@ describe('SppHostRemoteSigner', () => {
     const signer = new SppHostRemoteSigner({
       stellarAddress,
       networkPassphrase: 'Test SDF Network ; September 2015',
+      prepareGeneration: 78,
       send,
     });
     await expect(signer.signMessage('hi')).rejects.toThrow(/NYM_REQUIRED/);
@@ -97,6 +134,7 @@ describe('SppHostRemoteSigner', () => {
     const signer = new SppHostRemoteSigner({
       stellarAddress,
       networkPassphrase: Networks.TESTNET,
+      prepareGeneration: 79,
       send,
     });
     await expect(runWithSppHostFeeScope({

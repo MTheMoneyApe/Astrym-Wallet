@@ -8,9 +8,26 @@ import {
 import {
   clearSppAutoPrepareOnNymDisconnect,
   ensureSppAutoPrepareIfNeeded,
-  startSppAutoPrepareAfterNymConnect,
 } from '../spp/sppAutoPrepare.js';
 import { clearSppPrivatePool } from '../spp/sppPrivatePoolRegistry.js';
+import { revokeSppSignApprovals } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { revokeSppStorageUnlockApprovals } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
+
+async function notifySppHostCleared(message: string): Promise<void> {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      await chrome.runtime.sendMessage({
+        channel: SPP_HOST_BRIDGE_CHANNEL,
+        type: 'SPP_HOST_POOL_LIFECYCLE',
+        generation: Date.now(),
+        state: 'cleared',
+        message,
+      });
+    }
+  } catch {
+    // Host may already be closed; the worker-side registry is still cleared.
+  }
+}
 
 function toSnapshot(snap: NymRuntimeUiSnapshot): ValidatedResponsePayload<'NYM_STATUS'> {
   return {
@@ -48,10 +65,16 @@ export function createNymConnectHandler() {
       connectOpts.preferredGateway = payload.preferredGateway;
     }
     const snap = await ctrl.connect(connectOpts);
-    // Background SPP prepare (host internal). Failures stay in prepare status — never fake ready.
-    void startSppAutoPrepareAfterNymConnect().catch(() => {
-      /* status publisher records failure */
-    });
+    // Start SPP only after a successful Nym connection. The idempotent ensure
+    // path preserves an active generation and coalesces repeated Connect calls.
+    if (snap.connected && snap.mode === 'nym') {
+      void ensureSppAutoPrepareIfNeeded({
+        nymConnected: true,
+        nymMode: 'nym',
+      }).catch(() => {
+        /* prepare status publisher records failure */
+      });
+    }
     return toSnapshot(snap);
   };
 }
@@ -60,22 +83,12 @@ export function createNymDisconnectHandler() {
   return async (
     _payload: ValidatedRequestPayload<'NYM_DISCONNECT'>,
   ): Promise<ValidatedResponsePayload<'NYM_DISCONNECT'>> => {
-    // Fail-closed SPP: drop SW registry and tell spp-host to drop write pools.
+    // Revoke one-shot SPP/KDF permits synchronously before async Nym teardown.
+    revokeSppSignApprovals();
+    revokeSppStorageUnlockApprovals();
     clearSppPrivatePool();
-    void clearSppAutoPrepareOnNymDisconnect();
-    try {
-      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-        void chrome.runtime.sendMessage({
-          channel: SPP_HOST_BRIDGE_CHANNEL,
-          type: 'SPP_HOST_POOL_LIFECYCLE',
-          generation: Date.now(),
-          state: 'cleared',
-          message: 'Nym disconnected',
-        });
-      }
-    } catch {
-      // Host may be closed; registry clear already happened.
-    }
+    await clearSppAutoPrepareOnNymDisconnect();
+    await notifySppHostCleared('Nym disconnected');
     const snap = await getNymRuntimeController().disconnect();
     return toSnapshot(snap);
   };
@@ -104,10 +117,25 @@ export function createNymSetModeHandler() {
     payload: ValidatedRequestPayload<'NYM_SET_MODE'>,
   ): Promise<ValidatedResponsePayload<'NYM_SET_MODE'>> => {
     const ctrl = getNymRuntimeController();
+    const previous = ctrl.getSnapshot();
+    // Leaving Nym invalidates approvals and clears both the SW registry and host pool.
+    if (payload.mode !== 'nym') {
+      revokeSppSignApprovals();
+      revokeSppStorageUnlockApprovals();
+      clearSppPrivatePool();
+      await clearSppAutoPrepareOnNymDisconnect();
+      await notifySppHostCleared('Nym mode disabled; SPP paused');
+    }
     // Direct is the default Horizon path. Nym mode stays fail-closed (no silent clearnet).
     ctrl.setMode(payload.mode);
     await ctrl.syncGatewayConfigUi();
-    return toSnapshot(ctrl.getSnapshot());
+    const snapshot = ctrl.getSnapshot();
+    if (payload.mode === 'nym' && snapshot.connected && previous.mode !== 'nym') {
+      void ensureSppAutoPrepareIfNeeded({ nymConnected: true, nymMode: 'nym' }).catch(() => {
+        /* prepare status publisher records failure */
+      });
+    }
+    return toSnapshot(snapshot);
   };
 }
 

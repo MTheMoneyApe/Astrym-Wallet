@@ -10,6 +10,14 @@ permissions:
 jobs:
   vercel-build:
     runs-on: ubuntu-24.04
+    # Keep the historical, content-addressed cc-rs input path stable. cc-rs
+    # hashes the absolute SQLite amalgamation source path into its .o filename;
+    # the archive member name then affects the linked WASM even when .o bytes
+    # are identical. These are the exact paths used by the approved T3 Build A.
+    env:
+      SPP_BUILD_ROOT: /tmp/spp-path-a/cache
+      CARGO_HOME: /tmp/spp-path-a/cargo
+      RUSTUP_HOME: /tmp/spp-path-a/rustup
     steps:
       # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -65,49 +73,393 @@ jobs:
           mkdir -p "$RUNNER_TEMP/spp-logs"
           pnpm install --frozen-lockfile 2>&1 | tee "$RUNNER_TEMP/spp-logs/install.txt"
 
+      - name: Typecheck wallet-core production source
+        id: core_typecheck
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          pnpm --filter @solanym/wallet-core exec tsc --project tsconfig.build.json --noEmit 2>&1 | tee "$RUNNER_TEMP/spp-logs/typecheck-wallet-core.txt"
+
+      # Retain the full extension check as visible diagnostics. This broad project
+      # currently includes legacy Nym/Horizon source and test files with known
+      # unrelated errors; T4 gates on wallet-core production, focused SPP tests,
+      # and both actual extension/webapp production builds below.
+      - name: Typecheck full extension (legacy diagnostic)
+        id: extension_typecheck
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          pnpm --filter @solanym/extension typecheck 2>&1 | tee "$RUNNER_TEMP/spp-logs/typecheck-extension.txt"
+
+      - name: Run focused SPP signer tests
+        id: spp_tests
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          pnpm --filter @solanym/wallet-core exec vitest run \
+            tests/stellar/spp/sppSignGate.test.ts \
+            tests/stellar/spp/SppWalletSignerAdapter.test.ts \
+            tests/stellar/spp/sppStorageUnlockGate.test.ts \
+            tests/stellar/spp/SppSession.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/spp-logs/spp-signer-tests.txt"
+
+      - name: Run focused SPP extension bridge tests
+        id: spp_extension_tests
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          pnpm --filter @solanym/extension exec vitest run \
+            tests/background/spp/sppHostBridgeHandlers.test.ts \
+            tests/background/spp/sppSignGate.test.ts \
+            tests/background/spp/sppAutoPrepare.test.ts \
+            tests/background/handlers/sppStorageUnlockApprovalHandler.test.ts \
+            tests/spp-host/sppHostRemoteSigner.test.ts \
+            tests/spp-host/sessionConstruct.test.ts \
+            tests/spp-host/sppStorageKeyProvider.test.ts \
+            2>&1 | tee "$RUNNER_TEMP/spp-logs/spp-extension-bridge-tests.txt"
+
       - name: Build
+        id: spp_build
+        continue-on-error: true
+        env:
+          CC_ENABLE_DEBUG_OUTPUT: "1"
+          CARGO_TERM_VERBOSE: "true"
+          SPP_DIAGNOSTIC_LABEL: primary
         run: |
           set -o pipefail
           pnpm build:webapp 2>&1 | tee "$RUNNER_TEMP/spp-logs/build-webapp.txt"
 
-      - name: Record the SHA-256 manifest and wasm sections
+      - name: Build MV3 extension and background worker
+        id: mv3_build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pnpm --filter @solanym/extension build 2>&1 | tee "$RUNNER_TEMP/spp-logs/build-mv3-extension.txt"
+
+      - name: Extract actual cc-rs compiler evidence from the SPP build
+        if: always()
+        continue-on-error: true
+        run: |
+          set -eu
+          source="$RUNNER_TEMP/spp-logs/build-webapp.txt"
+          destination="$RUNNER_TEMP/spp-proof/wasm/cc-rs-actual-build.txt"
+          mkdir -p "$(dirname "$destination")"
+          python3 - "$source" "$destination" <<'PY'
+          import sys
+          from pathlib import Path
+
+          source, destination = map(Path, sys.argv[1:])
+          if not source.is_file():
+              destination.write_text("Primary SPP build log is missing.\n")
+              raise SystemExit(0)
+          lines = source.read_text(errors="replace").splitlines()
+          needles = (
+              "sqlite-wasm-rs",
+              "CC_ENABLE_DEBUG_OUTPUT",
+              "cargo:warning=Compiler family detected",
+              "cargo:warning=ToolFamily",
+              "cargo:warning=running:",
+              "cargo:warning=ar:",
+              "Running \`cc\`",
+              "Running \`clang\`",
+              "running: ",
+              "OUT_DIR",
+              "wsqlite3",
+          )
+          selected = set()
+          for index, line in enumerate(lines):
+              if any(needle in line for needle in needles):
+                  selected.update(range(max(0, index - 2), min(len(lines), index + 3)))
+          if not selected:
+              destination.write_text("No cc-rs compiler invocation lines matched; inspect build-webapp.txt.\n")
+          else:
+              destination.write_text("\n".join(f"{i+1}: {lines[i]}" for i in sorted(selected)) + "\n")
+          print(f"Wrote actual cc-rs build excerpts to {destination}")
+          PY
+
+      - name: Capture all built SPP hashes before asserting pins
+        if: always()
         run: |
           set -euo pipefail
           proof="$RUNNER_TEMP/spp-proof"
-          mkdir -p "$proof/manifest" "$proof/sections"
-          python3 scripts/spp-distributed-sha256.py \
+          runtime="$SPP_BUILD_ROOT/stellar-private-payments/sdk/web"
+          mkdir -p "$proof/wasm" "$proof/manifest"
+          if [ -d "$SPP_BUILD_ROOT/diagnostics" ]; then
+            cp -a "$SPP_BUILD_ROOT/diagnostics" "$proof/"
+          fi
+          for entry in \
+            "dist/stellar_private_payments_web_bg.wasm:main.wasm" \
+            "dist/workers/prover-worker-module_bg.wasm:prover-worker.wasm" \
+            "dist/workers/storage-worker-module_bg.wasm:storage-worker.wasm"; do
+            source_path="${entry%%:*}"
+            evidence_name="${entry#*:}"
+            if [ -f "$runtime/$source_path" ]; then
+              cp "$runtime/$source_path" "$proof/wasm/$evidence_name"
+            fi
+          done
+          {
+            echo "=== native compiler commands (cc-rs) ==="
+            for tool in cc clang clang-18 clang-19 wasm-ld wasm-ld-18 llvm-ar llvm-ranlib ar ranlib; do
+              if command -v "$tool" >/dev/null 2>&1; then
+                echo "--- $tool: $(command -v "$tool")"
+                "$tool" --version 2>&1 | sed -n '1,4p' || true
+              fi
+            done
+            for name in CC CC_wasm32_unknown_unknown TARGET_CC AR AR_wasm32_unknown_unknown CFLAGS CFLAGS_wasm32_unknown_unknown; do
+              eval "value=\${$name-}"
+              printf '%s=%s\n' "$name" "${value:-<unset>}"
+            done
+            echo "=== rust toolchain ==="
+            if [ -x "$CARGO_HOME/bin/rustc" ]; then
+              "$CARGO_HOME/bin/rustc" +1.97.1 --version --verbose
+              "$CARGO_HOME/bin/cargo" +1.97.1 --version --verbose
+            fi
+            wasm_opt="$SPP_BUILD_ROOT/stellar-private-payments/target/tmp/binaryen/binaryen-version_131/bin/wasm-opt"
+            if [ -x "$wasm_opt" ]; then "$wasm_opt" --version; fi
+          } > "$proof/wasm/toolchain.txt"
+          python3 - \
             packages/wallet-core/src/stellar/spp/nethermind/spp-runtime-manifest.json \
-            packages/extension/public/spp \
-            "$proof/manifest/spp-distributed-sha256.txt"
-          curl --proto '=https' -fsSL -o "$RUNNER_TEMP/wabt.tar.gz.partial" \
-            https://github.com/WebAssembly/wabt/releases/download/1.0.37/wabt-1.0.37-ubuntu-20.04.tar.gz
-          echo "cfc675dc9b663d9adc8c75d982c1ba29f661448a2e026a67e71fe3f76a3e09f3  $RUNNER_TEMP/wabt.tar.gz.partial" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/wabt"
-          tar -xzf "$RUNNER_TEMP/wabt.tar.gz.partial" -C "$RUNNER_TEMP/wabt"
-          obj="$RUNNER_TEMP/wabt/wabt-1.0.37/bin/wasm-objdump"
-          wasm="packages/extension/public/spp/dist/stellar_private_payments_web_bg.wasm"
-          "$obj" -x "$wasm" | python3 scripts/spp-wasm-sections.py > "$proof/sections/built-import-memory-export.txt"
-          if diff -u scripts/spp-wasm-sections-fb3481af.txt "$proof/sections/built-import-memory-export.txt" > "$proof/sections/section-diff.txt"; then
-            echo "IDENTICAL to fb3481af import, memory, and export sections" | tee "$proof/sections/section-result.txt"
+            "$runtime" "$proof/manifest/comparison.json" <<'PY'
+          import hashlib, json, sys
+          from pathlib import Path
+
+          manifest_path, web_root, output_path = map(Path, sys.argv[1:])
+          result = {
+              "runtimePresent": (web_root / "dist").is_dir(),
+              "sourceCommit": None,
+              "matches": [],
+              "mismatches": [],
+          }
+          if manifest_path.is_file():
+              manifest = json.loads(manifest_path.read_text())
+              result["sourceCommit"] = manifest.get("sourceCommit")
+              for rel, expected in manifest.get("files", {}).items():
+                  path = web_root / rel
+                  if not path.is_file():
+                      result["mismatches"].append({
+                          "path": rel, "reason": "missing",
+                          "expectedSha256": expected.get("sha256"),
+                          "expectedSize": expected.get("size"),
+                      })
+                      continue
+                  data = path.read_bytes()
+                  actual = {
+                      "path": rel,
+                      "sha256": hashlib.sha256(data).hexdigest(),
+                      "size": len(data),
+                  }
+                  if actual["sha256"] == expected.get("sha256") and actual["size"] == expected.get("size"):
+                      result["matches"].append(actual)
+                  else:
+                      actual["expectedSha256"] = expected.get("sha256")
+                      actual["expectedSize"] = expected.get("size")
+                      result["mismatches"].append(actual)
+          else:
+              result["error"] = "Versioned SPP manifest is missing"
+          output_path.write_text(json.dumps(result, indent=2) + "\n")
+          print(json.dumps({
+              "runtimePresent": result["runtimePresent"],
+              "sourceCommit": result["sourceCommit"],
+              "matched": len(result["matches"]),
+              "mismatched": len(result["mismatches"]),
+              "report": str(output_path),
+          }, indent=2))
+          PY
+          if [ -f "$proof/wasm/main.wasm" ]; then
+            curl --proto '=https' -fsSL -o "$RUNNER_TEMP/wabt.tar.gz.partial" \
+              https://github.com/WebAssembly/wabt/releases/download/1.0.37/wabt-1.0.37-ubuntu-20.04.tar.gz
+            echo "cfc675dc9b663d9adc8c75d982c1ba29f661448a2e026a67e71fe3f76a3e09f3  $RUNNER_TEMP/wabt.tar.gz.partial" | sha256sum -c -
+            mkdir -p "$RUNNER_TEMP/wabt"
+            tar -xzf "$RUNNER_TEMP/wabt.tar.gz.partial" -C "$RUNNER_TEMP/wabt"
+            obj="$RUNNER_TEMP/wabt/wabt-1.0.37/bin/wasm-objdump"
+            for name in main prover-worker storage-worker; do
+              wasm="$proof/wasm/$name.wasm"
+              if [ -f "$wasm" ]; then
+                "$obj" -h "$wasm" > "$proof/wasm/$name-section-headers.txt"
+                "$obj" -x "$wasm" | python3 scripts/spp-wasm-sections.py > "$proof/wasm/$name-import-memory-export.txt"
+              fi
+            done
+            if diff -u scripts/spp-wasm-sections-fb3481af.txt "$proof/wasm/main-import-memory-export.txt" > "$proof/wasm/section-diff.txt"; then
+              echo "IDENTICAL to fb3481af import, memory, and export sections" | tee "$proof/wasm/section-result.txt"
+            else
+              echo "DIFFERENT from fb3481af import, memory, or export sections" | tee "$proof/wasm/section-result.txt"
+            fi
           else
-            echo "DIFFERENT from fb3481af import, memory, or export sections" | tee "$proof/sections/section-result.txt"
-            exit 1
+            echo "main wasm missing; section comparison unavailable" > "$proof/wasm/section-result.txt"
           fi
 
-      # actions/upload-artifact v4.6.2
-      - name: Upload the SHA-256 manifest
+      - name: Upload SPP build diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: spp-sha256-manifest
-          path: ${{ runner.temp }}/spp-proof/manifest
+          name: spp-build-diagnostics
+          path: |
+            ${{ runner.temp }}/spp-logs
+            ${{ runner.temp }}/spp-proof
           if-no-files-found: error
 
-      # actions/upload-artifact v4.6.2
-      - name: Upload the wasm section comparison
+      - name: Assert the versioned runtime manifest
         if: always()
+        env:
+          SPP_BUILD_OUTCOME: ${{ steps.spp_build.outcome }}
+          SPP_CORE_TYPECHECK_OUTCOME: ${{ steps.core_typecheck.outcome }}
+          SPP_EXTENSION_TYPECHECK_OUTCOME: ${{ steps.extension_typecheck.outcome }}
+          SPP_TEST_OUTCOME: ${{ steps.spp_tests.outcome }}
+          SPP_EXTENSION_TEST_OUTCOME: ${{ steps.spp_extension_tests.outcome }}
+          SPP_MV3_BUILD_OUTCOME: ${{ steps.mv3_build.outcome }}
+        run: |
+          set -euo pipefail
+          for check in \
+            "wallet-core production typecheck:$SPP_CORE_TYPECHECK_OUTCOME" \
+            "focused SPP signer tests:$SPP_TEST_OUTCOME" \
+            "focused SPP extension bridge tests:$SPP_EXTENSION_TEST_OUTCOME" \
+            "MV3 extension build:$SPP_MV3_BUILD_OUTCOME" \
+            "SPP webapp build:$SPP_BUILD_OUTCOME"; do
+            name="${check%%:*}"
+            outcome="${check#*:}"
+            if [ "$outcome" != "success" ]; then
+              echo "$name concluded: $outcome" >&2
+              exit 1
+            fi
+          done
+          if [ "$SPP_EXTENSION_TYPECHECK_OUTCOME" != "success" ]; then
+            diagnostics="$(grep -Ec 'error TS[0-9]+' "$RUNNER_TEMP/spp-logs/typecheck-extension.txt" || true)"
+            echo "::warning::Full extension typecheck remains non-passing ($diagnostics diagnostics); see typecheck-extension.txt. It is tracked separately from the T4 production/build gates."
+          fi
+          python3 - "$RUNNER_TEMP/spp-proof/manifest/comparison.json" <<'PY'
+          import json, sys
+          from pathlib import Path
+          path = Path(sys.argv[1])
+          if not path.is_file():
+              raise SystemExit("SPP runtime diagnostic report was not produced")
+          result = json.loads(path.read_text())
+          if not result.get("runtimePresent"):
+              raise SystemExit("SPP upstream runtime was not built")
+          if result.get("mismatches"):
+              for item in result["mismatches"]:
+                  print(json.dumps(item, sort_keys=True))
+              raise SystemExit(f"{len(result['mismatches'])} SPP runtime manifest mismatch(es)")
+          print(f"All {len(result['matches'])} versioned SPP runtime files match.")
+          PY
+
+      - name: Validate installable MV3 package
+        if: success()
+        run: |
+          set -euo pipefail
+          node --input-type=module - "packages/extension/dist" <<'NODE'
+          import { existsSync, readFileSync, statSync } from 'node:fs';
+          import { resolve, relative, sep } from 'node:path';
+
+          const root = resolve(process.argv[2]);
+          const fail = (message) => {
+            console.error(`MV3 package validation failed: ${message}`);
+            process.exit(1);
+          };
+          const fileAt = (rel, label = rel) => {
+            if (typeof rel !== 'string' || rel.length === 0 || rel.includes('\\0')) {
+              fail(`invalid path for ${label}`);
+            }
+            const path = resolve(root, rel);
+            const fromRoot = relative(root, path);
+            if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || path === root) {
+              fail(`path escapes extension dist: ${rel}`);
+            }
+            if (!existsSync(path) || !statSync(path).isFile()) {
+              fail(`missing ${label}: ${rel}`);
+            }
+            return path;
+          };
+
+          if (!existsSync(root) || !statSync(root).isDirectory()) {
+            fail(`build output directory is missing: ${root}`);
+          }
+          const manifestPath = fileAt('manifest.json');
+          const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+          if (manifest.manifest_version !== 3) fail('manifest_version must be 3');
+          if (manifest.background?.type !== 'module') fail('background service worker must use module type');
+
+          const references = [
+            ['background.service_worker', manifest.background?.service_worker],
+            ['action.default_popup', manifest.action?.default_popup],
+            ...Object.entries(manifest.action?.default_icon ?? {}).map(([size, value]) => [`action.default_icon[${size}]`, value]),
+            ...Object.entries(manifest.icons ?? {}).map(([size, value]) => [`icons[${size}]`, value]),
+          ];
+          for (const [index, item] of (manifest.content_scripts ?? []).entries()) {
+            for (const value of item.js ?? []) references.push([`content_scripts[${index}].js`, value]);
+            for (const value of item.css ?? []) references.push([`content_scripts[${index}].css`, value]);
+          }
+          for (const [index, item] of (manifest.web_accessible_resources ?? []).entries()) {
+            for (const value of item.resources ?? []) {
+              if (!value.includes('*') && !value.includes('?')) {
+                references.push([`web_accessible_resources[${index}]`, value]);
+              }
+            }
+          }
+          for (const [label, rel] of references) fileAt(rel, label);
+
+          for (const rel of [
+            'popup.html',
+            'spp-host.html',
+            'nym-offscreen.html',
+            'background.js',
+            'content.js',
+            'provider.js',
+          ]) fileAt(rel);
+
+          const metaPath = fileAt('spp/SPP_ASSET_META.json');
+          const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
+          if (meta.sourceCommit !== 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120') {
+            fail(`unexpected SPP source commit: ${meta.sourceCommit}`);
+          }
+          if (meta.profile !== 'full') fail(`expected full SPP profile, got ${meta.profile}`);
+          if (!Array.isArray(meta.files) || meta.files.length === 0) fail('SPP asset file inventory is missing');
+
+          const requiredSpp = [
+            'js/index.js',
+            'dist/stellar_private_payments_web.js',
+            'dist/stellar_private_payments_web_bg.wasm',
+            'dist/workers/storage-worker.js',
+            'dist/workers/storage-worker-module.js',
+            'dist/workers/storage-worker-module_bg.wasm',
+            'dist/workers/prover-worker.js',
+            'dist/workers/prover-worker-module.js',
+            'dist/workers/prover-worker-module_bg.wasm',
+            'dist/circuits/circuits.json',
+            'dist/LICENSE.txt',
+          ];
+          const inventory = new Map(meta.files.map((item) => [item.path, item]));
+          for (const rel of requiredSpp) {
+            const item = inventory.get(rel);
+            if (!item) fail(`SPP inventory omits required asset: ${rel}`);
+            const packaged = fileAt(`spp/${rel}`, `SPP asset ${rel}`);
+            if (statSync(packaged).size !== item.size) fail(`SPP asset size changed after packaging: ${rel}`);
+          }
+          for (const item of meta.files) {
+            if (!item || typeof item.path !== 'string' || !Number.isInteger(item.size)) {
+              fail('SPP asset inventory contains an invalid entry');
+            }
+            const packaged = fileAt(`spp/${item.path}`, `SPP inventory asset ${item.path}`);
+            if (statSync(packaged).size !== item.size) fail(`SPP asset size mismatch: ${item.path}`);
+          }
+
+          console.log(JSON.stringify({
+            ok: true,
+            manifestVersion: manifest.manifest_version,
+            serviceWorker: manifest.background.service_worker,
+            profile: meta.profile,
+            sourceCommit: meta.sourceCommit,
+            sppFiles: meta.files.length,
+            requiredSppAssets: requiredSpp.length,
+            extensionRoot: root,
+          }, null, 2));
+          NODE
+
+      - name: Upload installable MV3 extension
+        if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: spp-wasm-sections
-          path: ${{ runner.temp }}/spp-proof/sections
+          name: astrym-wallet-mv3-${{ github.sha }}
+          path: packages/extension/dist/
           if-no-files-found: error
+          compression-level: 1
+          retention-days: 7
