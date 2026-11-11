@@ -89,14 +89,14 @@ function shouldStartPrepare(status: SppPrepareStatus | null): boolean {
  */
 export async function startSppAutoPrepareAfterNymConnect(): Promise<void> {
   const poolContract = await readStoredPoolContract();
-  await publishSppPrepareStatus({
+  const openingStatus = await publishSppPrepareStatus({
     phase: 'opening_host',
     message: 'Abriendo host SPP interno…',
     poolContract,
   });
 
   const intent: SppAutoPrepareIntent = {
-    generation: Date.now(),
+    generation: openingStatus.generation,
     requestedAt: Date.now(),
     poolContract,
     autoRun: true,
