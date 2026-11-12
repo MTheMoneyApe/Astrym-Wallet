@@ -3,6 +3,7 @@ node_modules/
 
 # Build outputs
 dist/
+dist-webapp/
 build/
 
 # Generated SPP SDK assets for extension packaging (Fase 1 — do not commit ~277MB)
@@ -32,3 +33,6 @@ Thumbs.db
 coverage/
 packages/extension/.vitest/
 **/.vitest/
+packages/extension/test-results/
+**/playwright-report/
+.vercel/

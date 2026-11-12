@@ -17,6 +17,7 @@ import {
   DEFAULT_NYM_NETWORK_ALLOWLIST,
   type NymNetworkAllowlistConfig,
 } from '../../nym-offscreen/networkAllowlist.js';
+import { NYM_VERIFIED_GATEWAY } from '../../nym-offscreen/verifiedGateway.js';
 
 export const NYM_GATEWAY_CONFIG_STORAGE_KEY = 'solanym_nym_gateway_config_v1';
 
@@ -75,6 +76,38 @@ export class NymGatewayConfigService {
   async load(): Promise<NymGatewayConfigState> {
     const data = await this._storage.get(NYM_GATEWAY_CONFIG_STORAGE_KEY);
     return parseStored(data[NYM_GATEWAY_CONFIG_STORAGE_KEY]);
+  }
+
+  /**
+   * Pin the documented DevRel gateway when the operator has not saved one.
+   * A complete saved config is left untouched. Connect calls this so the
+   * allowlist is not empty on a fresh install. Removing a custom gateway
+   * and connecting again re-seeds the verified default.
+   */
+  async ensureVerifiedDefault(): Promise<NymGatewayConfigState> {
+    const current = await this.load();
+    if (current.gatewayOrigins.length > 0 && current.selectedGateway && current.identityKey) {
+      return current;
+    }
+    if (current.gatewayOrigins.length === 0 && !current.identityKey) {
+      const seeded = await this.addGateway(
+        NYM_VERIFIED_GATEWAY.wssOrigin,
+        NYM_VERIFIED_GATEWAY.identityKey,
+      );
+      return seeded.config;
+    }
+    if (
+      !current.identityKey &&
+      (current.selectedGateway === NYM_VERIFIED_GATEWAY.wssOrigin ||
+        current.gatewayOrigins.includes(NYM_VERIFIED_GATEWAY.wssOrigin))
+    ) {
+      return this.setIdentityKey(NYM_VERIFIED_GATEWAY.identityKey);
+    }
+    if (current.identityKey && current.gatewayOrigins.length === 0) {
+      const added = await this.addGateway(NYM_VERIFIED_GATEWAY.wssOrigin, current.identityKey);
+      return added.config;
+    }
+    return current;
   }
 
   async save(state: NymGatewayConfigState): Promise<NymGatewayConfigState> {

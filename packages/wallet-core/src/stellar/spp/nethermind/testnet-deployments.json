@@ -1,0 +1,83 @@
+{
+  "network": "testnet",
+  "kdf_domain": "Nethermind",
+  "deployer": "GDX6X7DZQGIAGP6MWUK24BRQFDNQCP6E4FCJ4M6K3OCTNQM3EMWLQGPH",
+  "admin": "GDF4BXPQY5N4BEO24UIHM4NVB62MW7HDWH7SVHKLVZAMLP5IIHCFQORC",
+  "asp_membership": "CD25JAWK4OHQTZ2C72I3BZIN4P2RXT5M4LAWZG6RIXJO3HLVM74OFMCG",
+  "added_asp_memberships": [],
+  "asp_non_membership": "CDP34AQV4JY3AHNUTWL3DFMKOLVLR43XSX75IAXN6PPVDIWCFQKMFY4R",
+  "asp_membership_wasm_hash": "44522579b5560d1aabb99abf77320963df50a3a7954a0ec12c9c7fc444d4953d",
+  "asp_non_membership_wasm_hash": "3c6eaf31e690605d96ca3815982a264ed14b1637d80dafdd06cc527552bf1826",
+  "verifiers": {
+    "B": "CCMEZQ6RKT35PH5QILPFOBXCUJEDBUDYCWUBZEQMWWJCPEMPNFOLTGST",
+    "B_gvk_T": "CBKHDVIL5XN7IIBJU2ZPUWIIHKVIQSUSLSN5W6ZQF33FAYYXBBDNUYUG",
+    "B_gvk_V": "CBQS3Y4OTJVUBVYYTWEJEQC4ISKA3DAOOLOLAWNAU7Z2ZERP5YO7BLYO"
+  },
+  "public_key_registry": "CARXHKOPSGMUMFRDI72KNCRENVOTCJIGXPCPYOW42APDY2NEYF7CLKIL",
+  "public_key_registry_verifier": "CBL5BJUOPVL7O66QDJYXH3ZWKZSNGKFLT5D5KGVUKUKCME6CCRTXHK5A",
+  "public_key_registry_verifier_wasm_hash": "4234d57285c2312c38e8e3b3dc6549001039bb8d1cdcd3bf7c78d710f8193003",
+  "pools": [
+    {
+      "poolContractId": "CAMWBUWHYXEGBM3Q7M5DBGW7LLJL3I4QGANQEZFEWLRNTOJMTT2WG24U",
+      "tokenContractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+      "deploymentLedger": 5525981,
+      "enabled": true,
+      "policyFlags": [
+        "blocklist"
+      ],
+      "asset": {
+        "kind": "native"
+      }
+    },
+    {
+      "poolContractId": "CBTA5THUFNLDMFSH54YSHZJPAACLIBTT66ANWX2EPMP5F7ORPI24MXBQ",
+      "tokenContractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+      "deploymentLedger": 5525986,
+      "enabled": true,
+      "policyFlags": [
+        "blocklist"
+      ],
+      "asset": {
+        "kind": "native"
+      },
+      "gvkMode": "traceable",
+      "gvkAuthorityPubKey": {
+        "x": "0x0963f68aeb1663a54b57abb8bf099cdec33bed62108b084319109bd8ba85167b",
+        "y": "0x1fea09b90e87da009b0a922da0475cbb8d5dd900b915799f877d9cfeb82e20ab"
+      }
+    },
+    {
+      "poolContractId": "CAJZRQ5MMAGPDR3GCYKHV5IWA5MQWRYSDC3NG6TFDFYBI3VSK6CUF53W",
+      "tokenContractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+      "deploymentLedger": 5525991,
+      "enabled": true,
+      "policyFlags": [
+        "blocklist"
+      ],
+      "asset": {
+        "kind": "native"
+      },
+      "gvkMode": "viewOnly",
+      "gvkAuthorityPubKey": {
+        "x": "0x0963f68aeb1663a54b57abb8bf099cdec33bed62108b084319109bd8ba85167b",
+        "y": "0x1fea09b90e87da009b0a922da0475cbb8d5dd900b915799f877d9cfeb82e20ab"
+      }
+    },
+    {
+      "poolContractId": "CCU6H72HI6EL36YILNKHSCXXGLFVLOTYM7DKRORKSD5B5NTR22F7ZYKJ",
+      "tokenContractId": "CCUUDM434BMZMYWYDITHFXHDMIVTGGD6T2I5UKNX5BSLXLW7HVR4MCGZ",
+      "deploymentLedger": 5525994,
+      "enabled": true,
+      "policyFlags": [
+        "blocklist"
+      ],
+      "asset": {
+        "kind": "classic",
+        "code": "EURC",
+        "issuer": "GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO"
+      }
+    }
+  ],
+  "rpcUrl": "https://soroban-testnet.stellar.org/",
+  "networkPassphrase": "Test SDF Network ; September 2015"
+}

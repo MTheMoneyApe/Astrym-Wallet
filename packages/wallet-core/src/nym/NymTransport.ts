@@ -25,6 +25,11 @@ export type NymTransportConfig = {
    * Legacy alias name `gatewayUrl` kept for call sites — value must NOT be a URL.
    */
   gatewayUrl?: string;
+  /**
+   * MixFetchOpts.preferredNetworkRequester — Nym address
+   * (`identity.encryption@gatewayIdentity`). Pinning avoids random NR hangs.
+   */
+  preferredNetworkRequester?: string;
   /** Exact operator-configured WSS/HTTPS origins (fail-closed MV3 policy; not MixFetchOpts). */
   gatewayAllowlist?: string[];
   /** Soft deadline for connect(); implementations may ignore. */
@@ -171,6 +176,12 @@ export class MixFetchNymTransport implements NymHttpTransport {
     if (config?.gatewayUrl) {
       // Official MixFetchOpts.preferredGateway = identity key (mix-fetch-wasm@1.4.2).
       setupOpts.preferredGateway = config.gatewayUrl;
+    }
+    if (
+      typeof config?.preferredNetworkRequester === 'string' &&
+      config.preferredNetworkRequester.includes('@')
+    ) {
+      setupOpts.preferredNetworkRequester = config.preferredNetworkRequester;
     }
     if (config?.gatewayAllowlist) {
       // Internal offscreen policy only — stripped before createMixFetch.

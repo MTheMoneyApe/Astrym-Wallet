@@ -13,6 +13,9 @@ import type {
 import { stateCoordinator } from '../StateCoordinator.js';
 import { activeAccountManager, type ActiveAccountManager } from '../accounts/ActiveAccountManager.js';
 import browser from 'webextension-polyfill';
+import { isTrustedWalletPageUrl } from '../trustedWalletOrigin.js';
+import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
+import { ensureSppAutoPrepareIfNeeded } from '../spp/sppAutoPrepare.js';
 
 type ActiveAccountIndexWriter = Pick<ActiveAccountManager, 'setActiveAccountIndex'>;
 
@@ -120,6 +123,16 @@ export function createUnlockVaultHandler(vaultService: VaultService) {
       if (stateCoordinator.isResetting) throw new Error('Reset in progress');
       await vaultService.unlock(payload.password);
       stateCoordinator.setUnlocked();
+      // Write-pool needs an unlocked Stellar account; resume prepare if Nym is up.
+      try {
+        const nym = getNymRuntimeController().getSnapshot();
+        void ensureSppAutoPrepareIfNeeded({
+          nymConnected: nym.connected,
+          nymMode: nym.mode,
+        });
+      } catch {
+        // Non-fatal: unlock succeeded; prepare can be retried from Settings.
+      }
       return { success: true };
     } finally {
       stateCoordinator.mutex.release();
@@ -139,12 +152,8 @@ export function createRevealRecoveryPhraseHandler(vaultService: VaultService) {
     payload: { auth: string },
     sender?: browser.Runtime.MessageSender,
   ): Promise<{ recoveryPhrase: string[] }> => {
-    if (
-      !sender ||
-      sender.id !== browser.runtime.id ||
-      sender.url !== browser.runtime.getURL('/popup.html')
-    ) {
-      throw new Error('UnauthorizedSenderError: Recovery phrase reveal must originate from trusted popup UI');
+    if (!sender || sender.id !== browser.runtime.id || !isTrustedWalletPageUrl(sender.url)) {
+      throw new Error('UnauthorizedSenderError: Recovery phrase reveal must originate from trusted wallet UI');
     }
 
     await stateCoordinator.mutex.acquire();
@@ -162,8 +171,8 @@ export function createRevealRecoveryPhraseHandler(vaultService: VaultService) {
 export function createResetWalletHandler(vaultService: VaultService) {
   return async (payload: ResetWalletRequest, sender?: browser.Runtime.MessageSender): Promise<ResetWalletResponse> => {
     // 1. Strict Allowlist MV3 sender check
-    if (!sender || !sender.url || sender.url !== browser.runtime.getURL('/popup.html')) {
-      throw new Error('UnauthorizedSenderError: Reset must originate from trusted popup UI');
+    if (!sender || !isTrustedWalletPageUrl(sender.url)) {
+      throw new Error('UnauthorizedSenderError: Reset must originate from trusted wallet UI');
     }
 
     // 2. Payload check

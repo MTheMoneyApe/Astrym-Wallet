@@ -62,10 +62,17 @@ async function handleMessage(raw: unknown): Promise<NymOffscreenResponse> {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object') return false;
   if ((message as { channel?: unknown }).channel !== 'nym-offscreen') return false;
   if ((message as { target?: unknown }).target !== 'nym-runtime') return false;
+  // Same-extension only: reject foreign senders. Content scripts share runtime.id
+  // but should not drive MixFetch; require missing URL (SW) or extension-page URL.
+  if (!sender?.id || sender.id !== chrome.runtime.id) return false;
+  if (sender.url) {
+    const prefix = `chrome-extension://${chrome.runtime.id}/`;
+    if (!sender.url.startsWith(prefix)) return false;
+  }
 
   void handleMessage(message).then((response) => {
     sendResponse(response);

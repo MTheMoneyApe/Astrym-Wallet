@@ -6,6 +6,7 @@
   "dependencies": {
     "@solana/kit": "^2.3.0",
     "@solanym/wallet-core": "workspace:*",
+    "@stellar/stellar-sdk": "^17.3.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "webextension-polyfill": "^0.12.0",
@@ -22,11 +23,15 @@
     "build:nym-dev": "node scripts/copy-nym-mixfetch-assets.mjs && vite build --config vite.config.ts && vite build --config vite.background.config.ts && node scripts/smoke-nym-mixfetch-assets.mjs --dist",
     "build:nym-live-smoke": "node scripts/build-nym-live-smoke.mjs",
     "build:spp-host": "vite build --config vite.spp-host.config.ts",
+    "dev:webapp": "node scripts/copy-nym-mixfetch-assets.mjs && node scripts/copy-spp-assets.mjs && vite --config vite.webapp.config.ts --host",
+    "build:webapp": "node scripts/copy-nym-mixfetch-assets.mjs && node scripts/copy-spp-assets.mjs && vite build --config vite.webapp.config.ts && node scripts/smoke-spp-assets.mjs --public",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:responsive": "playwright test --config playwright.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@types/chrome": "^0.3.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

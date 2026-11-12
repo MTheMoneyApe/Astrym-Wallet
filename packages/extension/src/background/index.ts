@@ -35,6 +35,24 @@ import {
   createNymStatusHandler,
 } from './handlers/nymHandlers.js';
 import { isNymOffscreenChannelMessage } from '../nym-offscreen/protocol.js';
+import {
+  isSppHostBridgeMessage,
+  parseSppHostLifecycleEvent,
+  parseSppHostNymFetchRequest,
+  parseSppHostSignRequest,
+} from '../shared/sppHostBridge.js';
+import { createSppPrivatePaymentHandler } from './handlers/sppPrivatePaymentHandler.js';
+import {
+  createSppAccountSnapshotHandler,
+  createSppAccountSyncHandler,
+  createSppRecipientLookupHandler,
+  createSppRegisterPublicKeysHandler,
+} from './handlers/sppAccountHandlers.js';
+import { noteSppHostLifecycle } from './spp/sppPrivatePoolRegistry.js';
+import {
+  handleSppHostNymFetchRequest,
+  handleSppHostSignRequest,
+} from './spp/sppHostBridgeHandlers.js';
 
 import { 
   createUnlockVaultHandler, 
@@ -88,9 +106,9 @@ function initBackgroundSynchronous() {
   (globalThis as any).nymRuntime = nymRuntime;
 
   // Stellar Horizon/Friendbot → FailClosedTransportRouter via MixFetch-aware adapter.
-  // Logical Horizon base = SDF testnet. In mode=nym, getStellarFetch() remaps to the
-  // validated effective base (default Ankr) — see stellarHorizonNymConfig.ts. No silent
-  // clearnet fallback. Default router mode starts as 'nym' (Nym-first). Direct requires explicit user action.
+  // Logical Horizon base = SDF testnet. Default mode=direct (Horizon without Nym).
+  // In mode=nym, getStellarFetch() remaps to the validated MixFetch-effective base
+  // (see stellarHorizonNymConfig.ts) with fail-closed routing (no silent clearnet).
   const stellarFetch = nymRuntime.getStellarFetch();
   const stellarReadClient = new StellarReadClient(
     STELLAR_TESTNET_HORIZON_URL,
@@ -168,6 +186,11 @@ function initBackgroundSynchronous() {
   router.registerHandler('SEND_STELLAR_TRANSFER', createSendStellarTransferHandler(stellarTxClient, stellarTransferConfirmationTracker) as any);
   router.registerHandler('CONFIRM_STELLAR_TRANSFER', createConfirmStellarTransferHandler(stellarTransferConfirmationTracker) as any);
 
+  router.registerHandler('SPP_PRIVATE_PAYMENT', createSppPrivatePaymentHandler());
+  router.registerHandler('SPP_ACCOUNT_SNAPSHOT', createSppAccountSnapshotHandler());
+  router.registerHandler('SPP_RECIPIENT_LOOKUP', createSppRecipientLookupHandler());
+  router.registerHandler('SPP_REGISTER_PUBLIC_KEYS', createSppRegisterPublicKeysHandler());
+  router.registerHandler('SPP_ACCOUNT_SYNC', createSppAccountSyncHandler());
   router.registerHandler('NYM_CONNECT', createNymConnectHandler());
   router.registerHandler('NYM_DISCONNECT', createNymDisconnectHandler());
   router.registerHandler('NYM_STATUS', createNymStatusHandler());
@@ -226,6 +249,46 @@ function initBackgroundSynchronous() {
   // claim the response Promise (offscreen document owns that protocol).
   browser.runtime.onMessage.addListener((message: any, sender: any) => {
     if (isNymOffscreenChannelMessage(message)) {
+      return;
+    }
+    // spp-host ↔ SW bridge: lifecycle events update the registry; sign + Nym
+    // fetch are answered here; execute requests are answered by the host page.
+    if (isSppHostBridgeMessage(message)) {
+      const lifecycle = parseSppHostLifecycleEvent(message);
+      if (lifecycle) {
+        noteSppHostLifecycle({
+          state: lifecycle.state,
+          ...(lifecycle.message !== undefined ? { message: lifecycle.message } : {}),
+        });
+        return Promise.resolve({ ok: true });
+      }
+      const signRequest = parseSppHostSignRequest(message);
+      if (signRequest) {
+        return (async () => {
+          try {
+            await initPromise;
+          } catch {
+            return {
+              channel: signRequest.channel,
+              type: 'SPP_HOST_SIGN_RESULT',
+              id: signRequest.id,
+              ok: false,
+              code: 'VAULT_LOCKED',
+              message: 'Wallet background initialization failed; unlock and retry.',
+            };
+          }
+          return handleSppHostSignRequest(signRequest, {
+            signer,
+            keyManager,
+            networkPassphrase: Networks.TESTNET,
+          });
+        })();
+      }
+      const nymFetchRequest = parseSppHostNymFetchRequest(message);
+      if (nymFetchRequest) {
+        return handleSppHostNymFetchRequest(nymFetchRequest);
+      }
+      // Execute requests: do not claim; host page owns replies.
       return;
     }
     return (async () => {

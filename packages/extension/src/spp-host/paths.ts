@@ -72,11 +72,20 @@ export function assertExtensionOriginUrls(urls: SppHostAssetUrls): void {
     if (typeof value !== 'string' || value.length === 0) {
       throw new Error('SPP asset URL is empty');
     }
+    // Allow chrome-extension://… and path-absolute same-origin (/spp/…) for webapp shim.
+    // Refuse remote http(s) and filesystem paths.
     if (value.startsWith('http://') || value.startsWith('https://')) {
       throw new Error(`Refusing non-extension SPP URL scheme: ${value.slice(0, 32)}…`);
     }
     if (value.startsWith('file:') || value.startsWith('C:') || value.startsWith('/Users/')) {
       throw new Error('Refusing filesystem SPP asset paths');
+    }
+    if (
+      !value.startsWith('chrome-extension:') &&
+      !value.startsWith('/') &&
+      !value.startsWith('blob:')
+    ) {
+      throw new Error(`Unexpected SPP asset URL shape: ${value.slice(0, 48)}`);
     }
   }
 }

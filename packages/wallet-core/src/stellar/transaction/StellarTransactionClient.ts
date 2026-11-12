@@ -115,6 +115,7 @@ export function attachHorizonFetchAdapter(
     }
 
     // 3. Format request headers (supporting plain objects, AxiosHeaders with toJSON/forEach, iterables)
+    // Arrays must be handled before forEach: Array.forEach supplies numeric indexes, not header names.
     const headers: Record<string, string> = {};
     if (config.headers) {
       if (typeof (config.headers as any).toJSON === 'function') {
@@ -126,9 +127,18 @@ export function attachHorizonFetchAdapter(
             }
           }
         }
+      } else if (Array.isArray(config.headers)) {
+        for (const entry of config.headers) {
+          if (Array.isArray(entry) && entry.length >= 2) {
+            const [k, v] = entry;
+            if (k && v !== undefined && v !== null) {
+              headers[String(k).toLowerCase()] = String(v);
+            }
+          }
+        }
       } else if (typeof config.headers.forEach === 'function') {
-        config.headers.forEach((v: unknown, k: string) => {
-          if (v !== undefined && v !== null) {
+        config.headers.forEach((v: unknown, k: unknown) => {
+          if (typeof k === 'string' && v !== undefined && v !== null) {
             headers[k.toLowerCase()] = String(v);
           }
         });
@@ -281,6 +291,27 @@ export function attachHorizonFetchAdapter(
   };
 }
 
+/**
+ * Horizon SDK NotFoundError stores `response` as the response *body* (often
+ * `{ status: 404, … }`), not an Axios envelope. It also does not set `name`.
+ */
+function isHorizonAccountNotFound(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as {
+    name?: unknown;
+    constructor?: { name?: unknown };
+    response?: { status?: unknown } | unknown;
+  };
+  if (e.constructor?.name === 'NotFoundError' || e.name === 'NotFoundError') {
+    return true;
+  }
+  const status =
+    e.response && typeof e.response === 'object'
+      ? (e.response as { status?: unknown }).status
+      : undefined;
+  return status === 404;
+}
+
 export class StellarTransactionClient {
   private readonly _horizon: Horizon.Server;
   private readonly _networkPassphrase: string;
@@ -361,8 +392,8 @@ export class StellarTransactionClient {
     let sourceAccountRecord: Horizon.AccountResponse;
     try {
       sourceAccountRecord = await this._horizon.loadAccount(sourceAddress);
-    } catch (err: any) {
-      if (err.response?.status === 404 || err.name === 'NotFoundError') {
+    } catch (err: unknown) {
+      if (isHorizonAccountNotFound(err)) {
         throw new StellarAccountNotFundedError(
           `Source account ${sourceAddress} is unfunded on Stellar Testnet. Fund it with Friendbot first.`,
         );

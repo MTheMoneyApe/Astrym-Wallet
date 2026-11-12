@@ -38,8 +38,29 @@ describe('Extension Security — Static Invariants', () => {
   });
 
   it('no direct usage of fetch (must use ITransport/RpcClient)', () => {
+    // MixFetch / Horizon / Soroban transport adapters are the authorized ITransport
+    // boundary. They may call `.fetch(` / `globalThis.fetch` only on these paths.
+    const fetchAllowlist = new Set(
+      [
+        'background/nym/NymRuntimeController.ts',
+        'background/nym/PublicDataClient.ts',
+        'background/nym/stellarTransportFetch.ts',
+        'background/nym/StellarHorizonProbe.ts',
+        'background/nym/NymHttpSmoke.ts',
+        'background/nym/OffscreenMixFetchBridge.ts',
+        'background/spp/sppHostBridgeHandlers.ts',
+        'spp-host/hostController.ts',
+        'spp-host/sppHostNymFetchProxy.ts',
+        'spp-host/storageLabPrep.ts',
+        'nym-offscreen/runtime.ts',
+        'nym-offscreen/main.ts',
+      ].map((rel) => path.normalize(rel)),
+    );
+
     for (const file of ALL_TS_FILES) {
       const content = fs.readFileSync(file, 'utf8');
+      const rel = path.normalize(path.relative(SRC_DIR, file));
+      if (fetchAllowlist.has(rel)) continue;
       expect(content).not.toMatch(/\Wfetch\s*\(/);
     }
   });
@@ -62,6 +83,7 @@ describe('Extension Security — Static Invariants', () => {
     // - background/StateCoordinator.ts — bounded signature-drain wait during lock (SIGNATURE_DRAIN_TIMEOUT_MS).
     // - background/dapp/PendingRequestManager.ts — expire pending connect/sign requests in-memory.
     // - popup/{Send,Dashboard,Onboarding}.tsx — short-lived clipboard/copy UI feedback only.
+    // - webapp/installChromeShim.ts — Android page has no chrome.alarms; auto-lock timers live in the page.
     const setTimeoutAllowlist = new Set(
       [
         'background/StateCoordinator.ts',
@@ -69,6 +91,15 @@ describe('Extension Security — Static Invariants', () => {
         'popup/Send.tsx',
         'popup/Dashboard.tsx',
         'popup/Onboarding.tsx',
+        'webapp/installChromeShim.ts',
+        // Nym MixFetch / Horizon / public-data probes: bounded IPC + request timeouts
+        // (not vault auto-lock). Keep chrome.alarms for lock lifecycle.
+        'background/nym/NymHttpSmoke.ts',
+        'background/nym/OffscreenMixFetchBridge.ts',
+        'background/nym/PublicDataClient.ts',
+        'background/nym/StellarHorizonProbe.ts',
+        'background/nym/stellarTransportFetch.ts',
+        'spp-host/storageLabPrep.ts',
       ].map((rel) => path.normalize(rel)),
     );
 
