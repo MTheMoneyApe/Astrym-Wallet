@@ -85,7 +85,10 @@ vi.mock('@solanym/wallet-core/src/nym/NymTransportPolicy.js', () => {
   };
 });
 
-import { NymRuntimeController } from '../../../src/background/nym/NymRuntimeController.js';
+import {
+  NymRuntimeController,
+  resetNymRuntimeControllerForTests,
+} from '../../../src/background/nym/NymRuntimeController.js';
 import { NymGatewayConfigService } from '../../../src/background/nym/NymGatewayConfigService.js';
 import { NymHostPermissionService } from '../../../src/background/nym/NymHostPermissionService.js';
 import { createNymSetModeHandler } from '../../../src/background/handlers/nymHandlers.js';
@@ -143,29 +146,30 @@ async function createTestController(bridgeOverrides: any = {}) {
   return { controller, bridge };
 }
 
-describe('Nym Diagnostic Isolation & Global Direct Mode Rejection', () => {
-  it('controller starts in Nym mode by default', async () => {
+describe('Nym Diagnostic Isolation & Direct/Nym mode policy', () => {
+  it('controller starts in Direct mode by default (Horizon without Nym)', async () => {
     const { controller } = await createTestController();
-    expect(controller.mode).toBe('nym');
-    expect(controller.getSnapshot().mode).toBe('nym');
+    expect(controller.mode).toBe('direct');
+    expect(controller.getSnapshot().mode).toBe('direct');
   });
 
-  it('rejects global Direct mode via setMode() with typed error and leaves mode unchanged', async () => {
+  it('allows switching to Direct and Nym via setMode()', async () => {
     const { controller } = await createTestController();
+    expect(() => controller.setMode('nym')).not.toThrow();
     expect(controller.mode).toBe('nym');
-
-    expect(() => controller.setMode('direct')).toThrow(/Global Direct mode is disabled/i);
-    expect(controller.mode).toBe('nym');
+    expect(() => controller.setMode('direct')).not.toThrow();
+    expect(controller.mode).toBe('direct');
   });
 
-  it('rejects global Direct mode via createNymSetModeHandler() IPC handler', async () => {
+  it('allows Direct mode via createNymSetModeHandler() IPC handler', async () => {
     const { controller } = await createTestController();
-    // Expose controller globally as handler retrieves it via getNymRuntimeController
-    (globalThis as any).nymRuntime = controller;
+    resetNymRuntimeControllerForTests(controller);
 
     const handler = createNymSetModeHandler();
-    await expect(handler({ mode: 'direct' })).rejects.toThrow(/Global Direct mode is disabled/i);
-    expect(controller.mode).toBe('nym');
+    await controller.setMode('nym');
+    const snap = await handler({ mode: 'direct' });
+    expect(snap.mode).toBe('direct');
+    expect(controller.mode).toBe('direct');
   });
 
   it('allows setting Nym mode via setMode("nym")', async () => {

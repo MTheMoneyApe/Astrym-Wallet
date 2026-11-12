@@ -3,6 +3,20 @@ import { sendIpcMessage } from './ipc.js';
 import { Send } from './Send.js';
 import { SppStatusPanel } from './SppStatusPanel.js';
 import { NymTransportPanel } from './NymTransportPanel.js';
+import {
+  SPP_BOOTNODE_URL_KEY,
+  SPP_CONTRACT_CONFIG_KEY,
+  SPP_POOL_CONTRACT_KEY,
+  SPP_PREPARE_STATUS_KEY,
+  isSppWriteReady,
+  type SppPrepareStatus,
+} from '../shared/sppPrepareStatus.js';
+import { ensureSppAutoPrepareIfNeeded } from '../background/spp/sppAutoPrepare.js';
+import { parseSppContractConfig } from '@solanym/wallet-core/src/stellar/spp/sppContractConfig.js';
+import {
+  getNethermindPublicTestnetContractConfig,
+  NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
+} from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import { isThemePalette, THEME_PRESETS, type ThemePalette } from './App.js';
 import { LOCK_TIMEOUT_OPTIONS_MINUTES, type LockTimeoutMinutes } from '@solanym/wallet-core/src/vault/IAlarmService.js';
 import {
@@ -23,6 +37,7 @@ import type {
 } from './NymTransportPanel.js';
 import { beginGatewayPermissionRequestFromUserGesture } from './nymPermissionGesture.js';
 import { NYM_LIVE_SMOKE_EXECUTION_AUTHORIZED } from '../nym-offscreen/liveSmokeAuth.js';
+import { NYM_VERIFIED_GATEWAY } from '../nym-offscreen/verifiedGateway.js';
 
 function coerceNymUiSnapshot(snap: {
   state: NymUiSnapshot['state'];
@@ -279,7 +294,7 @@ export function AccountMenu({
   };
 
   return (
-    <div ref={wrapperRef} style={{ minWidth: 0, flex: 1 }}>
+    <div ref={wrapperRef} className="account-menu-wrap">
       <button
         ref={triggerRef}
         type="button"
@@ -294,7 +309,7 @@ export function AccountMenu({
           gap: 7,
           width: '100%',
           minWidth: 0,
-          minHeight: 38,
+          minHeight: 44,
           padding: '5px 9px',
           border: '1px solid var(--border-dark)',
           borderRadius: 10,
@@ -315,10 +330,10 @@ export function AccountMenu({
       {open && (
         <div
           id="solanym-account-menu"
+          className="account-menu-panel"
           role="menu"
           aria-label="Wallet accounts"
           aria-busy={loading || busy}
-          style={{ position: 'absolute', zIndex: 20, top: 'calc(100% + 8px)', right: 0, width: 'min(320px, calc(100vw - 40px))', maxHeight: 'min(440px, calc(100vh - 84px))', overflowY: 'auto', padding: 8, border: '1px solid var(--border-dark)', borderRadius: 12, background: 'var(--surface-color)', boxShadow: '0 12px 32px rgba(0,0,0,0.36)' }}
         >
           {loading ? (
             <p className="text-secondary" style={{ margin: 0, padding: '10px 8px', fontSize: '0.82rem' }}>Loading accounts...</p>
@@ -446,6 +461,7 @@ function ReceiveAddressView({ account, onBack }: { account: { address: string; l
           <img
             src={qrUrl}
             alt={`Receive address QR for ${account.address}`}
+            className="receive-qr"
             style={{ width: 200, height: 200, display: 'block', background: '#fff', borderRadius: 12, border: '1px solid var(--border-dark)' }}
             onError={() => setQrError('Unable to load QR. Please copy the address below.')}
           />
@@ -455,7 +471,7 @@ function ReceiveAddressView({ account, onBack }: { account: { address: string; l
 
         <div style={{ width: '100%' }}>
           <p className="text-secondary" style={{ margin: '0 0 8px', fontSize: '0.72rem' }}>Public address</p>
-          <div style={{ background: 'var(--bg-color)', border: '1px solid var(--border-dark)', borderRadius: 10, padding: '10px 12px', wordBreak: 'break-all', fontFamily: 'monospace', fontSize: '0.76rem', lineHeight: 1.5 }}>
+          <div className="address-wrap" style={{ background: 'var(--bg-color)', border: '1px solid var(--border-dark)', borderRadius: 10, padding: '10px 12px', fontSize: '0.76rem', lineHeight: 1.5 }}>
             {account.address}
           </div>
         </div>
@@ -513,7 +529,11 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   const [autoLockSaved, setAutoLockSaved] = useState(false);
 
   // Theme State
-  const [themePreset, setThemePreset] = useState<string>('midnight');
+  const [themePreset, setThemePreset] = useState<string>(
+    typeof document !== 'undefined' && document.documentElement.classList.contains('astrym-webapp')
+      ? 'astrym'
+      : 'midnight',
+  );
   const [customColors, setCustomColors] = useState<ThemePalette>({
     '--bg-color': '#11151B',
     '--surface-color': '#1B222B',
@@ -866,6 +886,12 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   const [sppSessionHandle, setSppSessionHandle] = useState<SppSessionStatusHandle | null>(null);
   const [sppSessionGeneration, setSppSessionGeneration] = useState(0);
   const [sppProbeDone, setSppProbeDone] = useState(false);
+  const [sppSelected, setSppSelected] = useState(false);
+  const [sendKind, setSendKind] = useState<'clear' | 'private'>('clear');
+  const [sppPrepareStatus, setSppPrepareStatus] = useState<SppPrepareStatus | null>(null);
+  const [sppPoolContract, setSppPoolContract] = useState('');
+  const [sppContractConfigJson, setSppContractConfigJson] = useState('');
+  const [sppBootnodeUrl, setSppBootnodeUrl] = useState('');
   const sppGenerationRef = useRef(0);
   const sppHandleRef = useRef<SppSessionStatusHandle | null>(null);
 
@@ -918,17 +944,6 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     return () => chrome.storage.onChanged.removeListener(onChanged);
   }, []);
 
-  const sppStatusSnapshot: SppIntegrationSnapshot = useMemo(
-    () =>
-      new SppIntegrationStatus(
-        createPopupSppIntegrationProbe({
-          isFacadePackaged: () => sppFacadePackaged,
-          getSession: () => sppSessionHandle,
-        }),
-      ).snapshot(),
-    [sppFacadePackaged, sppSessionHandle],
-  );
-
   const [nymSnapshot, setNymSnapshot] = useState<NymUiSnapshot>({
     state: 'disconnected',
     lastError: null,
@@ -937,6 +952,115 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     mode: 'direct',
     documentReady: false,
   });
+  const nymReadyForSpp = nymSnapshot.mode === 'nym' && nymSnapshot.connected;
+  const sppStatusSnapshot: SppIntegrationSnapshot = useMemo(
+    () =>
+      new SppIntegrationStatus(
+        createPopupSppIntegrationProbe({
+          isFacadePackaged: () => sppFacadePackaged,
+          getSession: () => sppSessionHandle,
+          isPrivatePaymentsEnabled: () => sppSelected && nymReadyForSpp,
+          isNymTransportActive: () => nymReadyForSpp,
+        }),
+      ).snapshot(),
+    [sppFacadePackaged, sppSessionHandle, sppSelected, nymReadyForSpp],
+  );
+
+  useEffect(() => {
+    if (!nymReadyForSpp && (sppSelected || sendKind === 'private')) {
+      setSppSelected(false);
+      setSendKind('clear');
+    }
+  }, [nymReadyForSpp, sppSelected, sendKind]);
+
+  // Auto-enable SPP option when Nym connects (user can still turn it off).
+  useEffect(() => {
+    if (nymReadyForSpp) setSppSelected(true);
+  }, [nymReadyForSpp]);
+
+  // Re-arm SPP auto-prepare when Nym is already connected (reload / Settings)
+  // without inventing readiness — host must still emit write_pool_ready.
+  useEffect(() => {
+    if (!nymReadyForSpp) return;
+    if (isSppWriteReady(sppPrepareStatus)) return;
+    let cancelled = false;
+    void ensureSppAutoPrepareIfNeeded({
+      nymConnected: true,
+      nymMode: 'nym',
+    })
+      .then((status) => {
+        if (!cancelled && status) setSppPrepareStatus(status);
+      })
+      .catch(() => {
+        /* prepare status publisher records failure */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [nymReadyForSpp, sppPrepareStatus?.phase, sppPrepareStatus?.updatedAt]);
+
+  useEffect(() => {
+    if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) return;
+    chrome.storage.local.get(
+      [
+        SPP_PREPARE_STATUS_KEY,
+        SPP_POOL_CONTRACT_KEY,
+        SPP_CONTRACT_CONFIG_KEY,
+        SPP_BOOTNODE_URL_KEY,
+      ],
+      (res) => {
+        const prep = res[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+        if (prep?.phase) setSppPrepareStatus(prep);
+        const pool = res[SPP_POOL_CONTRACT_KEY];
+        if (typeof pool === 'string') setSppPoolContract(pool);
+        else setSppPoolContract(NETHERMIND_PUBLIC_XLM_POOL_CONTRACT);
+        const cfg = res[SPP_CONTRACT_CONFIG_KEY];
+        if (cfg && typeof cfg === 'object') {
+          setSppContractConfigJson(JSON.stringify(cfg, null, 2));
+        } else if (typeof cfg === 'string') {
+          setSppContractConfigJson(cfg);
+        } else {
+          const pinned = getNethermindPublicTestnetContractConfig();
+          setSppContractConfigJson(JSON.stringify(pinned, null, 2));
+          void chrome.storage.local.set({
+            [SPP_CONTRACT_CONFIG_KEY]: pinned,
+            [SPP_POOL_CONTRACT_KEY]: NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
+          });
+        }
+        const boot = res[SPP_BOOTNODE_URL_KEY];
+        if (typeof boot === 'string') setSppBootnodeUrl(boot);
+      },
+    );
+    const onChanged = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ) => {
+      if (area !== 'local') return;
+      if (changes[SPP_PREPARE_STATUS_KEY]?.newValue) {
+        setSppPrepareStatus(changes[SPP_PREPARE_STATUS_KEY].newValue as SppPrepareStatus);
+      }
+      if (typeof changes[SPP_POOL_CONTRACT_KEY]?.newValue === 'string') {
+        setSppPoolContract(changes[SPP_POOL_CONTRACT_KEY].newValue as string);
+      }
+      if (changes[SPP_CONTRACT_CONFIG_KEY]?.newValue) {
+        const next = changes[SPP_CONTRACT_CONFIG_KEY].newValue;
+        if (typeof next === 'string') setSppContractConfigJson(next);
+        else if (next && typeof next === 'object') {
+          setSppContractConfigJson(JSON.stringify(next, null, 2));
+        }
+      }
+      if (typeof changes[SPP_BOOTNODE_URL_KEY]?.newValue === 'string') {
+        setSppBootnodeUrl(changes[SPP_BOOTNODE_URL_KEY].newValue as string);
+      } else if (
+        changes[SPP_BOOTNODE_URL_KEY] &&
+        changes[SPP_BOOTNODE_URL_KEY].newValue === undefined
+      ) {
+        setSppBootnodeUrl('');
+      }
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, []);
   const [nymBusy, setNymBusy] = useState(false);
   const [nymHttpSmokeResult, setNymHttpSmokeResult] = useState<NymHttpSmokeUiResult | null>(
     null,
@@ -970,7 +1094,31 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     };
   }, [view]);
 
-  const handleNymConnect = async () => {
+  const handleNymConnect = () => {
+    const origin = nymSnapshot.selectedGateway || NYM_VERIFIED_GATEWAY.wssOrigin;
+    const permissionsApi = typeof chrome !== 'undefined' ? chrome.permissions : undefined;
+    let permissionPending: ReturnType<typeof beginGatewayPermissionRequestFromUserGesture> | null =
+      null;
+    if (permissionsApi && typeof permissionsApi.request === 'function') {
+      try {
+        permissionPending = beginGatewayPermissionRequestFromUserGesture(origin);
+      } catch (err: unknown) {
+        setNymSnapshot((prev) => ({
+          ...prev,
+          state: 'error',
+          connected: false,
+          documentReady: false,
+          lastError: err instanceof Error ? err.message : 'Host permission request failed to start',
+          diagnosticCode:
+            err && typeof err === 'object' && 'code' in err
+              ? String((err as { code: unknown }).code)
+              : 'PERMISSION_REQUEST_FAILED',
+          gatewayHostPermissionGranted: false,
+        }));
+        return;
+      }
+    }
+
     setNymBusy(true);
     setNymSnapshot((prev) => ({
       ...prev,
@@ -978,20 +1126,38 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
       connected: false,
       lastError: null,
     }));
-    try {
-      const snap = await sendIpcMessage('NYM_CONNECT', {});
-      setNymSnapshot(coerceNymUiSnapshot(snap));
-    } catch (err: unknown) {
-      setNymSnapshot((prev) => ({
-        ...prev,
-        state: 'error',
-        connected: false,
-        documentReady: false,
-        lastError: err instanceof Error ? err.message : 'NYM_CONNECT failed',
-      }));
-    } finally {
-      setNymBusy(false);
-    }
+    void (async () => {
+      try {
+        if (permissionPending) {
+          const gesture = await permissionPending;
+          if (!gesture.granted) {
+            setNymSnapshot((prev) => ({
+              ...prev,
+              state: 'error',
+              connected: false,
+              documentReady: false,
+              lastError:
+                'Host permission not granted. Grant the gateway, then Connect. Permission ≠ Mixnet Ready.',
+              diagnosticCode: 'PERMISSION_DENIED',
+              gatewayHostPermissionGranted: false,
+            }));
+            return;
+          }
+        }
+        const snap = await sendIpcMessage('NYM_CONNECT', {});
+        setNymSnapshot(coerceNymUiSnapshot(snap));
+      } catch (err: unknown) {
+        setNymSnapshot((prev) => ({
+          ...prev,
+          state: 'error',
+          connected: false,
+          documentReady: false,
+          lastError: err instanceof Error ? err.message : 'NYM_CONNECT failed',
+        }));
+      } finally {
+        setNymBusy(false);
+      }
+    })();
   };
 
   const handleNymDisconnect = async () => {
@@ -1047,14 +1213,13 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   };
 
   const handleNymRequestPermission = () => {
-    const origin = nymSnapshot.selectedGateway;
-    if (!origin) {
+    const origin = nymSnapshot.selectedGateway || NYM_VERIFIED_GATEWAY.wssOrigin;
+    if (typeof chrome === 'undefined' || typeof chrome.permissions?.request !== 'function') {
       setNymSnapshot((prev) => ({
         ...prev,
-        state: prev.state === 'connected' ? 'disconnected' : prev.state,
-        connected: false,
-        lastError: 'Save an exact WSS gateway before granting host permission',
-        diagnosticCode: 'GATEWAY_ALLOWLIST_EMPTY',
+        lastError:
+          'El webapp de Android no usa permisos de host de Chrome. Pulsa Connect: el gateway verificado se configura solo y MixFetch corre en esta página.',
+        diagnosticCode: 'OK',
       }));
       return;
     }
@@ -1388,7 +1553,19 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   }
 
   if (view === 'send' && account) {
-    return <Send onBack={() => setView('dashboard')} accountIndex={account.index} accountAddress={account.address} onComplete={() => setView('dashboard')} />;
+    return (
+      <Send
+        onBack={() => setView('dashboard')}
+        accountIndex={account.index}
+        accountAddress={account.address}
+        onComplete={() => setView('dashboard')}
+        privatePaymentsEnabled={sppSelected && nymReadyForSpp}
+        privatePreparePhase={sppPrepareStatus?.phase ?? 'idle'}
+        privatePoolContract={sppPoolContract}
+        paymentMode={sendKind}
+        onPaymentModeChange={setSendKind}
+      />
+    );
   }
 
   if (view === 'settings') {
@@ -1404,6 +1581,59 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           snapshot={sppStatusSnapshot}
           probing={!sppProbeDone}
           sessionGeneration={sppSessionGeneration}
+          nymMode={nymSnapshot.mode === 'nym' ? 'nym' : 'direct'}
+          nymConnected={nymSnapshot.connected}
+          sppSelected={sppSelected}
+          prepareStatus={sppPrepareStatus ?? null}
+          poolContract={sppPoolContract}
+          contractConfigJson={sppContractConfigJson}
+          bootnodeUrl={sppBootnodeUrl}
+          onToggleSpp={(next) => {
+            if (!nymReadyForSpp) return;
+            setSppSelected(next);
+            if (!next) setSendKind('clear');
+          }}
+          onPoolContractChange={(contract) => {
+            setSppPoolContract(contract);
+            if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+              void chrome.storage.local.set({ [SPP_POOL_CONTRACT_KEY]: contract });
+            }
+          }}
+          onContractConfigJsonChange={(json) => {
+            setSppContractConfigJson(json);
+            if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+            const trimmed = json.trim();
+            if (!trimmed) {
+              void chrome.storage.local.remove(SPP_CONTRACT_CONFIG_KEY);
+              return;
+            }
+            try {
+              const parsed = parseSppContractConfig(JSON.parse(trimmed) as unknown);
+              void chrome.storage.local.set({ [SPP_CONTRACT_CONFIG_KEY]: parsed });
+            } catch {
+              // Keep textarea text; do not persist invalid JSON as ready config.
+            }
+          }}
+          onBootnodeUrlChange={(url) => {
+            setSppBootnodeUrl(url);
+            if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+            if (!url) {
+              void chrome.storage.local.remove(SPP_BOOTNODE_URL_KEY);
+              return;
+            }
+            void chrome.storage.local.set({ [SPP_BOOTNODE_URL_KEY]: url });
+          }}
+          onUseNethermindPublic={() => {
+            const pinned = getNethermindPublicTestnetContractConfig();
+            setSppPoolContract(NETHERMIND_PUBLIC_XLM_POOL_CONTRACT);
+            setSppContractConfigJson(JSON.stringify(pinned, null, 2));
+            if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+              void chrome.storage.local.set({
+                [SPP_CONTRACT_CONFIG_KEY]: pinned,
+                [SPP_POOL_CONTRACT_KEY]: NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
+              });
+            }
+          }}
         />
         <NymTransportPanel
           snapshot={nymSnapshot}
@@ -1432,6 +1662,7 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
             className="input-field"
             style={{ width: '100%', marginBottom: 15 }}
           >
+            <option value="astrym">Astrym</option>
             <option value="midnight">Midnight Green</option>
             <option value="lightmint">Light Mint</option>
             <option value="forest">Forest</option>

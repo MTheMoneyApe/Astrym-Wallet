@@ -26,6 +26,7 @@ Cross-checked against Nym’s official Node Status API (re-verify before live us
 | Field | Value |
 | --- | --- |
 | Identity (`preferredGateway`) | `q2A2cbooyC16YJzvdYaSMH9X3cSiieZNtfBr8cE8Fi1` |
+| Network Requester (`preferredNetworkRequester`) | `7Y9eyF1p1JmzHnd7TVZufnQHkh93ASc9sRBCFY57ZGr8.F8KPyVMVqFQ5yJC3LqeP2ZC7fukzj9a1T426rjo432yT@q2A2cbooyC16YJzvdYaSMH9X3cSiieZNtfBr8cE8Fi1` (gateway `self_described.network_requester`, `uses_exit_policy=false`) |
 | Docs source | https://nym.com/docs/developers/mix-fetch/migration |
 | Status API | https://mainnet-node-status-api.nymtech.cc/v2/gateways/q2A2cbooyC16YJzvdYaSMH9X3cSiieZNtfBr8cE8Fi1 |
 | Hostname | `nym-node-cli.devrel.nymte.ch` |
@@ -34,6 +35,10 @@ Cross-checked against Nym’s official Node Status API (re-verify before live us
 | Host permission pattern | `https://nym-node-cli.devrel.nymte.ch:9001/*` |
 | Bonded / entry | `true` / `entry: true` |
 | Code constant | `NYM_VERIFIED_GATEWAY` in `verifiedGateway.ts` |
+
+**Important:** `createMixFetch` Ready ≠ working HTTP. Without `preferredNetworkRequester`,
+mix-fetch picks a random NR among hundreds; many hang forever at SOCKS `SENDING CONNECT`.
+Solanym pins the verified gateway’s own NR on Connect when using that identity.
 
 The development manifest lists that **exact** pattern under `optional_host_permissions`.
 Chrome will not grant it until you click **Grant permission** in the Solanym UI (user gesture).

@@ -256,7 +256,7 @@ export function NymTransportPanel({
           <button
             type="button"
             className="btn-secondary"
-            disabled={busy || !snapshot.selectedGateway}
+            disabled={busy}
             onClick={(e) => {
               // Keep request on the click stack — handler must not await IPC first.
               e.preventDefault();
@@ -301,15 +301,15 @@ export function NymTransportPanel({
             >
               Nym mode
             </button>
-            {/* Founder Decision F: Global Direct mode is disabled. Direct requires operation-specific authorization. */}
             <button
               type="button"
               className="btn-secondary"
-              disabled={true}
+              disabled={busy || mode === 'direct'}
+              onClick={() => onSetMode('direct')}
               data-testid="nym-mode-direct"
-              title="Global Direct mode is disabled. Direct requires operation-specific authorization."
+              title="Horizon / clearnet for ordinary wallet ops. Private SPP stays Nym-only."
             >
-              Direct (disabled)
+              Direct (Horizon)
             </button>
           </>
         ) : null}
@@ -572,14 +572,14 @@ export function NymTransportPanel({
       ) : null}
 
       <p style={{ margin: '10px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
-        Flujo: 1) Save gateway → 2) Grant permission (click) → 3) Smoke dry-run → 4) Connect solo
-        tras permiso y (live) build autorizado. 5) HTTP smoke solo con MixFetch Ready. Dry-run nunca
-        abre Mixnet. Fallo Mixnet ≠ clearnet.
+        Por defecto la wallet usa Horizon en Direct. Connect activa Nym (MixFetch fail-closed).
+        Disconnect vuelve a Direct. En modo Nym no hay fallback silencioso a clearnet. En la
+        extensión, el permiso de host se pide en el mismo clic; en Android MixFetch corre en la página.
       </p>
       {mode === 'nym' && !ready ? (
         <p style={{ margin: '6px 0 0', fontSize: '0.72rem', color: 'var(--muted, #888)' }}>
-          Protected Stellar Horizon/Friendbot requests stay blocked until Mixnet is Ready
-          (no clearnet fallback).
+          Mientras Nym está seleccionado y no Ready, las peticiones Stellar por MixFetch fallan
+          cerradas (sin clearnet). Usa Direct para Horizon ordinario.
         </p>
       ) : null}
     </div>

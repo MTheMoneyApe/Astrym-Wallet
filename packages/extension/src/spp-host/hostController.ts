@@ -38,6 +38,12 @@ import {
   type SppSessionPrepInput,
 } from './sessionConstruct.js';
 import {
+  clearSppHostWritePool,
+  noteSppHostReadonlySessionReady,
+} from './sppHostWritePool.js';
+import { initializeSppHostWritePool } from './sppHostWritePoolFactory.js';
+import type { Client } from 'stellar-private-payments';
+import {
   SppStorageLabPrep,
   type StorageLabEvidence,
   type StorageLabGateInput,
@@ -185,6 +191,12 @@ export class SppHostController {
   private _facadeModule: Record<string, unknown> | null = null;
   private _sessionConstructError: string | null = null;
   private _sessionStatusGeneration = 0;
+  private _sessionInitializeEnabled = false;
+  private _constructedSession: SppSession | null = null;
+  /** Full SDK Client retained only in this page for write-pool init (not shared to SW). */
+  private _writeClient: Client | null = null;
+  /** rpcUrl from last successful session construct (needed for Nym-proxied write init). */
+  private _sessionRpcUrl: string | null = null;
   private readonly _deps: SppHostControllerDeps;
   private readonly _storageLab: SppStorageLabPrep;
 
@@ -249,6 +261,11 @@ export class SppHostController {
    */
   clearBoundSession(): void {
     this._boundSession = null;
+    this._constructedSession = null;
+    this._sessionInitializeEnabled = false;
+    this._writeClient = null;
+    this._sessionRpcUrl = null;
+    clearSppHostWritePool('session cleared');
     this._emitBoundSessionChange();
   }
 
@@ -288,7 +305,13 @@ export class SppHostController {
 
       const validated = validateSppSessionPrepInput(prep);
       const deps = extractSppSdkRuntimeDepsFromLoadedFacade(this._facadeModule);
-      const runtime = buildSppSdkRuntimeFromDeps(deps);
+      this._writeClient = null;
+      const runtime = buildSppSdkRuntimeFromDeps({
+        ...deps,
+        onClientCreated: (client) => {
+          this._writeClient = client;
+        },
+      });
       const config: SppSessionConfig = {
         rpcUrl: validated.rpcUrl,
         contractConfig: validated.contractConfig as SppSessionConfig['contractConfig'],
@@ -308,6 +331,9 @@ export class SppHostController {
         throw new Error(`Expected uninitialized session, got ${session.state}`);
       }
 
+      this._constructedSession = session;
+      this._sessionRpcUrl = validated.rpcUrl;
+      this._sessionInitializeEnabled = false;
       this.attachExistingSession(session);
       return this.snapshot();
     } catch (cause) {
@@ -324,6 +350,60 @@ export class SppHostController {
    * Synchronous RO mirror via {@link readSppSessionStatusHandle}.
    * Safe for probes; does not call initialize, RO reads, or dispose.
    */
+  async initializeBoundSessionForNym(nymActive: boolean): Promise<SppHostSnapshot> {
+    if (!nymActive) {
+      throw new Error('Stellar Private Payments requiere Nym conectado');
+    }
+    const bound = this._constructedSession;
+    if (!bound) {
+      throw new Error('Construye la sesión SPP antes de inicializarla');
+    }
+    await bound.initialize();
+    this._sessionInitializeEnabled = bound.state === 'ready';
+    this._emitBoundSessionChange();
+    // RO session is ready in this page. Write PrivatePool still requires
+    // Client.account()+signer wiring — announce readonly so the SW knows the host is up.
+    if (bound.state === 'ready') {
+      noteSppHostReadonlySessionReady();
+    }
+    return this.snapshot();
+  }
+
+  /**
+   * Create PrivatePool via Client.account + remote WalletSigner + derivePrivacyKeys.
+   * Requires Nym active and a write Client retained from RO initialize.
+   * Fail-closed: does not invent success without a registered write pool.
+   */
+  async initializeWritePoolForNym(input: {
+    nymActive: boolean;
+    poolContract: string;
+    userAddress: string;
+    networkPassphrase: string;
+  }): Promise<SppHostSnapshot> {
+    if (!input.nymActive) {
+      throw new Error('Stellar Private Payments write pool requires Nym connected');
+    }
+    if (!this._constructedSession || this._constructedSession.state !== 'ready') {
+      throw new Error('Initialize the SPP RO session before creating a write pool');
+    }
+    if (!this._writeClient) {
+      throw new Error(
+        'Write Client unavailable (RO session did not retain Client). Reconstruct and re-initialize the session.',
+      );
+    }
+    if (!this._sessionRpcUrl) {
+      throw new Error('SPP session rpcUrl unavailable for write pool init');
+    }
+    await initializeSppHostWritePool({
+      client: this._writeClient,
+      rpcUrl: this._sessionRpcUrl,
+      poolContract: input.poolContract,
+      userAddress: input.userAddress,
+      networkPassphrase: input.networkPassphrase,
+    });
+    return this.snapshot();
+  }
+
   readBoundSessionStatus(): SppSessionStatusHandle | null {
     return readSppSessionStatusHandle(this._boundSession);
   }
@@ -365,7 +445,7 @@ export class SppHostController {
       wasmErrorMessage: this._wasmErrorMessage,
       wasmInitialized: this._wasmPhase === 'ready',
       sdkInitialized: this._boundSession?.state === 'ready',
-      sessionInitializeEnabled: false,
+      sessionInitializeEnabled: this._sessionInitializeEnabled,
       sessionBound: this._boundSession !== null,
       sessionState: this._boundSession?.state ?? null,
       sessionConstructError: this._sessionConstructError,

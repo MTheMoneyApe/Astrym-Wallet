@@ -138,9 +138,14 @@ export class SignedXdrValidator {
         );
       }
       const rawMemo = decoded.memo.value;
-      const actualMemo = Buffer.isBuffer(rawMemo)
-        ? rawMemo.toString('utf8')
-        : String(rawMemo ?? '');
+      // stellar-sdk may surface text memos as Buffer, Uint8Array, or string depending
+      // on decode path; never use String(Uint8Array) (comma-joined code points).
+      const actualMemo =
+        typeof rawMemo === 'string'
+          ? rawMemo
+          : rawMemo instanceof Uint8Array
+            ? Buffer.from(rawMemo).toString('utf8')
+            : String(rawMemo ?? '');
       if (actualMemo !== expectedMemo) {
         throw new StellarXdrValidationError(
           `Memo mismatch: expected "${expectedMemo}", got "${actualMemo}"`,
@@ -156,6 +161,9 @@ export class SignedXdrValidator {
     }
 
     const op = decoded.operations[0];
+    if (!op) {
+      throw new StellarXdrValidationError('Expected exactly 1 operation, found 0');
+    }
 
     // DEFECT-04: Strict check against per-operation source override
     if (op.source !== undefined && op.source !== null) {

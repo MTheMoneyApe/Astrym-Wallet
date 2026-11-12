@@ -349,7 +349,8 @@ describe('Fase 5G.3 surface guarantees (static)', () => {
     expect(main).toMatch(/constructAndAttachUninitializedSession/);
     expect(controller).toMatch(/constructAndAttachUninitializedSession/);
     expect(controller).toMatch(/constructUninitializedSppSession/);
-    expect(controller).toMatch(/sessionInitializeEnabled:\s*false/);
+    expect(controller).toMatch(/_sessionInitializeEnabled = false/);
+    expect(controller).toMatch(/initializeBoundSessionForNym/);
     expect(mainCode).not.toMatch(/\.initialize\s*\(/);
     expect(mainCode).not.toMatch(/\.dispose\s*\(/);
     expect(controllerCode).not.toMatch(/session\.initialize\s*\(/);

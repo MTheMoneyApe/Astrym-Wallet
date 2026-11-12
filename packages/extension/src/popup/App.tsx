@@ -3,6 +3,7 @@ import { sendIpcMessage } from './ipc.js';
 import { Onboarding } from './Onboarding.js';
 import { Unlock } from './Unlock.js';
 import { Dashboard } from './Dashboard.js';
+import { OpenAndroidWebappBar } from './OpenAndroidWebappBar.js';
 // Founder Decision A: ApproveConnect and ApproveSign removed from active startup flow.
 // Legacy component sources preserved in ./ApproveConnect.tsx and ./ApproveSign.tsx.
 
@@ -44,7 +45,14 @@ export const THEME_PRESETS: Record<string, ThemePalette> = {
     '--accent-color': '#8FE8A8',
     '--text-main': '#F1FFF5',
     '--text-sec': '#A9C8B4',
-  }
+  },
+  astrym: {
+    '--bg-color': '#191A1C',
+    '--surface-color': '#141416',
+    '--accent-color': '#3CE894',
+    '--text-main': '#FFFFFF',
+    '--text-sec': '#D0D5DD',
+  },
 };
 
 export function App() {
@@ -55,8 +63,11 @@ export function App() {
     // Load theme
     chrome.storage.local.get(['themePreset', 'customColors'], (res) => {
       const storage = res as Record<string, unknown>;
-      const presetId = typeof storage['themePreset'] === 'string' ? String(storage['themePreset']) : 'midnight';
-      const fallbackColors = THEME_PRESETS['midnight'] as ThemePalette;
+      const webapp = document.documentElement.classList.contains('astrym-webapp');
+      const presetId = typeof storage['themePreset'] === 'string'
+        ? String(storage['themePreset'])
+        : webapp ? 'astrym' : 'midnight';
+      const fallbackColors = (webapp ? THEME_PRESETS['astrym'] : THEME_PRESETS['midnight']) as ThemePalette;
       let colors: ThemePalette = fallbackColors;
       const presetColors = THEME_PRESETS[presetId] as ThemePalette | undefined;
       if (presetColors) {
@@ -130,16 +141,31 @@ export function App() {
     }
   };
 
-  if (error) {
-    return (
-      <div style={{ padding: 20, color: 'red' }}>
-        <h2>Error</h2>
-        <p>{error}</p>
-        <button onClick={() => { setError(null); checkWalletState(); }}>Retry</button>
-      </div>
-    );
-  }
+  const screen = error ? (
+    <div style={{ padding: 20, color: 'red' }}>
+      <h2>Error</h2>
+      <p>{error}</p>
+      <button onClick={() => { setError(null); checkWalletState(); }}>Retry</button>
+    </div>
+  ) : (
+    renderWalletScreen(appState, checkWalletState)
+  );
 
+  // Desktop extension popup must not show Android/PWA chrome.
+  // Webapp (html.astrym-webapp) keeps the compact brand bar only.
+  const showWebappBrandBar =
+    typeof document !== 'undefined' &&
+    document.documentElement.classList.contains('astrym-webapp');
+
+  return (
+    <div className="wallet-shell">
+      {showWebappBrandBar ? <OpenAndroidWebappBar /> : null}
+      {screen}
+    </div>
+  );
+}
+
+function renderWalletScreen(appState: AppState, checkWalletState: () => Promise<void>) {
   switch (appState) {
     case 'LOADING':
       return <div className="center-content">Loading Astrym...</div>;
@@ -149,7 +175,9 @@ export function App() {
       return <Unlock onUnlock={checkWalletState} />;
     case 'DASHBOARD':
       return <Dashboard onLock={checkWalletState} />;
-    default:
-      return null;
+    default: {
+      const unexpected: never = appState;
+      throw new Error(`Unhandled wallet screen: ${String(unexpected)}`);
+    }
   }
 }

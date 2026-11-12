@@ -229,11 +229,11 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
         }
         .onboarding-logo {
           display: block;
-          width: 128px;
-          height: 128px;
+          width: 72px;
+          height: 72px;
           margin-bottom: 20px;
           object-fit: contain;
-          border-radius: 22px;
+          border-radius: 16px;
         }
         .onboarding-logo--small {
           width: 48px;

@@ -112,6 +112,21 @@ export type SppSdkRuntimeDeps = {
   Client: {
     new: (options: ClientNewOptions) => Promise<Client>;
   };
+  /**
+   * Optional SDK `bootnodeRequired` probe. When true and no `bootnodeUrl` is
+   * configured, initialize fails closed (never invents a bootnode URL).
+   */
+  bootnodeRequired?: (
+    rpcUrl: string,
+    storage: Storage,
+    options: { contractConfig: ContractConfigInput },
+  ) => Promise<boolean>;
+  /**
+   * Optional hook after `Client.new` succeeds. Used by spp-host to retain the
+   * full Client for write-pool init without exposing mutators on {@link SppSession}.
+   * Must not escape secrets; Client still lives only in the host page.
+   */
+  onClientCreated?: (client: Client) => void;
 };
 
 /**
@@ -126,6 +141,18 @@ export function createSppSdkRuntime(deps: SppSdkRuntimeDeps): SppSessionRuntime 
       const storage = await deps.Storage.open({
         workerUrl: args.assets.storageWorkerUrl,
       });
+      let bootnodeUrl = args.bootnodeUrl;
+      if (deps.bootnodeRequired) {
+        const required = await deps.bootnodeRequired(args.rpcUrl, storage, {
+          contractConfig: args.contractConfig,
+        });
+        if (required && (bootnodeUrl === undefined || !bootnodeUrl.trim())) {
+          throw new SppSessionError(
+            'INVALID_CONFIG',
+            'bootnodeRequired=true but bootnodeUrl is missing. Nethermind publishes no public bootnode; configure a self-hosted URL or fail closed.',
+          );
+        }
+      }
       const options: ClientNewOptions = {
         rpcUrl: args.rpcUrl,
         contractConfig: args.contractConfig,
@@ -134,10 +161,15 @@ export function createSppSdkRuntime(deps: SppSdkRuntimeDeps): SppSessionRuntime 
         storage,
         proverWorkerUrl: args.assets.proverWorkerUrl,
       };
-      if (args.bootnodeUrl !== undefined) {
-        options.bootnodeUrl = args.bootnodeUrl;
+      if (bootnodeUrl !== undefined && bootnodeUrl.trim()) {
+        options.bootnodeUrl = bootnodeUrl.trim();
       }
       const client = await deps.Client.new(options);
+      try {
+        deps.onClientCreated?.(client);
+      } catch {
+        // Hook failures must not leave a half-ready RO session.
+      }
       return {
         aspState: () => client.aspState(),
         allContractsData: () => client.allContractsData(),

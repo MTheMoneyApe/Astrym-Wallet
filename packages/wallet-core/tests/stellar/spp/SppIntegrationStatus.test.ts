@@ -102,6 +102,25 @@ describe('SppIntegrationStatus', () => {
     expect(snap.error).toBeNull();
   });
 
+  it('enables private_payments only when the session is ready, the option is on, and Nym is connected', () => {
+    const ready = () => ({ state: 'ready' as const, lastErrorMessage: null });
+    const on = new SppIntegrationStatus({
+      isFacadePackaged: () => true,
+      isPrivatePaymentsEnabled: () => true,
+      isNymTransportActive: () => true,
+      getSession: ready,
+    }).snapshot();
+    expect(on.capabilities.private_payments).toBe(true);
+
+    const nymOff = new SppIntegrationStatus({
+      isFacadePackaged: () => true,
+      isPrivatePaymentsEnabled: () => true,
+      isNymTransportActive: () => false,
+      getSession: ready,
+    }).snapshot();
+    expect(nymOff.capabilities.private_payments).toBe(false);
+  });
+
   it('treats uninitialized/initializing/disposed session as not_initialized', () => {
     for (const state of ['uninitialized', 'initializing', 'disposed'] as const) {
       const snap = new SppIntegrationStatus({

@@ -72,8 +72,9 @@ export function extractSppSdkRuntimeDepsFromLoadedFacade(
   const ClientNs = facadeModule['Client'] as {
     new: SppSdkRuntimeDeps['Client']['new'];
   };
+  const bootnodeRequiredFn = facadeModule['bootnodeRequired'];
 
-  return {
+  const deps: SppSdkRuntimeDeps = {
     initWasm: async (wasmUrl: string) => {
       await initFn({ module_or_path: wasmUrl });
     },
@@ -84,6 +85,11 @@ export function extractSppSdkRuntimeDepsFromLoadedFacade(
       new: (options) => ClientNs.new(options),
     },
   };
+  if (typeof bootnodeRequiredFn === 'function') {
+    const probe = bootnodeRequiredFn as NonNullable<SppSdkRuntimeDeps['bootnodeRequired']>;
+    deps.bootnodeRequired = (rpcUrl, storage, options) => probe(rpcUrl, storage, options);
+  }
+  return deps;
 }
 
 /**
@@ -155,12 +161,18 @@ export function validateSppSessionPrepInput(input: SppSessionPrepInput): Validat
   ) {
     throw new Error('contractConfig must be a non-null object');
   }
+  if ((input.contractConfig as { labPlaceholder?: unknown }).labPlaceholder === true) {
+    throw new Error('Rejecting labPlaceholder contractConfig — supply real deployments.json');
+  }
   if (
     input.circuitLock === null ||
     typeof input.circuitLock !== 'object' ||
     Array.isArray(input.circuitLock)
   ) {
     throw new Error('circuitLock must be a non-null object');
+  }
+  if ((input.circuitLock as { labPlaceholder?: unknown }).labPlaceholder === true) {
+    throw new Error('Rejecting labPlaceholder circuitLock — load packaged circuits.json');
   }
   const out: ValidatedSppSessionPrep = {
     rpcUrl,
