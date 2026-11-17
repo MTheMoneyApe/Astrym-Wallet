@@ -1,0 +1,77 @@
+{
+  "ok": false,
+  "baselineSha": "2dedcc4f68be57558fd0042d0df25ac26f45f23c",
+  "candidateSha": "215d5dc2d94a600c401e8fb1ded0dda669cde0f9",
+  "baseSha": "2dedcc4f68be57558fd0042d0df25ac26f45f23c",
+  "headSha": "215d5dc2d94a600c401e8fb1ded0dda669cde0f9",
+  "mergeSha": "",
+  "baselineErrorCount": 328,
+  "candidateErrorCount": 328,
+  "baselineFailedCount": 2,
+  "candidateFailedCount": 1,
+  "baselineFailingFiles": 2,
+  "candidateFailingFiles": 1,
+  "addedErrors": [
+    {
+      "package": "extension",
+      "file": "src/background/nym/NymRuntimeController.ts",
+      "line": 1043,
+      "code": "TS2379",
+      "count": 1
+    }
+  ],
+  "addedFailures": [],
+  "addedFailingFiles": [],
+  "deletedTests": [
+    {
+      "package": "extension",
+      "file": "tests/website/landing.test.ts",
+      "fullName": "Astrym landing page uses the Astrym palette and the three typefaces",
+      "baselineStatus": "passed"
+    },
+    {
+      "package": "extension",
+      "file": "tests/background/nym/NymDiagnosticIsolation.test.ts",
+      "fullName": "Nym Diagnostic Isolation & Direct/Nym mode policy controller starts in Direct mode by default (Horizon without Nym)",
+      "baselineStatus": "passed"
+    },
+    {
+      "package": "extension",
+      "file": "tests/background/nym/NymDiagnosticIsolation.test.ts",
+      "fullName": "Nym Diagnostic Isolation & Direct/Nym mode policy A diagnostic explicitly requesting Direct uses isolated clearnet while wallet router is in Nym mode",
+      "baselineStatus": "passed"
+    }
+  ],
+  "becameSkipped": [],
+  "problems": [],
+  "toolchain": {
+    "baseline": {
+      "node": "v22.23.4",
+      "pnpm": "10.33.4"
+    },
+    "candidate": {
+      "node": "v22.23.4",
+      "pnpm": "10.33.4"
+    },
+    "same": true
+  },
+  "staticInvariants": {
+    "2dedcc4f68be57558fd0042d0df25ac26f45f23c": [
+      {
+        "file": "wallet-core/tests/security/staticInvariants.test.ts",
+        "fullName": "Security \u2014 Static Invariants no case-insensitive \"mainnet\" under src/",
+        "status": "failed",
+        "reason": "AssertionError: expected '/**\\n * hard gate for testnet private\u2026' not to contain 'mainnet'"
+      }
+    ],
+    "215d5dc2d94a600c401e8fb1ded0dda669cde0f9": [
+      {
+        "file": "wallet-core/tests/security/staticInvariants.test.ts",
+        "fullName": "Security \u2014 Static Invariants no case-insensitive \"mainnet\" under src/",
+        "status": "failed",
+        "reason": "AssertionError: expected '/**\\n * hard gate for testnet private\u2026' not to contain 'mainnet'"
+      }
+    ]
+  },
+  "walletCoreLogs": "reused from 8e1606c87cd538f5b3b795dd3f071da228a918a8 because packages/wallet-core and packages/extension/src are identical"
+}
