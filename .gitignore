@@ -21,7 +21,9 @@ packages/extension/public/nym-mixfetch/
 # Editor / local agent tooling
 .vscode/
 .idea/
-.cursor/
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
 .continue/
 *.swp
 
