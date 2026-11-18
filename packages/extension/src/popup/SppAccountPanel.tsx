@@ -63,6 +63,13 @@ export function sppDerivationV3RegisterFields(kdfDomain: string): {
   };
 }
 
+const HELD_REGISTRATION_NOTE = 'Registro retenido: aún no hay firma Registration v1';
+
+function isBroadcastAwaitingApproval(cause: unknown): boolean {
+  if (typeof cause !== 'object' || cause === null || !('code' in cause)) return false;
+  return (cause as { code: unknown }).code === 'BROADCAST_AWAITING_APPROVAL';
+}
+
 function stroopsToXlm(stroops: string | null): string {
   if (!stroops) return '—';
   try {
@@ -89,7 +96,7 @@ export function SppAccountPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [registerNote, setRegisterNote] = useState<string | null>(null);
-  const [registerState, setRegisterState] = useState<'idle' | 'sign-blocked' | 'submitted'>('idle');
+  const [registerState, setRegisterState] = useState<'idle' | 'sign-blocked' | 'failed'>('idle');
   const [confirmRegister, setConfirmRegister] = useState(false);
   const [confirmDerivation, setConfirmDerivation] = useState(false);
   const [derivationNote, setDerivationNote] = useState<string | null>(null);
@@ -104,7 +111,10 @@ export function SppAccountPanel({
   useEffect(() => {
     setConfirmDerivation(false);
     setDerivationNote(null);
+    setConfirmRegister(false);
   }, [preparePhase, prepareGeneration, kdfDomain, nymConnected]);
+
+  const registerFlowState = busy === 'register' ? 'busy' : registerState;
 
   const refresh = () => {
     setError(null);
@@ -191,7 +201,8 @@ export function SppAccountPanel({
       ...derived,
     })
       .then((result) => {
-        setRegisterState('submitted');
+        setConfirmRegister(false);
+        setRegisterState('idle');
         setRegisterNote(
           result.txHash
             ? `Registro on-chain ok — tx ${result.txHash}`
@@ -200,18 +211,18 @@ export function SppAccountPanel({
         refresh();
       })
       .catch((cause: unknown) => {
-        const message = cause instanceof Error ? cause.message : 'Registro de claves falló';
-        setError(message);
-        if (message.includes('SPP_BROADCAST_AWAITING_APPROVAL')) {
+        if (isBroadcastAwaitingApproval(cause)) {
+          setError(null);
           setRegisterState('sign-blocked');
-          setRegisterNote(
-            'Registro retenido en la firma. La solicitud salió de Derivation v3. El sign gate está cerrado: no se firmó ni se acuñó aprobación.',
-          );
+          setRegisterNote(HELD_REGISTRATION_NOTE);
+          return;
         }
+        setRegisterNote(null);
+        setRegisterState('failed');
+        setError(cause instanceof Error ? cause.message : 'Registro de claves falló');
       })
       .finally(() => {
         setBusy(null);
-        setConfirmRegister(false);
       });
   };
 
@@ -221,6 +232,7 @@ export function SppAccountPanel({
       style={{ display: 'grid', gap: 10, marginTop: 12 }}
       data-testid="spp-account-panel"
       data-spp-account-ready={writeReady ? 'yes' : 'no'}
+      data-spp-register-state={registerFlowState}
     >
       <h4 style={{ margin: 0, fontSize: '0.9rem' }}>Cuenta privada SPP</h4>
       <p className="text-secondary" style={{ margin: 0, fontSize: '0.75rem' }}>
@@ -314,11 +326,7 @@ export function SppAccountPanel({
           disabled={gateClosed || busy !== null}
           onClick={registerKeys}
         >
-          {busy === 'register'
-            ? 'Registrando…'
-            : confirmRegister
-              ? 'Confirmar registro (Testnet)'
-              : 'Registrar claves (gated)'}
+          Preparar registro (retenido)
         </button>
       </div>
       {confirmRegister ? (
@@ -343,6 +351,14 @@ export function SppAccountPanel({
           <span className="text-secondary">
             El mensaje v3 crea una clave nueva. Una firma v2 no se reutiliza ni se migra.
           </span>
+          <button
+            type="button"
+            className="btn-secondary"
+            data-testid="spp-register-cancel"
+            onClick={() => setConfirmRegister(false)}
+          >
+            Cancelar
+          </button>
         </div>
       ) : null}
 
@@ -399,16 +415,16 @@ export function SppAccountPanel({
         </div>
       ) : null}
 
-      {registerNote ? (
-        <p
-          className="text-secondary"
-          style={{ margin: 0, fontSize: '0.75rem' }}
-          data-testid="spp-register-note"
-          data-spp-register-state={registerState}
-        >
-          {registerNote}
-        </p>
-      ) : null}
+      <p
+        className="text-secondary"
+        style={{ margin: 0, fontSize: '0.75rem' }}
+        role="status"
+        aria-live="polite"
+        data-testid="spp-register-note"
+        data-spp-register-state={registerFlowState}
+      >
+        {registerNote}
+      </p>
       {error ? (
         <p className="error-text" role="alert" data-testid="spp-account-error">
           {error}
