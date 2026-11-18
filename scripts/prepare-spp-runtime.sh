@@ -35,8 +35,20 @@ command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
 # substitute for the exact compiler/archive pair used to pin the runtime.
 SPP_CANONICAL_GHA_PROFILE=0
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
-  export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-  export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+  # Every Ubuntu CI build, including T9's asset-preparation harness, must use
+  # the same absolute Cargo/Rustup homes that were used to pin the runtime.
+  # cc-rs includes the registry source path in SQLite archive member names.
+  local_toolchain_root="${SPP_TOOLCHAIN_ROOT:-$(dirname "$BUILD_ROOT")}"
+  canonical_cargo_home="$local_toolchain_root/cargo"
+  canonical_rustup_home="$local_toolchain_root/rustup"
+  if [ -n "${CARGO_HOME:-}" ] && [ "$CARGO_HOME" != "$canonical_cargo_home" ]; then
+    die "GHA CARGO_HOME differs from the manifest-approved path: $CARGO_HOME"
+  fi
+  if [ -n "${RUSTUP_HOME:-}" ] && [ "$RUSTUP_HOME" != "$canonical_rustup_home" ]; then
+    die "GHA RUSTUP_HOME differs from the manifest-approved path: $RUSTUP_HOME"
+  fi
+  export CARGO_HOME="$canonical_cargo_home"
+  export RUSTUP_HOME="$canonical_rustup_home"
 fi
 
 ensure_wasm_c_compiler() {
