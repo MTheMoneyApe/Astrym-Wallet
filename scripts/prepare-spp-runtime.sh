@@ -29,14 +29,57 @@ command -v git >/dev/null 2>&1 || die "git is required"
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
 
-# cc-rs selects clang for wasm32-unknown-unknown. The generic Vercel image
-# compiler is Clang 15, while the upstream SDK package was built with LLVM 18.
-# Install and select the versioned AL2023 compiler explicitly so the C portion
-# of sqlite-wasm-rs is not silently built with the host's unpinned default.
+# GitHub Actions uses the manifest-approved Ubuntu 24.04 toolchain.
+# Vercel's Amazon Linux build image is different and keeps its isolated
+# compiler fallback below. Do not let a nominally equal Clang version
+# substitute for the exact compiler/archive pair used to pin the runtime.
+SPP_CANONICAL_GHA_PROFILE=0
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+  export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+fi
+
 ensure_wasm_c_compiler() {
-  # GitHub Actions ubuntu-latest currently builds the upstream SDK with
-  # Clang 18.1.3. Vercel's Amazon Linux image ships a different Clang, so
-  # install the exact conda-forge Linux toolchain in an isolated prefix.
+  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    local system_clang="/usr/lib/llvm-18/bin/clang"
+    local system_llvm_ar="/usr/lib/llvm-18/bin/llvm-ar"
+    local expected_clang_sha="8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+    local actual_clang_sha clang_version llvm_ar_version
+
+    [ -x "$system_clang" ] || die "manifest-approved Ubuntu Clang 18.1.3 is missing"
+    [ -x "$system_llvm_ar" ] || die "manifest-approved Ubuntu llvm-ar 18.1.3 is missing"
+    actual_clang_sha="$(sha256sum "$system_clang" | awk '{print $1}')"
+    [ "$actual_clang_sha" = "$expected_clang_sha" ] || die "Ubuntu Clang 18.1.3 SHA-256 changed: $actual_clang_sha"
+    clang_version="$("$system_clang" --version 2>&1 | sed -n '1p')"
+    llvm_ar_version="$("$system_llvm_ar" --version 2>&1 | grep -m1 'LLVM version')"
+    case "$clang_version" in
+      *"18.1.3 (1ubuntu1)"*) ;;
+      *) die "manifest-approved Ubuntu Clang version changed: $clang_version" ;;
+    esac
+    case "$llvm_ar_version" in
+      *"18.1.3"*) ;;
+      *) die "manifest-approved Ubuntu llvm-ar version changed: $llvm_ar_version" ;;
+    esac
+
+    for variable in CC_wasm32_unknown_unknown CXX_wasm32_unknown_unknown AR_wasm32_unknown_unknown RANLIB_wasm32_unknown_unknown; do
+      eval "value=\${$variable-}"
+      [ -z "$value" ] || die "$variable is externally set; refusing a non-canonical toolchain"
+    done
+    export PATH="/usr/lib/llvm-18/bin:$PATH"
+    [ "$(command -v clang)" = "$system_clang" ] || die "PATH did not select manifest-approved Clang"
+    [ "$(command -v llvm-ar)" = "$system_llvm_ar" ] || die "PATH did not select manifest-approved llvm-ar"
+    SPP_CANONICAL_GHA_PROFILE=1
+    export SPP_CANONICAL_GHA_PROFILE
+    log "TOOL wasm-target-cc $system_clang ($clang_version; sha256=$actual_clang_sha)"
+    log "TOOL wasm-target-ar $system_llvm_ar ($llvm_ar_version)"
+    log "TOOL wasm-target-profile manifest-approved Ubuntu 24.04"
+    return 0
+  fi
+
+  SPP_CANONICAL_GHA_PROFILE=0
+  export SPP_CANONICAL_GHA_PROFILE
+  # Vercel's Amazon Linux image ships a different Clang. Use a pinned,
+  # isolated conda-forge toolchain there rather than trusting the host default.
   local micromamba_dir="$BUILD_ROOT/toolchain-bin"
   local micromamba="$micromamba_dir/micromamba"
   local micromamba_url="https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-linux-64"
@@ -123,16 +166,19 @@ ensure_wasm_c_compiler() {
 }
 ensure_wasm_c_compiler
 
-# Retain caller-provided homes (or the image /rust fallback) as explicit
-# remap inputs before assigning the isolated build homes used by this script.
-CARGO_HOME_REMAP="${CARGO_HOME:-/rust}"
-RUSTUP_HOME_REMAP="${RUSTUP_HOME:-/rust}"
-# Keep the build toolchain homes inside the isolated build root even when the
-# CI image preconfigures global homes under /rust. Preserve those original
-# locations separately so RUSTFLAGS can remap them and the scanner can still
-# reject any leaked host paths.
-export CARGO_HOME="$BUILD_ROOT/cargo"
-export RUSTUP_HOME="$BUILD_ROOT/rustup"
+if [ "$SPP_CANONICAL_GHA_PROFILE" = "1" ]; then
+  # Match the exact CARGO_HOME/RUSTUP_HOME and path mappings from the approved
+  # Ubuntu 24.04 manifest build. These homes are supplied by the workflow.
+  CARGO_HOME_REMAP="$CARGO_HOME"
+  RUSTUP_HOME_REMAP="$RUSTUP_HOME"
+else
+  # Retain caller-provided homes (or the image /rust fallback) as explicit
+  # remap inputs before assigning isolated homes for the non-canonical image.
+  CARGO_HOME_REMAP="${CARGO_HOME:-/rust}"
+  RUSTUP_HOME_REMAP="${RUSTUP_HOME:-/rust}"
+  export CARGO_HOME="$BUILD_ROOT/cargo"
+  export RUSTUP_HOME="$BUILD_ROOT/rustup"
+fi
 # The pinned rustup 1.97.1 proxy must win over any image toolchain.
 export PATH="$CARGO_HOME/bin${PATH:+:$PATH}"
 
@@ -369,21 +415,22 @@ required = [
 missing = [item for item in required if item not in upstream]
 if missing:
     raise SystemExit("upstream wasm32 rustflags lost: " + ", ".join(missing))
+canonical = os.environ.get("SPP_CANONICAL_GHA_PROFILE") == "1"
 tokens = {
     "src": "/spp-src",
     "cargo": "/cargo",
-    "rustup": "/spp-rustup",
+    "rustup": "/rustup" if canonical else "/spp-rustup",
     "cargo-remap": "/cargo",
-    "rustup-remap": "/spp-rustup",
+    "rustup-remap": "/rustup" if canonical else "/spp-rustup",
     "build": "/spp-build",
     "target": "/spp-target",
     "home": "/spp-home",
     "circuits": "/spp-circuits",
 }
-# Rust's prebuilt sysroot contributes virtual source paths under /rustc
-# and /rust/deps. Use equal-length, specific aliases shared with the
-# post-build normalizer before the general /rust fallback.
-pairs = [
+# The approved Ubuntu build leaves Rust's virtual /rust/deps and /rustc
+# sysroot strings untouched. Other images use equal-length aliases that can
+# be reversed before asserting the pinned upstream manifest.
+pairs = [] if canonical else [
     ("/rust/deps", "/sppx/deps"),
     ("/rustc", "/sppxc"),
     ("/rust", "/cargo"),
@@ -401,11 +448,11 @@ for item in sys.argv[3:]:
 pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
 remaps = [f"--remap-path-prefix={src}={dst}" for src, dst in pairs]
 
-# Keep the explicit image-home fallback remap and both caller-provided toolchain
-# homes in the Rust compiler flags. One shared /rust prefix intentionally maps
-# to /cargo when CARGO_HOME and RUSTUP_HOME both use the image default.
+# The generic image profile must retain the explicit /rust fallback.
+# The approved Ubuntu profile instead reproduces the exact successful flag set
+# and intentionally does not rewrite /rust/deps or /rustc sysroot strings.
 required_remap = "--remap-path-prefix=/rust=/cargo"
-if required_remap not in remaps:
+if not canonical and required_remap not in remaps:
     raise SystemExit(f"required Rust path remap is missing: {required_remap}")
 for key in ("cargo-remap", "rustup-remap"):
     candidates = set(home_remap_paths.get(key, ()))
@@ -862,8 +909,9 @@ fi
 # in shipped WASM data, using byte-for-byte equal-length replacements. This
 # preserves every WASM section length and offset; the strict host-path scanner
 # below still scans every shipped artifact and fails on any remaining path.
-log "COMMAND: normalize precompiled Rust sysroot source-path strings in WASM"
-python3 - "$SRC/sdk/web" <<'PY'
+if [ "$SPP_CANONICAL_GHA_PROFILE" != "1" ]; then
+  log "COMMAND: normalize precompiled Rust sysroot source-path strings in WASM"
+  python3 - "$SRC/sdk/web" <<'PY'
 import os, sys
 from pathlib import Path
 
@@ -893,6 +941,9 @@ for path in sorted(web.rglob("*.wasm")):
     print(f"normalized {changed} precompiled sysroot path strings in {path.name}")
 print(f"normalized {total} Rust sysroot path strings across shipped WASM modules")
 PY
+else
+  log "COMMAND: leave approved Ubuntu sysroot bytes unchanged"
+fi
 
 log "COMMAND: scan shipped files for host paths and wasm memory limits"
 python3 - "$SRC/sdk/web" "$SRC" "$CARGO_HOME" "$RUSTUP_HOME" "$BUILD_ROOT" \
@@ -1024,37 +1075,34 @@ print(f"host paths absent from {len(scanned)} shipped files")
 PY
 
 python3 - "$SRC/sdk/web" "$MANIFEST" "$SOURCE_COMMIT" <<'PY'
-import hashlib, json, sys
+import hashlib, json, os, sys
 from pathlib import Path
 web, manifest_path, commit = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 manifest = json.loads(manifest_path.read_text())
 if manifest["sourceCommit"] != commit:
     raise SystemExit("manifest sourceCommit drifted")
-# The pinned upstream manifest hashes the original SDK outputs. For WASM,
-# reconstruct those original bytes by reversing the exact compile-time path
-# remaps and the equal-length sysroot aliases above, then verify upstream SHA
-# and size. The /rust -> /cargo remap intentionally changes path-string lengths;
-# compare the reconstructed source bytes, not the remapped distribution size.
-reverse_replacements = (
-    # Reverse the equal-length aliases used by RUSTFLAGS and the post-build
-    # normalizer. The broad /rust -> /cargo remap is reversed separately below.
+canonical = os.environ.get("SPP_CANONICAL_GHA_PROFILE") == "1"
+# The approved Ubuntu build emits the versioned upstream bytes directly.
+# Non-canonical images reverse only their explicitly recorded path normalizations.
+reverse_replacements = () if canonical else (
     (b"/sppx/deps/", b"/rust/deps/"),
     (b"/sppxc/", b"/rustc/"),
     (b"/sppxc-", b"/rustc-"),
     (b"/cargo", b"/rust"),
 )
-for normalized, original in reverse_replacements[:-1]:
-    if len(normalized) != len(original):
-        raise SystemExit(f"unsafe reverse normalization length mismatch: {normalized!r} -> {original!r}")
-if len(reverse_replacements[-1][0]) != len(reverse_replacements[-1][1]) + 1:
-    raise SystemExit("unexpected /rust -> /cargo remap length; refusing manifest verification")
+if not canonical:
+    for normalized, original in reverse_replacements[:-1]:
+        if len(normalized) != len(original):
+            raise SystemExit(f"unsafe reverse normalization length mismatch: {normalized!r} -> {original!r}")
+    if len(reverse_replacements[-1][0]) != len(reverse_replacements[-1][1]) + 1:
+        raise SystemExit("unexpected /rust -> /cargo remap length; refusing manifest verification")
 
 for rel, expect in manifest["files"].items():
     path = web / rel
     data = path.read_bytes()
     source_data = data
     remapped_path_count = 0
-    if rel.endswith(".wasm"):
+    if rel.endswith(".wasm") and not canonical:
         remapped_path_count = source_data.count(b"/cargo")
         for normalized, original in reverse_replacements:
             source_data = source_data.replace(normalized, original)
