@@ -7,6 +7,8 @@
 export const IpcErrorSchema = z.object({
   name: z.string(),
   message: z.string(),
+  code: z.string().optional(),
+  txHashes: z.array(z.string()).optional(),
 });
 
 export const BaseRequestEnvelopeSchema = z.object({
@@ -701,6 +703,27 @@ export const MessageSchemas = {
       transportFetchInvoked: z.boolean(),
     }),
   },
+  SPP_AUTHORIZE_KEY_DERIVATION: {
+    request: z.object({
+      acknowledgeHighRisk: z.literal(true),
+      kdfDomain: z.string().min(1).max(64),
+      prepareGeneration: z.number().int().positive(),
+    }),
+    response: z.object({
+      approved: z.literal(true),
+    }),
+  },
+  SPP_AUTHORIZE_STORAGE_UNLOCK: {
+    request: z.object({
+      message: z.string().min(1).max(2_000),
+      prepareGeneration: z.number().int().positive(),
+      uses: z.union([z.literal(1), z.literal(2)]),
+    }),
+    response: z.object({
+      approved: z.literal(true),
+      approvalToken: z.string().uuid(),
+    }),
+  },
   SPP_PRIVATE_PAYMENT: {
     request: z.object({
       enabled: z.literal(true),
@@ -723,6 +746,7 @@ export const MessageSchemas = {
     response: z.object({
       operation: z.enum(['deposit', 'transfer', 'withdraw']),
       txHash: z.string().nullable(),
+      txHashes: z.array(z.string().min(1)).optional(),
       rpcRoutedViaNym: z.literal(true),
       confirmation: z.enum(['confirmed', 'unknown']),
     }),
@@ -761,7 +785,9 @@ export const MessageSchemas = {
       /** 32-byte encryption public key the user is registering, hex. */
       encryptionKeyHex: z.string().regex(/^[0-9a-fA-F]{64}$/),
       /** Present only when the registry call includes note_key_proof. */
-      noteKeyProofHex: z.string().regex(/^(?:[0-9a-fA-F]{2})+$/).optional(),
+      noteKeyProofHex: z.string().regex(/^(?:[0-9a-fA-F]{2})+$/),
+      encryptionKeySignatureHex: z.string().regex(/^[0-9a-fA-F]{128}$/),
+      ownerSignatureHex: z.string().regex(/^[0-9a-fA-F]{128}$/),
     }),
     response: z.object({
       txHash: z.string().nullable(),

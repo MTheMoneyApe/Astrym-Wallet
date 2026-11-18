@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createSppNymScopedFetch,
   executeSppPrivatePayment,
+  runSppProbedPoolPayment,
   sppOptionAvailability,
   sppPrivatePaymentsAllowed,
   withSppRpcThroughNym,
@@ -13,6 +14,7 @@ import {
 import {
   privatePaymentFingerprint,
   resetPrivatePaymentExecutionGuardForTests,
+  beginPrivatePaymentExecution,
 } from '../../../src/stellar/spp/sppExecutionGuard.js';
 import {
   resetSppBroadcastGateForTests,
@@ -142,26 +144,38 @@ describe('SPP option while Nym is on', () => {
     const previous = globalThis.fetch;
     const direct = vi.fn(async () => new Response('clearnet', { status: 200 }));
     globalThis.fetch = direct as typeof fetch;
-    const nymFetch = vi.fn(async () => new Response('{"result":"ok"}', { status: 200 }));
+    const order: string[] = [];
+    const nymFetch = vi.fn(async () => {
+      expect(globalThis.fetch).toBe(direct);
+      order.push('probe');
+      return new Response('{"result":"ok"}', { status: 200 });
+    });
     const pool = readyPool();
-    const request = { operation: 'deposit' as const, poolContract: poolContract(), amountStroops: '10' };
+    pool.deposit = vi.fn(async () => {
+      order.push('deposit');
+      return { txHash: 'deposit-tx' };
+    });
     try {
-      const result = await executeSppPrivatePayment({
-        gate: { mode: 'nym', connected: true, selected: true },
-        request,
+      const result = await runSppProbedPoolPayment({
+        request: { operation: 'deposit', amount: 10n, recipient: null },
         rpcUrl: RPC,
         nymFetch,
         pool,
         preferInjectedTransport: true,
-        authorizationFingerprint: auth(request),
       });
-      expect(result.rpcRoutedViaNym).toBe(true);
-      expect(result.confirmation).toBe('confirmed');
-      expect(result.txHash).toBe('deposit-tx');
+      expect(result).toMatchObject({
+        rpcRoutedViaNym: true,
+        confirmation: 'confirmed',
+        txHash: 'deposit-tx',
+      });
+      expect(order).toEqual(['probe', 'deposit']);
+      expect(nymFetch).toHaveBeenCalledWith(RPC, expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getHealth' }),
+      }));
+      expect(pool.deposit).toHaveBeenCalledWith(10n);
       expect(direct).not.toHaveBeenCalled();
       expect(globalThis.fetch).toBe(direct);
-      expect(nymFetch).toHaveBeenCalled();
-      expect(pool.deposit).toHaveBeenCalled();
     } finally {
       globalThis.fetch = previous;
     }
@@ -169,27 +183,10 @@ describe('SPP option while Nym is on', () => {
 
   it('rejects duplicate in-flight executions', async () => {
     const nymFetch = vi.fn(async () => new Response('{"result":"ok"}', { status: 200 }));
-    let resolveDeposit: (value: { txHash: string }) => void = () => undefined;
-    const pool: SppPrivatePool = {
-      deposit: vi.fn(
-        () =>
-          new Promise<{ txHash: string }>((resolve) => {
-            resolveDeposit = resolve;
-          }),
-      ),
-      transfer: vi.fn(async () => ({ txHash: 't' })),
-      withdraw: vi.fn(async () => ({ txHash: 'w' })),
-    };
+    const pool = readyPool();
     const request = { operation: 'deposit' as const, poolContract: poolContract(), amountStroops: '10' };
     const fingerprint = auth(request);
-    const first = executeSppPrivatePayment({
-      gate: { mode: 'nym', connected: true, selected: true },
-      request,
-      rpcUrl: RPC,
-      nymFetch,
-      pool,
-      authorizationFingerprint: fingerprint,
-    });
+    const held = beginPrivatePaymentExecution(fingerprint);
     await expect(
       executeSppPrivatePayment({
         gate: { mode: 'nym', connected: true, selected: true },
@@ -200,8 +197,76 @@ describe('SPP option while Nym is on', () => {
         authorizationFingerprint: fingerprint,
       }),
     ).rejects.toMatchObject({ code: 'DUPLICATE_EXECUTION' });
-    resolveDeposit({ txHash: 'deposit-tx' });
-    await expect(first).resolves.toMatchObject({ txHash: 'deposit-tx', confirmation: 'confirmed' });
+    held.release();
+    expect(pool.deposit).not.toHaveBeenCalled();
+  });
+
+  it('does not call the pool for a deposit while private economics are blocked', async () => {
+    const previous = globalThis.fetch;
+    const direct = vi.fn(async () => new Response('clearnet', { status: 200 }));
+    globalThis.fetch = direct as typeof fetch;
+    const nymFetch = vi.fn(async () => new Response('{"result":"ok"}', { status: 200 }));
+    const pool = readyPool();
+    const request = { operation: 'deposit' as const, poolContract: poolContract(), amountStroops: '10' };
+    try {
+      await expect(executeSppPrivatePayment({
+        gate: { mode: 'nym', connected: true, selected: true },
+        request,
+        rpcUrl: RPC,
+        nymFetch,
+        pool,
+        preferInjectedTransport: true,
+        authorizationFingerprint: auth(request),
+      })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+      expect(pool.deposit).not.toHaveBeenCalled();
+      expect(nymFetch).not.toHaveBeenCalled();
+      expect(direct).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = previous;
+    }
+  });
+
+  it('rejects a deposit before the pool while economics are blocked', async () => {
+    const nymFetch = vi.fn(async () => new Response('{"result":"ok"}', { status: 200 }));
+    const pool = readyPool();
+    const request = { operation: 'deposit' as const, poolContract: poolContract(), amountStroops: '10' };
+    await expect(executeSppPrivatePayment({
+      gate: { mode: 'nym', connected: true, selected: true },
+      request,
+      rpcUrl: RPC,
+      nymFetch,
+      pool,
+      authorizationFingerprint: auth(request),
+    })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(pool.deposit).not.toHaveBeenCalled();
+    expect(nymFetch).not.toHaveBeenCalled();
+  });
+
+  it('blocks a repeat after a partial result is held for reconciliation', () => {
+    const first = beginPrivatePaymentExecution('deposit|pool|10|');
+    first.release({ reconcile: true });
+    expect(() => beginPrivatePaymentExecution('deposit|pool|10|')).toThrow(/duplicado/);
+  });
+
+  it('does not confirm only the first hash when the pool reports several', async () => {
+    const nymFetch = vi.fn(async () => new Response('{"result":"ok"}', { status: 200 }));
+    const pool: SppPrivatePool = {
+      deposit: vi.fn(async () => ({ txHash: 'first', txHashes: ['first', 'second'] })),
+      transfer: vi.fn(async () => ({ txHash: null })),
+      withdraw: vi.fn(async () => ({ txHash: null })),
+    };
+    const request = { operation: 'deposit' as const, poolContract: poolContract(), amountStroops: '10' };
+    await expect(
+      executeSppPrivatePayment({
+        gate: { mode: 'nym', connected: true, selected: true },
+        request,
+        rpcUrl: RPC,
+        nymFetch,
+        pool,
+        authorizationFingerprint: auth(request),
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(pool.deposit).not.toHaveBeenCalled();
   });
 
   it('marks missing tx hash as SUBMISSION_UNKNOWN (no invented confirmation)', async () => {
@@ -221,7 +286,8 @@ describe('SPP option while Nym is on', () => {
         pool,
         authorizationFingerprint: auth(request),
       }),
-    ).rejects.toMatchObject({ code: 'SUBMISSION_UNKNOWN' });
+    ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(pool.deposit).not.toHaveBeenCalled();
   });
 
   it('scoped fetch rejects non-RPC origins', async () => {
@@ -267,7 +333,7 @@ describe('SPP option while Nym is on', () => {
     }
   });
 
-  it('does not run the pool when the Nym RPC probe fails', async () => {
+  it('does not run the pool when private economics are blocked', async () => {
     const pool = readyPool();
     const nymFetch = vi.fn(async () => {
       throw new Error('mixnet down');
@@ -282,7 +348,34 @@ describe('SPP option while Nym is on', () => {
         pool,
         authorizationFingerprint: auth(request),
       }),
-    ).rejects.toMatchObject({ code: 'RPC_FAILED' });
+    ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
     expect(pool.withdraw).not.toHaveBeenCalled();
+    expect(nymFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not run the pool when the Nym RPC probe fails', async () => {
+    const previous = globalThis.fetch;
+    const direct = vi.fn(async () => new Response('clearnet', { status: 200 }));
+    globalThis.fetch = direct as typeof fetch;
+    const pool = readyPool();
+    const nymFetch = vi.fn(async () => {
+      expect(globalThis.fetch).not.toBe(direct);
+      throw new Error('mixnet down');
+    });
+    try {
+      await expect(runSppProbedPoolPayment({
+        request: { operation: 'withdraw', amount: 3n, recipient: null },
+        rpcUrl: RPC,
+        nymFetch,
+        pool,
+        preferInjectedTransport: false,
+      })).rejects.toMatchObject({ code: 'RPC_FAILED' });
+      expect(pool.withdraw).not.toHaveBeenCalled();
+      expect(nymFetch).toHaveBeenCalledOnce();
+      expect(globalThis.fetch).toBe(direct);
+      expect(direct).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = previous;
+    }
   });
 });

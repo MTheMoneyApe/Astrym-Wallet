@@ -298,7 +298,7 @@ export function parseStoredSppSessionStatusRecord(
 ): StoredSppSessionStatus | null {
   if (!raw || typeof raw !== 'object') return null;
   const rec = raw as Record<string, unknown>;
-  const state = rec.state;
+  const state = rec['state'];
   const allowed = new Set([
     'uninitialized',
     'initializing',
@@ -307,19 +307,19 @@ export function parseStoredSppSessionStatusRecord(
     'disposed',
   ]);
   if (typeof state !== 'string' || !allowed.has(state)) return null;
-  const generation = rec.generation;
+  const generation = rec['generation'];
   if (typeof generation !== 'number' || !Number.isFinite(generation) || generation < 1) {
     return null;
   }
   const lastErrorMessage =
-    rec.lastErrorMessage == null
+    rec['lastErrorMessage'] == null
       ? null
-      : typeof rec.lastErrorMessage === 'string'
-        ? rec.lastErrorMessage
-        : String(rec.lastErrorMessage);
+      : typeof rec['lastErrorMessage'] === 'string'
+        ? rec['lastErrorMessage']
+        : String(rec['lastErrorMessage']);
   const updatedAt =
-    typeof rec.updatedAt === 'string' && rec.updatedAt.trim()
-      ? rec.updatedAt
+    typeof rec['updatedAt'] === 'string' && rec['updatedAt'].trim()
+      ? rec['updatedAt']
       : new Date(0).toISOString();
   return {
     state: state as SppSessionState,
@@ -380,8 +380,8 @@ export function applyStoredSppSessionClearIfNewer(
     return applyStoredSppSessionStatusIfNewer(raw, previous);
   }
   const rec = raw as Record<string, unknown>;
-  if (rec.clear === true) {
-    const generation = rec.generation;
+  if (rec['clear'] === true) {
+    const generation = rec['generation'];
     if (typeof generation !== 'number' || !Number.isFinite(generation) || generation < 1) {
       return { handle: previous.handle, generation: previous.generation, applied: false };
     }

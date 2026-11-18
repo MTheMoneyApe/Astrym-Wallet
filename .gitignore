@@ -36,3 +36,6 @@ packages/extension/.vitest/
 packages/extension/test-results/
 **/playwright-report/
 .vercel/
+
+# Upstream SPP source checkout and circuit archive used by scripts/prepare-spp-runtime.sh
+.cache/

@@ -11,6 +11,7 @@ import {
   privatePaymentFingerprint,
 } from './sppExecutionGuard.js';
 import { assertSppTestnetBroadcastAuthorized } from './sppBroadcastGate.js';
+import { assertSppPoolPaymentEconomicsBound } from './sppSignGate.js';
 import { assertFeeWithinCeiling, maxFeeStroopsForOperation } from './sppFeePolicy.js';
 
 export const STELLAR_SOROBAN_TESTNET_RPC = 'https://soroban-testnet.stellar.org';
@@ -34,7 +35,11 @@ export type SppPrivatePaymentRequest = {
   recipient?: string;
 };
 
-export type SppPrivatePoolResult = { txHash: string | null };
+export type SppPrivatePoolResult = {
+  txHash: string | null;
+  /** Every hash from one SDK execute. Omitted by mocks that only set txHash. */
+  txHashes?: readonly string[];
+};
 
 export type SppPrivatePool = {
   deposit(amount: bigint): Promise<SppPrivatePoolResult>;
@@ -57,12 +62,30 @@ export type SppPrivatePaymentCode =
 
 export class SppPrivatePaymentError extends Error {
   readonly code: SppPrivatePaymentCode;
+  readonly txHashes: readonly string[];
 
-  constructor(code: SppPrivatePaymentCode, message: string, options?: { cause?: unknown }) {
+  constructor(
+    code: SppPrivatePaymentCode,
+    message: string,
+    options?: { cause?: unknown; txHashes?: readonly string[] },
+  ) {
     super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = 'SppPrivatePaymentError';
     this.code = code;
+    this.txHashes = options?.txHashes ?? [];
   }
+}
+
+function reportedPoolHashes(result: SppPrivatePoolResult): readonly string[] {
+  if (result.txHashes) return result.txHashes;
+  return result.txHash ? [result.txHash] : [];
+}
+
+function hashesCarriedBy(cause: unknown): readonly string[] {
+  if (!cause || typeof cause !== 'object' || !('txHashes' in cause)) return [];
+  const value = (cause as { txHashes?: unknown }).txHashes;
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
 }
 
 export type SppRpcFetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -244,6 +267,7 @@ export async function executeSppPrivatePayment(input: {
 }): Promise<{
   operation: SppPrivateOperation;
   txHash: string | null;
+  txHashes: readonly string[];
   rpcRoutedViaNym: true;
   confirmation: 'confirmed' | 'unknown';
 }> {
@@ -288,7 +312,7 @@ export async function executeSppPrivatePayment(input: {
     amountStroops: request.amount.toString(),
     recipient: request.recipient,
   });
-  let release: (opts?: { completed?: boolean }) => void;
+  let release: (opts?: { completed?: boolean; reconcile?: boolean }) => void;
   try {
     ({ release } = beginPrivatePaymentExecution(fingerprint));
   } catch (cause) {
@@ -336,42 +360,102 @@ export async function executeSppPrivatePayment(input: {
     );
   }
 
-  const pool = input.pool;
-  const preferInjected = input.preferInjectedTransport !== false;
-  let completed = false;
+  try {
+    assertSppPoolPaymentEconomicsBound(request.operation);
+  } catch (cause) {
+    release();
+    throw new SppPrivatePaymentError(
+      'INVALID_REQUEST',
+      cause instanceof Error ? cause.message : 'SPP_POOL_ECONOMICS_NOT_VERIFIED',
+      { cause },
+    );
+  }
 
+  const flags = { completed: false, reconcile: false };
+  try {
+    return await runSppProbedPoolPayment({
+      request,
+      rpcUrl: input.rpcUrl,
+      nymFetch: input.nymFetch,
+      pool: input.pool,
+      ...(input.preferInjectedTransport === undefined
+        ? {}
+        : { preferInjectedTransport: input.preferInjectedTransport }),
+    }, flags);
+  } finally {
+    release(flags.completed ? { completed: true } : flags.reconcile ? { reconcile: true } : undefined);
+  }
+}
+
+/**
+ * Probe and pool execution that sits below the economics gate.
+ * Exported so tests can exercise this path without opening that gate.
+ * `flags` is the same completion record `executeSppPrivatePayment` releases.
+ */
+export async function runSppProbedPoolPayment(
+  input: {
+    request: {
+      operation: SppPrivateOperation;
+      amount: bigint;
+      recipient: string | null;
+    };
+    rpcUrl: string;
+    nymFetch: SppRpcFetch;
+    pool: SppPrivatePool;
+    preferInjectedTransport?: boolean;
+  },
+  flags: { completed: boolean; reconcile: boolean } = { completed: false, reconcile: false },
+): Promise<{
+  operation: SppPrivateOperation;
+  txHash: string | null;
+  txHashes: readonly string[];
+  rpcRoutedViaNym: true;
+  confirmation: 'confirmed' | 'unknown';
+}> {
+  const pool = input.pool;
+  const request = input.request;
+  const preferInjected = input.preferInjectedTransport !== false;
   const run = async () => {
     await probeSorobanRpc(input.rpcUrl, input.nymFetch);
     try {
       const result = await runPool(pool, request);
-      if (!result.txHash) {
+      const hashes = reportedPoolHashes(result);
+      if (hashes.length !== 1) {
+        flags.reconcile = true;
         throw new SppPrivatePaymentError(
           'SUBMISSION_UNKNOWN',
-          'El SDK no devolvió hash. No se inventa confirmación; verifica en el explorador antes de reintentar.',
+          `El SDK devolvió ${hashes.length} hash(es). No se confirma solo el primero y no hay reintento. hashes=${hashes.join(',')}`,
+          { txHashes: hashes },
         );
       }
-      completed = true;
+      flags.completed = true;
       return {
         operation: request.operation,
-        txHash: result.txHash,
+        txHash: hashes[0] ?? null,
+        txHashes: hashes,
         rpcRoutedViaNym: true as const,
         confirmation: 'confirmed' as const,
       };
     } catch (cause) {
-      if (cause instanceof SppPrivatePaymentError) throw cause;
+      if (cause instanceof SppPrivatePaymentError) {
+        if (cause.txHashes.length > 0) flags.reconcile = true;
+        throw cause;
+      }
       const message = cause instanceof Error ? cause.message : 'El pago privado SPP falló';
-      throw new SppPrivatePaymentError('EXECUTION_FAILED', message, { cause });
+      const recovered = hashesCarriedBy(cause);
+      if (recovered.length > 0) flags.reconcile = true;
+      throw new SppPrivatePaymentError(
+        'EXECUTION_FAILED',
+        recovered.length > 0 ? `${message} completedHashes=${recovered.join(',')}` : message,
+        { cause, txHashes: recovered },
+      );
     }
   };
 
-  try {
-    if (preferInjected) {
-      return await run();
-    }
-    return await withSppRpcThroughNym(input.rpcUrl, input.nymFetch, run);
-  } finally {
-    release(completed ? { completed: true } : undefined);
+  if (preferInjected) {
+    return await run();
   }
+  return await withSppRpcThroughNym(input.rpcUrl, input.nymFetch, run);
 }
 
 async function runPool(

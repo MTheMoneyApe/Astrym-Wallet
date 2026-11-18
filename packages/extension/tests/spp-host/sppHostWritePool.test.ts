@@ -3,10 +3,14 @@ import {
   resetSppBroadcastGateForTests,
   setSppTestnetBroadcastAuthorized,
 } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
-import { SppMultiAccountSequenceTracker } from '@solanym/wallet-core/src/stellar/spp/sppAccountSequenceTracker.js';
+import {
+  SppMultiAccountSequenceTracker,
+  beginSppAccountOperation,
+} from '@solanym/wallet-core/src/stellar/spp/sppAccountSequenceTracker.js';
 import { SPP_HOST_BRIDGE_CHANNEL } from '../../src/shared/sppHostBridge.js';
 import {
   clearSppHostWritePool,
+  confirmOrAbortSequence,
   executeSppHostWritePool,
   getSppHostSequenceTracker,
   getSppHostWritePoolStatus,
@@ -118,22 +122,24 @@ describe('sppHostWritePool', () => {
     expect(getSppHostWritePoolStatus().hasWritePool).toBe(true);
 
     await expect(executeSppHostWritePool(request({ operation: 'deposit' }))).resolves.toMatchObject({
-      ok: true,
-      txHash: 'dep',
-      rpcRoutedViaNym: true,
+      ok: false,
+      code: 'INVALID_REQUEST',
     });
     await expect(
       executeSppHostWritePool(
         request({ operation: 'transfer', recipient: 'G'.padEnd(56, 'B') }),
       ),
-    ).resolves.toMatchObject({ ok: true, txHash: 'tr' });
+    ).resolves.toMatchObject({ ok: false, code: 'INVALID_REQUEST' });
 
     const failed = await executeSppHostWritePool(request({ operation: 'withdraw' }));
     expect(failed.ok).toBe(false);
     if (!failed.ok) {
-      expect(failed.code).toBe('EXECUTION_FAILED');
-      expect(failed.message).toContain('wasm boom');
+      expect(failed.code).toBe('INVALID_REQUEST');
+      expect(failed.message).toMatch(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
     }
+    expect(deposit).not.toHaveBeenCalled();
+    expect(transfer).not.toHaveBeenCalled();
+    expect(withdraw).not.toHaveBeenCalled();
   });
 
   it('blocks Testnet broadcast until the approval gate is opened', async () => {
@@ -189,15 +195,15 @@ describe('sppHostWritePool', () => {
           operationFingerprint: 'fp-deposit-1',
         }),
       ),
-    ).resolves.toMatchObject({ ok: true, txHash: TX_DEP });
+    ).resolves.toMatchObject({ ok: false, code: 'INVALID_REQUEST' });
 
     const after = tracker.get(SENDER);
-    expect(after?.expectedFreshSequence).toBe('101');
+    expect(after?.expectedFreshSequence).toBe('100');
     expect(after?.inFlightFingerprint).toBeNull();
-    expect(after?.confirmedTxHashes).toEqual([TX_DEP]);
+    expect(after?.confirmedTxHashes).toEqual([]);
   });
 
-  it('clears in-flight without advancing when nextFreshSequence is missing on success', async () => {
+  it('clears in-flight without advancing when the payment stays blocked', async () => {
     registerOkPool();
     const tracker = getSppHostSequenceTracker();
     tracker.seed(SENDER, '100');
@@ -210,7 +216,28 @@ describe('sppHostWritePool', () => {
           operationFingerprint: 'fp-no-next',
         }),
       ),
-    ).resolves.toMatchObject({ ok: true, txHash: TX_DEP });
+    ).resolves.toMatchObject({ ok: false, code: 'INVALID_REQUEST' });
+
+    const after = tracker.get(SENDER);
+    expect(after?.expectedFreshSequence).toBe('100');
+    expect(after?.inFlightFingerprint).toBeNull();
+    expect(after?.confirmedTxHashes).toEqual([]);
+  });
+
+  it('clears in-flight without advancing when nextFreshSequence is missing on success', () => {
+    const tracker = new SppMultiAccountSequenceTracker();
+    const seeded = tracker.seed(SENDER, '100');
+    const begun = beginSppAccountOperation(seeded, 'fp-no-next');
+    expect(begun.ok).toBe(true);
+    if (!begun.ok) return;
+    tracker.replace(begun.state);
+    setSppHostSequenceTracker(tracker);
+
+    confirmOrAbortSequence(
+      { address: SENDER, fingerprint: 'fp-no-next' },
+      TX_DEP,
+      undefined,
+    );
 
     const after = tracker.get(SENDER);
     expect(after?.expectedFreshSequence).toBe('100');
@@ -265,7 +292,7 @@ describe('sppHostWritePool', () => {
       }),
     );
     expect(failed.ok).toBe(false);
-    if (!failed.ok) expect(failed.code).toBe('EXECUTION_FAILED');
+    if (!failed.ok) expect(failed.code).toBe('INVALID_REQUEST');
     expect(tracker.get(SENDER)?.inFlightFingerprint).toBeNull();
     expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('100');
   });
@@ -289,9 +316,9 @@ describe('sppHostWritePool', () => {
           operationFingerprint: 'fp-sender-xfer',
         }),
       ),
-    ).resolves.toMatchObject({ ok: true, txHash: 'tr-hash-ok12' });
+    ).resolves.toMatchObject({ ok: false, code: 'INVALID_REQUEST' });
 
-    expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('101');
+    expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('100');
     expect(tracker.get(RECIPIENT)?.expectedFreshSequence).toBe('200');
     expect(tracker.get(RECIPIENT)?.inFlightFingerprint).toBeNull();
   });

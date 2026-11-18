@@ -1,4 +1,11 @@
 {
+  "git": {
+    "deploymentEnabled": {
+      "*": false,
+      "**": false,
+      "master": true
+    }
+  },
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm build:webapp",
   "outputDirectory": "packages/extension/dist-webapp",

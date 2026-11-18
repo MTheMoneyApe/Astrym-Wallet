@@ -4,12 +4,10 @@
 
 import React, { useMemo, useState } from 'react';
 import { StrKey } from '@solanym/wallet-core';
-import { sendIpcMessage } from './ipc.js';
 import {
   xlmToStroops,
   type SppPrivateOperation,
 } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
-import { privatePaymentFingerprint } from '@solanym/wallet-core/src/stellar/spp/sppExecutionGuard.js';
 import { routePrivatePayment } from './privatePaymentRouter.js';
 import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
 
@@ -56,7 +54,7 @@ export function SppPrivateSend({
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const busy = false;
 
   const amountValue = onAmountChange ? amount : localAmount;
   const recipientValue = onDestinationChange ? destination : localRecipient;
@@ -100,9 +98,8 @@ export function SppPrivateSend({
       setErrorCode('INVALID_REQUEST');
       return;
     }
-    let amountStroops: string;
     try {
-      amountStroops = xlmToStroops(amountValue);
+      xlmToStroops(amountValue);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Importe inválido');
       setErrorCode('INVALID_REQUEST');
@@ -113,62 +110,11 @@ export function SppPrivateSend({
       setErrorCode('INVALID_REQUEST');
       return;
     }
-    if (!authorized) {
-      setAuthorized(true);
-      return;
-    }
-    const authorizationFingerprint = privatePaymentFingerprint({
-      operation,
-      poolContract: poolContract.trim(),
-      amountStroops,
-      recipient: operation === 'deposit' ? null : recipientValue.trim() || null,
-    });
-    const maxFeeStroops = maxFeeStroopsForOperation(operation);
-    const payload: {
-      enabled: true;
-      operation: SppPrivateOperation;
-      poolContract: string;
-      amountStroops: string;
-      authorizationFingerprint: string;
-      maxFeeStroops: string;
-      recipient?: string;
-    } = {
-      enabled: true,
-      operation,
-      poolContract: poolContract.trim(),
-      amountStroops,
-      authorizationFingerprint,
-      maxFeeStroops,
-    };
-    if (operation !== 'deposit' && recipientValue.trim()) {
-      payload.recipient = recipientValue.trim();
-    }
-    setBusy(true);
-    void sendIpcMessage('SPP_PRIVATE_PAYMENT', payload)
-      .then((result) => {
-        if (result.confirmation === 'unknown' || !result.txHash) {
-          setErrorCode('SUBMISSION_UNKNOWN');
-          setError(
-            'Resultado ambiguo: no hay hash confirmado. No reintentes hasta verificar en el explorador.',
-          );
-          setTxHash(result.txHash);
-        } else {
-          setTxHash(result.txHash);
-        }
-        setAuthorized(false);
-      })
-      .catch((cause: unknown) => {
-        const message =
-          cause instanceof Error ? cause.message : 'El pago privado no se pudo enviar';
-        setError(message);
-        setErrorCode(
-          cause && typeof cause === 'object' && 'code' in cause
-            ? String((cause as { code: unknown }).code)
-            : 'EXECUTION_FAILED',
-        );
-        setAuthorized(false);
-      })
-      .finally(() => setBusy(false));
+    setAuthorized(false);
+    setErrorCode('SPP_POOL_ECONOMICS_NOT_VERIFIED');
+    setError(
+      'BLOCKED SPP_POOL_ECONOMICS_NOT_VERIFIED: el importe y el techo de tx.fee no fijan public_amount = ext_amount - pool fee, ni los commitments del destinatario privado, ni los pasos. No se estima un fee ni se nombra un beneficiario. Aprobación bloqueada.',
+    );
   };
 
   return (
@@ -195,9 +141,8 @@ export function SppPrivateSend({
           <span>
             maxFee techo: {maxFeeStroopsForOperation(operation)} stroops (política centralizada, no unbounded)
           </span>
-          <span className="text-secondary">
-            El broadcast permanece bloqueado hasta aprobación explícita del operador
-            (gate SPP_BROADCAST_AWAITING_APPROVAL). Inclusión + recursos Soroban cubiertos por el techo.
+          <span className="text-secondary" data-testid="spp-pool-economics">
+            BLOCKED. El techo es tx.fee, no el pool fee. public_amount = ext_amount - fee no está en esta aprobación. El admin del pool elige el claim recipient. No hay fee Astrym ni beneficiario fijo.
           </span>
         </div>
       ) : null}

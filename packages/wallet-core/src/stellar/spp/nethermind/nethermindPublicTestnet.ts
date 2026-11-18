@@ -15,24 +15,52 @@ import {
   type SppPoolConfigInput,
 } from '../sppContractConfig.js';
 
-/** Official upstream path under NethermindEth/stellar-private-payments. */
+/**
+ * Official source commit rechecked 2026-11-07. `deployments.json` is byte-identical
+ * to the last deployment commit `c71ba3fcb2298f320d1320e9fa12f600564cf6e6` (2026-11-04).
+ * Later main commits do not change this file, the KDF text, or the registry ABI.
+ */
+export const NETHERMIND_PUBLIC_TESTNET_SOURCE_COMMIT =
+  'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120' as const;
+
 export const NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS_SOURCE =
-  'https://raw.githubusercontent.com/NethermindEth/stellar-private-payments/main/deployments/testnet/deployments.json' as const;
+  `https://raw.githubusercontent.com/NethermindEth/stellar-private-payments/${NETHERMIND_PUBLIC_TESTNET_SOURCE_COMMIT}/deployments/testnet/deployments.json` as const;
 
 /** Companion circuits lock published next to deployments.json (fingerprints only). */
 export const NETHERMIND_PUBLIC_TESTNET_CIRCUITS_SOURCE =
-  'https://raw.githubusercontent.com/NethermindEth/stellar-private-payments/main/deployments/testnet/circuits.json' as const;
+  `https://raw.githubusercontent.com/NethermindEth/stellar-private-payments/${NETHERMIND_PUBLIC_TESTNET_SOURCE_COMMIT}/deployments/testnet/circuits.json` as const;
+
+/** SHA-256 of the pinned circuits lock. Matches GitHub release circuits-v0.7 `circuits.json`. */
+export const NETHERMIND_PUBLIC_TESTNET_CIRCUITS_SHA256 =
+  '35c36f4d0f7055514156b67df9995cb9550e5f380e9a84d85dddb457d17b241e' as const;
+
+/**
+ * Official circuits-v0.7 archive. Its `circuits.json` is byte-identical to the lock above.
+ * The npm package `stellar-private-payments@0.2.1` (2026-10-16) is not this runtime.
+ */
+export const NETHERMIND_CIRCUITS_V07_SHA256 =
+  'c4ad54de6cc146bd8323e502341d545e09d0cd95d21b4f60ad2388188f64a2f9' as const;
 
 /**
  * SHA-256 of the exact deployments.json bytes pinned in
  * `./testnet-deployments.json` (verified against upstream main at integrate time).
  */
 export const NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS_SHA256 =
-  '77b3f61021d3985ad0d7c6ce4b39e5bbe075421174564d390df614123689e18e' as const;
+  'c1a9a7c9b7fbaf27ff09ee38c23ece84e75a2744191b28ac4178cbc417d44394' as const;
+
+/**
+ * Previous public deployment, still present on Testnet as of ledger 5611126,
+ * and not the current official manifest. Do not treat its keys as current.
+ */
+export const STALE_NETHERMIND_PUBLIC_XLM_POOL_CONTRACT =
+  'CAMWBUWHYXEGBM3Q7M5DBGW7LLJL3I4QGANQEZFEWLRNTOJMTT2WG24U' as const;
+
+export const STALE_NETHERMIND_PUBLIC_KEY_REGISTRY =
+  'CARXHKOPSGMUMFRDI72KNCRENVOTCJIGXPCPYOW42APDY2NEYF7CLKIL' as const;
 
 /** Public shared XLM (native) pool — first enabled non-GVK native pool in the manifest. */
 export const NETHERMIND_PUBLIC_XLM_POOL_CONTRACT =
-  'CAMWBUWHYXEGBM3Q7M5DBGW7LLJL3I4QGANQEZFEWLRNTOJMTT2WG24U' as const;
+  'CCSI25UI6P42ZZWFPHAJ44BIYFLZV2QLMJ3BBT3XHDKNM5RRHXOLB5TW' as const;
 
 export const NETHERMIND_PUBLIC_KDF_DOMAIN = 'Nethermind' as const;
 
@@ -67,33 +95,33 @@ export const NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS = {
   kdf_domain: 'Nethermind',
   deployer: 'GDX6X7DZQGIAGP6MWUK24BRQFDNQCP6E4FCJ4M6K3OCTNQM3EMWLQGPH',
   admin: 'GDF4BXPQY5N4BEO24UIHM4NVB62MW7HDWH7SVHKLVZAMLP5IIHCFQORC',
-  asp_membership: 'CD25JAWK4OHQTZ2C72I3BZIN4P2RXT5M4LAWZG6RIXJO3HLVM74OFMCG',
+  asp_membership: 'CCFFZGCA7I3ZEAHNBWHQNDLU7YNEVV6ZDIJ3XCELMQAVIDYRIMOE4PQS',
   added_asp_memberships: [] as { contractId: string; deploymentLedger: number }[],
-  asp_non_membership: 'CDP34AQV4JY3AHNUTWL3DFMKOLVLR43XSX75IAXN6PPVDIWCFQKMFY4R',
+  asp_non_membership: 'CBDXUA7VT7QGZCDEJSS4WQY2VYACEEFLL4XSEKPL7GOBDKUSGCV6NA2D',
   asp_membership_wasm_hash: '44522579b5560d1aabb99abf77320963df50a3a7954a0ec12c9c7fc444d4953d',
   asp_non_membership_wasm_hash: '3c6eaf31e690605d96ca3815982a264ed14b1637d80dafdd06cc527552bf1826',
   verifiers: {
-    B: 'CCMEZQ6RKT35PH5QILPFOBXCUJEDBUDYCWUBZEQMWWJCPEMPNFOLTGST',
-    B_gvk_T: 'CBKHDVIL5XN7IIBJU2ZPUWIIHKVIQSUSLSN5W6ZQF33FAYYXBBDNUYUG',
-    B_gvk_V: 'CBQS3Y4OTJVUBVYYTWEJEQC4ISKA3DAOOLOLAWNAU7Z2ZERP5YO7BLYO',
+    B: 'CDNNLHL5SZPQFEBWAWUQYSJLWBYKG5U6TTNAE4PP5RO3NTLWQK57CJZA',
+    B_gvk_T: 'CB35TLTKGEYH653CQCL3CKVZVKJU4TTNZJPA7DENUHVJQ7DIAFHVLKVS',
+    B_gvk_V: 'CAJGVSVOIW3Q3ZKWZDPWHQDUASUOBV3ATLV5HI2M24YA5XQT7DDPCREO',
   },
-  public_key_registry: 'CARXHKOPSGMUMFRDI72KNCRENVOTCJIGXPCPYOW42APDY2NEYF7CLKIL',
-  public_key_registry_verifier: 'CBL5BJUOPVL7O66QDJYXH3ZWKZSNGKFLT5D5KGVUKUKCME6CCRTXHK5A',
+  public_key_registry: 'CA5MA3LDXS4TQKBQ7SY57IHO3VMYV7G3ZJH45CWCX4QVP25IDFMZWZ3E',
+  public_key_registry_verifier: 'CAK4AHQZIWC5ZTHJSSP562LF6IYZNFBAVFAL36KBAW635YD5UDA7DLUV',
   public_key_registry_verifier_wasm_hash:
     '4234d57285c2312c38e8e3b3dc6549001039bb8d1cdcd3bf7c78d710f8193003',
   pools: [
     {
-      poolContractId: 'CAMWBUWHYXEGBM3Q7M5DBGW7LLJL3I4QGANQEZFEWLRNTOJMTT2WG24U',
+      poolContractId: 'CCSI25UI6P42ZZWFPHAJ44BIYFLZV2QLMJ3BBT3XHDKNM5RRHXOLB5TW',
       tokenContractId: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
-      deploymentLedger: 5525981,
+      deploymentLedger: 5557034,
       enabled: true,
       policyFlags: ['blocklist'],
       asset: { kind: 'native' as const },
     },
     {
-      poolContractId: 'CBTA5THUFNLDMFSH54YSHZJPAACLIBTT66ANWX2EPMP5F7ORPI24MXBQ',
+      poolContractId: 'CAQOV7J36IJUL67YW65ZFWUP3J6M2QFQCFRULRDOVBUDAHP2YKJU5TSR',
       tokenContractId: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
-      deploymentLedger: 5525986,
+      deploymentLedger: 5557039,
       enabled: true,
       policyFlags: ['blocklist'],
       asset: { kind: 'native' as const },
@@ -104,9 +132,9 @@ export const NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS = {
       },
     },
     {
-      poolContractId: 'CAJZRQ5MMAGPDR3GCYKHV5IWA5MQWRYSDC3NG6TFDFYBI3VSK6CUF53W',
+      poolContractId: 'CCIR7H5EU6L7MIUSK2GX2FLRPUDCGIDWSKHXFVEIURHLEMFKKP5HRWDA',
       tokenContractId: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
-      deploymentLedger: 5525991,
+      deploymentLedger: 5557045,
       enabled: true,
       policyFlags: ['blocklist'],
       asset: { kind: 'native' as const },
@@ -117,9 +145,9 @@ export const NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS = {
       },
     },
     {
-      poolContractId: 'CCU6H72HI6EL36YILNKHSCXXGLFVLOTYM7DKRORKSD5B5NTR22F7ZYKJ',
+      poolContractId: 'CC62LI4F2DV4PIY45T7KQYYXEV2NU5DD63XHA4KXWPBKZ2AJOWAI4REW',
       tokenContractId: 'CCUUDM434BMZMYWYDITHFXHDMIVTGGD6T2I5UKNX5BSLXLW7HVR4MCGZ',
-      deploymentLedger: 5525994,
+      deploymentLedger: 5557050,
       enabled: true,
       policyFlags: ['blocklist'],
       asset: {
