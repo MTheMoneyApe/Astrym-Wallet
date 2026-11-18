@@ -10,11 +10,9 @@ on:
       base_sha:
         description: Baseline commit
         required: true
-        default: 2dedcc4f68be57558fd0042d0df25ac26f45f23c
       head_sha:
         description: Candidate commit
         required: true
-        default: 215d5dc2d94a600c401e8fb1ded0dda669cde0f9
 
 permissions:
   contents: read
@@ -119,7 +117,5 @@ jobs:
         if: always()
         with:
           name: t9-delta
-          path: |
-            t9-logs
-            data/delta-215-vs-2dedcc4.json
+          path: t9-logs
           if-no-files-found: error
