@@ -29,6 +29,49 @@ command -v git >/dev/null 2>&1 || die "git is required"
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
 
+# cc-rs selects clang for wasm32-unknown-unknown. The generic Vercel image
+# compiler is Clang 15, while the upstream SDK package was built with LLVM 18.
+# Install and select the versioned AL2023 compiler explicitly so the C portion
+# of sqlite-wasm-rs is not silently built with the host's unpinned default.
+ensure_wasm_c_compiler() {
+  command -v dnf >/dev/null 2>&1 || die "dnf is required to install pinned Clang 18"
+  log "COMMAND: dnf install pinned clang18 18.1.8-6.amzn2023.0.3"
+  dnf install -y clang18-18.1.8-6.amzn2023.0.3
+
+  local candidate=""
+  local name
+  for name in clang18 clang-18 /usr/lib64/llvm18/bin/clang /usr/lib/llvm18/bin/clang; do
+    if command -v "$name" >/dev/null 2>&1; then
+      candidate="$(command -v "$name")"
+      break
+    fi
+  done
+  [ -n "$candidate" ] || die "pinned Clang 18 binary was not found after installation"
+
+  local version
+  version="$("$candidate" --version 2>&1 | sed -n '1p')"
+  case "$version" in
+    *"18.1.8"*) ;;
+    *) die "wasm C compiler is not pinned Clang 18.1.8: $version" ;;
+  esac
+
+  export CC_wasm32_unknown_unknown="$candidate"
+  local cxx
+  cxx=""
+  for name in clang++18 clang++-18 /usr/lib64/llvm18/bin/clang++ /usr/lib/llvm18/bin/clang++; do
+    if command -v "$name" >/dev/null 2>&1; then
+      cxx="$(command -v "$name")"
+      break
+    fi
+  done
+  if [ -n "$cxx" ]; then
+    export CXX_wasm32_unknown_unknown="$cxx"
+    log "TOOL wasm-target-cxx $cxx ($("$cxx" --version 2>&1 | sed -n '1p'))"
+  fi
+  log "TOOL wasm-target-cc $CC_wasm32_unknown_unknown ($version)"
+}
+ensure_wasm_c_compiler
+
 # Retain caller-provided homes (or the image /rust fallback) as explicit
 # remap inputs before assigning the isolated build homes used by this script.
 CARGO_HOME_REMAP="${CARGO_HOME:-/rust}"
@@ -514,8 +557,8 @@ tools = {
     "cargo-rustup-proxy": shutil.which("cargo"),
     "host-cc": shutil.which("cc"),
     # cc-rs selects this compiler for its actual wasm32 C invocations.
-    "clang-wasm-target": shutil.which("clang"),
-    "clang-18": shutil.which("clang-18"),
+    "clang-wasm-target": os.environ.get("CC_wasm32_unknown_unknown") or shutil.which("clang"),
+    "clang-18": shutil.which("clang-18") or shutil.which("clang18"),
     "ar": shutil.which("ar"),
     "llvm-ar": shutil.which("llvm-ar"),
     "wasm-ld": shutil.which("wasm-ld"),
