@@ -7,22 +7,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import { sppKeyDerivationMessage } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 
-const sendIpcMessage = vi.hoisted(() => vi.fn());
+const sendMessage = vi.hoisted(() => vi.fn());
 
-vi.mock('../../src/popup/ipc.js', () => ({
-  sendIpcMessage: (...args: unknown[]) => sendIpcMessage(...args),
+vi.mock('webextension-polyfill', () => ({
+  default: {
+    runtime: {
+      sendMessage: (...args: unknown[]) => sendMessage(...args),
+    },
+  },
 }));
 
 import { SppAccountPanel } from '../../src/popup/SppAccountPanel.js';
 
 const HELD_NOTE = 'Registro retenido: aún no hay firma Registration v1';
-
-function rejection(): Error {
-  return Object.assign(new Error('SPP_BROADCAST_AWAITING_APPROVAL'), {
-    name: 'UNAUTHORIZED',
-    code: 'BROADCAST_AWAITING_APPROVAL',
-  });
-}
 
 describe('SppAccountPanel register', () => {
   let host: HTMLDivElement;
@@ -33,11 +30,19 @@ describe('SppAccountPanel register', () => {
       root?.unmount();
     });
     host?.remove();
-    sendIpcMessage.mockReset();
+    sendMessage.mockReset();
   });
 
-  it('holds the v3 review after two clicks when signing is refused', async () => {
-    sendIpcMessage.mockRejectedValue(rejection());
+  it('holds the v3 review after two clicks when the real IPC error carries the broadcast code', async () => {
+    sendMessage.mockResolvedValue({
+      id: 'register-held',
+      type: 'SPP_REGISTER_PUBLIC_KEYS',
+      error: {
+        name: 'UNAUTHORIZED',
+        message: 'SPP_BROADCAST_AWAITING_APPROVAL',
+        code: 'BROADCAST_AWAITING_APPROVAL',
+      },
+    });
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
@@ -50,23 +55,23 @@ describe('SppAccountPanel register', () => {
     const button = host.querySelector('[data-testid="spp-account-register"]') as HTMLButtonElement;
     const v3 = sppKeyDerivationMessage(getNethermindPublicTestnetContractConfig().kdf_domain);
     expect(host.querySelector('[data-spp-register-state="idle"]')).not.toBeNull();
-    expect(host.textContent).not.toContain(v3);
 
     await act(async () => {
       button.click();
     });
-    expect(sendIpcMessage).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
     expect(host.querySelector('[data-testid="spp-register-message"]')?.textContent).toContain(v3);
 
     await act(async () => {
       button.click();
     });
 
-    expect(sendIpcMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(host.querySelector('[data-spp-register-state="sign-blocked"]')).not.toBeNull();
     expect(host.querySelector('[role="status"]')?.textContent).toContain(HELD_NOTE);
     expect(host.querySelector('[data-testid="spp-register-message"]')?.textContent).toContain(v3);
     expect(host.querySelector('[data-testid="spp-account-error"]')).toBeNull();
+    expect(host.textContent).not.toContain('on-chain ok');
 
     const fields = [...host.querySelectorAll('input, textarea')];
     expect(fields).toHaveLength(1);
