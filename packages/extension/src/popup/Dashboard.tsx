@@ -585,26 +585,81 @@ export function FriendbotFundButton({
         onClick={onFund}
         disabled={fundingLoading || blocked}
         aria-describedby={notice ? FRIENDBOT_FUND_NOTICE_ID : undefined}
-        className="btn-outline"
+        className="btn-secondary"
         style={{
           width: '100%',
-          padding: '8px 12px',
-          fontSize: '0.82rem',
+          padding: '9px 12px',
+          fontSize: '0.84rem',
           fontWeight: 600,
-          color: 'var(--accent-color)',
-          borderColor: 'var(--accent-color)',
           cursor: blocked ? 'not-allowed' : 'pointer',
           opacity: blocked ? 0.55 : 1,
         }}
       >
-        {fundingLoading ? 'Funding from Friendbot...' : 'Fund with Friendbot (10,000 Testnet XLM)'}
+        {fundingLoading ? 'Fondeando en Testnet…' : 'Fondear Testnet (10,000 XLM)'}
       </button>
       {notice ? (
-        <p id={FRIENDBOT_FUND_NOTICE_ID} role="status" style={{ margin: '8px 0 0', fontSize: '0.78rem', color: 'var(--text-main)' }}>
+        <p id={FRIENDBOT_FUND_NOTICE_ID} role="status" style={{ margin: '8px 0 0', fontSize: '0.76rem', lineHeight: 1.4, color: 'var(--text-sec)' }}>
           {notice}
         </p>
       ) : null}
     </>
+  );
+}
+
+export function PrivacyModeSelector({
+  snapshot,
+  busy,
+  onSelectDirect,
+  onSelectNym,
+}: {
+  snapshot: NymUiSnapshot;
+  busy: boolean;
+  onSelectDirect: () => void;
+  onSelectNym: () => void;
+}) {
+  const hydrated = snapshot.preferenceHydrated === true;
+  const isDirect = hydrated && snapshot.mode === 'direct' && snapshot.egressBlocked !== true;
+  const isNym = hydrated && snapshot.mode === 'nym';
+  const connecting = snapshot.state === 'connecting';
+
+  return (
+    <div className="card privacy-card" data-testid="dashboard-privacy-selector">
+      <div className="privacy-switcher" role="group" aria-label="Modo de privacidad">
+        <button
+          type="button"
+          className="privacy-switcher__btn"
+          data-testid="dashboard-mode-direct"
+          aria-pressed={isDirect}
+          disabled={busy || isDirect}
+          onClick={onSelectDirect}
+        >
+          <span className={`privacy-dot ${isDirect ? 'privacy-dot--direct' : ''}`} aria-hidden="true" />
+          Modo Normal
+        </button>
+        <button
+          type="button"
+          className="privacy-switcher__btn"
+          data-testid="dashboard-mode-nym"
+          aria-pressed={isNym}
+          disabled={busy || (isNym && snapshot.connected)}
+          onClick={onSelectNym}
+        >
+          <span
+            className={`privacy-dot ${isNym ? (snapshot.connected ? 'privacy-dot--nym' : 'privacy-dot--blocked') : ''}`}
+            aria-hidden="true"
+          />
+          {connecting ? 'Conectando Nym…' : 'Modo Privado Nym'}
+        </button>
+      </div>
+      <div className="row-between" style={{ flexWrap: 'wrap' }}>
+        <PrivacyModeIndicator snapshot={snapshot} />
+        {isNym && !snapshot.connected && !connecting ? (
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-sec)' }}>
+            Red bloqueada por seguridad
+          </span>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -629,6 +684,9 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   const [isUnfunded, setIsUnfunded] = useState(false);
   const [fundingLoading, setFundingLoading] = useState(false);
   const [fundingMessage, setFundingMessage] = useState('');
+  const [recentActivity, setRecentActivity] = useState<
+    Array<{ id: string; title: string; subtitle: string; time: string }>
+  >([]);
   const [view, setView] = useState<'dashboard' | 'send' | 'receive' | 'settings'>('dashboard');
   const latestBalanceRequest = useRef(0);
   const selectedIndexRef = useRef<number | null>(null);
@@ -647,17 +705,13 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   const [autoLockSaved, setAutoLockSaved] = useState(false);
 
   // Theme State
-  const [themePreset, setThemePreset] = useState<string>(
-    typeof document !== 'undefined' && document.documentElement.classList.contains('astrym-webapp')
-      ? 'astrym'
-      : 'midnight',
-  );
+  const [themePreset, setThemePreset] = useState<string>('astrym');
   const [customColors, setCustomColors] = useState<ThemePalette>({
-    '--bg-color': '#11151B',
-    '--surface-color': '#1B222B',
-    '--accent-color': '#8FE8D0',
-    '--text-main': '#F4F7F8',
-    '--text-sec': '#A4ADBA'
+    '--bg-color': '#191A1C',
+    '--surface-color': '#141416',
+    '--accent-color': '#3CE894',
+    '--text-main': '#FFFFFF',
+    '--text-sec': '#D0D5DD'
   });
 
   useEffect(() => {
@@ -844,7 +898,17 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     try {
       const res = await sendIpcMessage('FUND_STELLAR_TESTNET_ACCOUNT', { address: targetAddress });
       if (res.success) {
-        setFundingMessage('Account funded with 10,000 Testnet XLM! Refreshing...');
+        setFundingMessage('Cuenta fondeada con 10,000 XLM de Testnet. Actualizando saldo…');
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setRecentActivity((prev) => [
+          {
+            id: `fund-${Date.now()}`,
+            title: '+10,000 XLM (Testnet)',
+            subtitle: 'Fondeo con Friendbot',
+            time,
+          },
+          ...prev.slice(0, 4),
+        ]);
         await fetchBalance(targetAddress, account?.index);
       } else {
         setFundingMessage(res.message);
@@ -1722,7 +1786,19 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           onBack={() => setView('dashboard')}
           accountIndex={account.index}
           accountAddress={account.address}
-          onComplete={() => setView('dashboard')}
+          onComplete={() => {
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            setRecentActivity((prev) => [
+              {
+                id: `send-${Date.now()}`,
+                title: 'Envío completado',
+                subtitle: 'Transacción enviada en Stellar Testnet',
+                time,
+              },
+              ...prev.slice(0, 4),
+            ]);
+            setView('dashboard');
+          }}
           privatePaymentsEnabled={sppSelected && nymReadyForSpp}
           privatePreparePhase={sppPrepareStatus?.phase ?? 'idle'}
           privatePoolContract={sppPoolContract}
@@ -1748,93 +1824,96 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   }
 
   if (view === 'settings') {
+    const sppPanel = (
+      <SppStatusPanel
+        snapshot={sppStatusSnapshot}
+        probing={!sppProbeDone}
+        sessionGeneration={sppSessionGeneration}
+        nymMode={
+          nymSnapshot.preferenceHydrated === true &&
+          nymSnapshot.mode === 'direct' &&
+          nymSnapshot.egressBlocked !== true
+            ? 'direct'
+            : 'nym'
+        }
+        nymConnected={nymSnapshot.connected}
+        sppSelected={sppSelected}
+        prepareStatus={sppPrepareStatus ?? null}
+        poolContract={sppPoolContract}
+        contractConfigJson={sppContractConfigJson}
+        bootnodeUrl={sppBootnodeUrl}
+        onToggleSpp={(next) => {
+          if (!nymReadyForSpp) return;
+          setSppSelected(next);
+          if (next) {
+            if (!isSppWriteReady(sppPrepareStatus)) {
+              void ensureSppAutoPrepareIfNeeded({
+                nymConnected: true,
+                nymMode: 'nym',
+              })
+                .then((status) => {
+                  if (status) setSppPrepareStatus(status);
+                })
+                .catch(() => {
+                  /* prepare status publisher records failure */
+                });
+            }
+          } else {
+            setSendKind('clear');
+          }
+        }}
+        onPoolContractChange={(contract) => {
+          setSppPoolContract(contract);
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            void chrome.storage.local.set({ [SPP_POOL_CONTRACT_KEY]: contract });
+          }
+        }}
+        onContractConfigJsonChange={(json) => {
+          setSppContractConfigJson(json);
+          if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+          const trimmed = json.trim();
+          if (!trimmed) {
+            void chrome.storage.local.remove(SPP_CONTRACT_CONFIG_KEY);
+            return;
+          }
+          try {
+            const parsed = parseSppContractConfig(JSON.parse(trimmed) as unknown);
+            void chrome.storage.local.set({ [SPP_CONTRACT_CONFIG_KEY]: parsed });
+          } catch {
+            // Keep textarea text; do not persist invalid JSON as ready config.
+          }
+        }}
+        onBootnodeUrlChange={(url) => {
+          setSppBootnodeUrl(url);
+          if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+          if (!url) {
+            void chrome.storage.local.remove(SPP_BOOTNODE_URL_KEY);
+            return;
+          }
+          void chrome.storage.local.set({ [SPP_BOOTNODE_URL_KEY]: url });
+        }}
+        onUseNethermindPublic={() => {
+          const pinned = getNethermindPublicTestnetContractConfig();
+          setSppPoolContract(NETHERMIND_PUBLIC_XLM_POOL_CONTRACT);
+          setSppContractConfigJson(JSON.stringify(pinned, null, 2));
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            void chrome.storage.local.set({
+              [SPP_CONTRACT_CONFIG_KEY]: pinned,
+              [SPP_POOL_CONTRACT_KEY]: NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
+            });
+          }
+        }}
+      />
+    );
+
     return (
       <div className="view-container" style={{ overflowY: 'auto' }}>
         <div className="header">
-          <button onClick={() => setView('dashboard')} className="btn-icon">&larr; Back</button>
-          <h2>Settings</h2>
-          <div style={{ width: 45 }}></div>
+          <button onClick={() => setView('dashboard')} className="btn-icon">&larr; Volver</button>
+          <h2>Ajustes</h2>
+          <div style={{ width: 52 }}></div>
         </div>
 
-        <SppStatusPanel
-          snapshot={sppStatusSnapshot}
-          probing={!sppProbeDone}
-          sessionGeneration={sppSessionGeneration}
-          nymMode={
-            nymSnapshot.preferenceHydrated === true &&
-            nymSnapshot.mode === 'direct' &&
-            nymSnapshot.egressBlocked !== true
-              ? 'direct'
-              : 'nym'
-          }
-          nymConnected={nymSnapshot.connected}
-          sppSelected={sppSelected}
-          prepareStatus={sppPrepareStatus ?? null}
-          poolContract={sppPoolContract}
-          contractConfigJson={sppContractConfigJson}
-          bootnodeUrl={sppBootnodeUrl}
-          onToggleSpp={(next) => {
-            if (!nymReadyForSpp) return;
-            setSppSelected(next);
-            if (next) {
-              if (!isSppWriteReady(sppPrepareStatus)) {
-                void ensureSppAutoPrepareIfNeeded({
-                  nymConnected: true,
-                  nymMode: 'nym',
-                })
-                  .then((status) => {
-                    if (status) setSppPrepareStatus(status);
-                  })
-                  .catch(() => {
-                    /* prepare status publisher records failure */
-                  });
-              }
-            } else {
-              setSendKind('clear');
-            }
-          }}
-          onPoolContractChange={(contract) => {
-            setSppPoolContract(contract);
-            if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-              void chrome.storage.local.set({ [SPP_POOL_CONTRACT_KEY]: contract });
-            }
-          }}
-          onContractConfigJsonChange={(json) => {
-            setSppContractConfigJson(json);
-            if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
-            const trimmed = json.trim();
-            if (!trimmed) {
-              void chrome.storage.local.remove(SPP_CONTRACT_CONFIG_KEY);
-              return;
-            }
-            try {
-              const parsed = parseSppContractConfig(JSON.parse(trimmed) as unknown);
-              void chrome.storage.local.set({ [SPP_CONTRACT_CONFIG_KEY]: parsed });
-            } catch {
-              // Keep textarea text; do not persist invalid JSON as ready config.
-            }
-          }}
-          onBootnodeUrlChange={(url) => {
-            setSppBootnodeUrl(url);
-            if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
-            if (!url) {
-              void chrome.storage.local.remove(SPP_BOOTNODE_URL_KEY);
-              return;
-            }
-            void chrome.storage.local.set({ [SPP_BOOTNODE_URL_KEY]: url });
-          }}
-          onUseNethermindPublic={() => {
-            const pinned = getNethermindPublicTestnetContractConfig();
-            setSppPoolContract(NETHERMIND_PUBLIC_XLM_POOL_CONTRACT);
-            setSppContractConfigJson(JSON.stringify(pinned, null, 2));
-            if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-              void chrome.storage.local.set({
-                [SPP_CONTRACT_CONFIG_KEY]: pinned,
-                [SPP_POOL_CONTRACT_KEY]: NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
-              });
-            }
-          }}
-        />
         <NymTransportPanel
           snapshot={nymSnapshot}
           busy={nymBusy}
@@ -1852,21 +1931,22 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           publicDataResult={nymPublicDataResult}
           onStellarHorizonProbe={handleNymStellarHorizonProbe}
           stellarHorizonResult={nymStellarHorizonResult}
+          advancedChildren={sppPanel}
         />
 
-        <div className="card" style={{ marginBottom: 20 }}>
-          <h3 style={{ margin: '0 0 10px 0' }}>Theme</h3>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: '0 0 10px 0', fontSize: '0.96rem' }}>Apariencia</h3>
           <select 
             value={themePreset} 
             onChange={e => handleThemeChange(e.target.value)}
             className="input-field"
-            style={{ width: '100%', marginBottom: 15 }}
+            style={{ width: '100%', marginBottom: themePreset === 'custom' ? 14 : 0 }}
           >
-            <option value="astrym">Astrym</option>
+            <option value="astrym">Astrym (Oscuro)</option>
             <option value="midnight">Midnight Green</option>
             <option value="lightmint">Light Mint</option>
             <option value="forest">Forest</option>
-            <option value="custom">Custom Colors</option>
+            <option value="custom">Colores personalizados</option>
           </select>
           
           {themePreset === 'custom' && (
@@ -1887,11 +1967,11 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         </div>
 
         <div className="card" style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: '0 0 6px' }}>Auto-lock</h3>
-          <p className="text-secondary" style={{ margin: '0 0 12px', fontSize: '0.78rem', lineHeight: 1.4 }}>
-            Lock after this period without activity in the wallet. A real interaction resets the timer; service-worker restarts do not.
+          <h3 style={{ margin: '0 0 6px', fontSize: '0.96rem' }}>Bloqueo automático</h3>
+          <p className="text-secondary" style={{ margin: '0 0 12px', fontSize: '0.8rem', lineHeight: 1.45 }}>
+            Bloquea la wallet tras este tiempo sin actividad para proteger tus fondos.
           </p>
-          <label htmlFor="auto-lock-timeout" className="text-secondary" style={{ display: 'block', marginBottom: 6, fontSize: '0.76rem' }}>Inactivity period</label>
+          <label htmlFor="auto-lock-timeout" className="text-secondary" style={{ display: 'block', marginBottom: 6, fontSize: '0.78rem' }}>Tiempo de inactividad</label>
           <select
             id="auto-lock-timeout"
             className="input-field"
@@ -1903,21 +1983,21 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
             }}
             style={{ width: '100%' }}
           >
-            {LOCK_TIMEOUT_OPTIONS_MINUTES.map((minutes) => <option key={minutes} value={minutes}>{minutes} minute{minutes === 1 ? '' : 's'}</option>)}
+            {LOCK_TIMEOUT_OPTIONS_MINUTES.map((minutes) => <option key={minutes} value={minutes}>{minutes} minuto{minutes === 1 ? '' : 's'}</option>)}
           </select>
-          {autoLockError && <p role="alert" className="error-text" style={{ margin: '8px 0 0', fontSize: '0.75rem' }}>{autoLockError}</p>}
-          {autoLockSaved && <p role="status" className="text-accent" style={{ margin: '8px 0 0', fontSize: '0.75rem' }}>Auto-lock setting saved.</p>}
+          {autoLockError && <p role="alert" className="error-text" style={{ margin: '8px 0 0', fontSize: '0.76rem' }}>{autoLockError}</p>}
+          {autoLockSaved && <p role="status" className="text-accent" style={{ margin: '8px 0 0', fontSize: '0.76rem' }}>Ajuste guardado.</p>}
         </div>
 
         <div className="card">
-          <h3 style={{ margin: '0 0 10px 0' }}>Wallet Backup</h3>
-          <p className="text-secondary" style={{ marginBottom: 20, fontSize: '0.9em' }}>
-            Your recovery phrase is the only way to restore your wallet. Never share it with anyone.
+          <h3 style={{ margin: '0 0 8px 0', fontSize: '0.96rem' }}>Copia de seguridad</h3>
+          <p className="text-secondary" style={{ margin: '0 0 16px', fontSize: '0.82rem', lineHeight: 1.45 }}>
+            Tu frase de recuperación es la única forma de restaurar tu wallet. Nunca la compartas con nadie.
           </p>
 
           {recoveryPhrase ? (
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
                 {recoveryPhrase.map((word, i) => (
                   <div key={i} className="phrase-word">
                     <span className="text-secondary" style={{ userSelect: 'none' }}>{i + 1}.</span>
@@ -1927,15 +2007,15 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
               </div>
               <div style={{ display: 'flex', gap: 10 }}>
                 <button onClick={handleCopyPhrase} className="btn-secondary" style={{ flex: 1 }}>
-                  {copySuccess ? 'Copied \u2713' : 'Copy'}
+                  {copySuccess ? 'Copiada \u2713' : 'Copiar'}
                 </button>
-                <button onClick={() => setRecoveryPhrase(null)} className="btn-secondary" style={{ flex: 1 }}>
-                  Hide
+                <button onClick={() => setRecoveryPhrase(null)} className="btn-outline" style={{ flex: 1 }}>
+                  Ocultar
                 </button>
               </div>
               {copySuccess && (
-                <p className="text-secondary" style={{ fontSize: '0.8em', marginTop: 10, textAlign: 'center' }}>
-                  Clipboard contents may be accessible to other apps. Clear your clipboard after secure offline storage.
+                <p className="text-secondary" style={{ fontSize: '0.76rem', marginTop: 10, textAlign: 'center', lineHeight: 1.4 }}>
+                  Recuerda vaciar el portapapeles después de guardar tu frase en un lugar seguro.
                 </p>
               )}
             </div>
@@ -1943,14 +2023,14 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
             <form onSubmit={handleRevealMnemonic} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <input 
                 type="password" 
-                placeholder="Enter password to reveal"
+                placeholder="Introduce tu contraseña"
                 value={settingsPassword}
                 onChange={e => setSettingsPassword(e.target.value)}
                 className="input-field"
               />
-              {settingsError && <p className="error-text">{settingsError}</p>}
+              {settingsError && <p className="error-text" style={{ margin: 0, fontSize: '0.8rem' }}>{settingsError}</p>}
               <button type="submit" disabled={settingsLoading || !settingsPassword} className="btn-primary">
-                {settingsLoading ? 'Verifying...' : 'Reveal Recovery Phrase'}
+                {settingsLoading ? 'Verificando…' : 'Mostrar frase de recuperación'}
               </button>
             </form>
           )}
@@ -1961,8 +2041,8 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
 
   return (
     <div className="view-container">
-      <div className="header" style={{ position: 'relative', gap: 8 }}>
-        <h2 className="text-accent" style={{ margin: 0, fontSize: '1.2rem' }}>Stellar Privacy</h2>
+      <div className="header" style={{ position: 'relative', gap: 8, marginBottom: 14 }}>
+        <h2 className="text-accent" style={{ margin: 0, fontSize: '1.15rem', letterSpacing: '0.02em' }}>Astrym</h2>
         <AccountMenu
           accounts={accounts}
           activeIndex={confirmedActiveIndex}
@@ -1979,52 +2059,60 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           onRename={handleRenameAccount}
         />
         <div style={{ display: 'flex', gap: 6, flex: '0 0 auto' }}>
-          <button onClick={() => setView('settings')} className="btn-outline" style={{ padding: '6px 8px', fontSize: '0.82rem' }}>Settings</button>
-          <button onClick={handleLock} className="btn-outline" style={{ padding: '6px 8px', fontSize: '0.82rem' }}>Lock</button>
+          <button onClick={() => setView('settings')} className="btn-outline" style={{ padding: '6px 9px', fontSize: '0.8rem' }}>Ajustes</button>
+          <button onClick={handleLock} className="btn-outline" style={{ padding: '6px 9px', fontSize: '0.8rem' }}>Bloquear</button>
         </div>
       </div>
       
       {accountError && (
         <div className="error-card">
-          <span style={{ fontSize: '0.9em' }}>{accountError}</span>
-          <button onClick={loadAccounts} className="btn-error">Retry</button>
+          <span style={{ fontSize: '0.86rem' }}>{accountError}</span>
+          <button onClick={loadAccounts} className="btn-error">Reintentar</button>
         </div>
       )}
       
       {loadingAccounts ? (
         <div className="center-content">
-          <p className="text-secondary">Loading account...</p>
+          <p className="text-secondary">Cargando cuenta…</p>
         </div>
       ) : account ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div className="card balance-card" style={{ padding: 25, border: '1px solid var(--border-color)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <PrivacyModeSelector
+            snapshot={nymSnapshot}
+            busy={nymBusy}
+            onSelectDirect={() => void handleNymSetMode('direct')}
+            onSelectNym={() => {
+              if (nymSnapshot.connected) {
+                void handleNymSetMode('nym');
+              } else {
+                handleNymConnect();
+              }
+            }}
+          />
+
+          <div className="card balance-card">
             <div className="balance-indicator" data-status={rpcStatus}></div>
             
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+            <div className="row-between" style={{ alignItems: 'flex-start', marginBottom: 14 }}>
               <div>
-                <h3 style={{ margin: '0 0 4px 0', fontSize: '1rem', fontWeight: '500' }}>{account.label}</h3>
+                <h3 style={{ margin: '0 0 4px 0', fontSize: '0.95rem', fontWeight: 600 }}>{account.label}</h3>
                 <CopyAddressButton address={account.address} label={account.label} />
               </div>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                <PrivacyModeIndicator snapshot={nymSnapshot} />
-                <div className="horizon-status" data-horizon-status={rpcStatus}>
-                  {rpcStatus === 'connecting' && <span className="text-secondary">Horizon pending</span>}
-                  {rpcStatus === 'connected' && <span className="text-accent">Horizon OK</span>}
-                  {rpcStatus === 'unavailable' && <span className="error-text">Horizon failed</span>}
-                </div>
-              </div>
+              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-sec)', padding: '3px 8px', borderRadius: 999, background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}>
+                Stellar Testnet
+              </span>
             </div>
             
-            <h1 style={{ margin: '0', fontSize: '2.8rem', fontWeight: '700' }}>
-              {balanceLoading ? <span className="text-secondary" style={{ fontSize: '2rem' }}>...</span> : balance} 
-              <span className="text-secondary" style={{ fontSize: '1.2rem', fontWeight: 'normal', marginLeft: 8 }}>{currency}</span>
+            <p className="text-secondary" style={{ margin: '0 0 4px 0', fontSize: '0.78rem' }}>Saldo disponible</p>
+            <h1 className="balance-amount">
+              {balanceLoading ? <span className="text-secondary" style={{ fontSize: '1.8rem' }}>…</span> : balance} 
+              <span className="text-secondary" style={{ fontSize: '1.1rem', fontWeight: 500, marginLeft: 8 }}>{currency}</span>
             </h1>
 
             {isUnfunded && (
-              <div style={{ marginTop: 15, padding: '12px 14px', background: 'rgba(255, 193, 7, 0.12)', border: '1px solid rgba(255, 193, 7, 0.3)', borderRadius: 8 }}>
-                <p style={{ margin: '0 0 8px 0', fontSize: '0.82rem', color: 'var(--text-main)' }}>
-                  This account is unfunded on Stellar Testnet. You can request free Testnet XLM to fund it.
+              <div style={{ marginTop: 14, padding: '12px', background: 'rgba(60, 232, 148, 0.08)', border: '1px solid rgba(60, 232, 148, 0.25)', borderRadius: 10 }}>
+                <p style={{ margin: '0 0 8px 0', fontSize: '0.8rem', lineHeight: 1.4, color: 'var(--text-main)' }}>
+                  Esta cuenta aún no tiene saldo en Testnet. Puedes solicitar XLM de prueba gratis.
                 </p>
                 <FriendbotFundButton
                   mode={friendbotGate.mode}
@@ -2034,27 +2122,48 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
                   onFund={() => handleFundTestnet(account.address)}
                 />
                 {fundingMessage && (
-                  <p style={{ margin: '8px 0 0', fontSize: '0.78rem', color: 'var(--accent-color)' }}>{fundingMessage}</p>
+                  <p style={{ margin: '8px 0 0', fontSize: '0.76rem', color: 'var(--accent-color)' }}>{fundingMessage}</p>
                 )}
               </div>
             )}
 
             {balanceError && (
-              <div style={{ marginTop: 15, padding: 10, background: 'rgba(255, 107, 107, 0.1)', borderRadius: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="error-text" style={{ fontSize: '0.85em' }}>{balanceError}</span>
-                <button onClick={() => fetchBalance(account.address, account.index)} disabled={balanceLoading} className="btn-error">Retry</button>
+              <div style={{ marginTop: 14, padding: 10, background: 'rgba(255, 107, 107, 0.1)', border: '1px solid rgba(255, 107, 107, 0.3)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <span className="error-text" style={{ fontSize: '0.8rem' }}>{balanceError}</span>
+                <button onClick={() => fetchBalance(account.address, account.index)} disabled={balanceLoading} className="btn-error">Reintentar</button>
               </div>
             )}
           </div>
 
           <div className="action-grid">
-            <button onClick={() => setView('send')} className="btn-primary" style={{ padding: 14 }}>Send</button>
-            <button onClick={() => setView('receive')} className="btn-secondary" style={{ padding: 14 }}>Receive</button>
+            <button onClick={() => setView('receive')} className="btn-secondary">Recibir</button>
+            <button onClick={() => setView('send')} className="btn-primary">Enviar</button>
           </div>
+
+          <section className="card activity-card" data-testid="dashboard-recent-activity">
+            <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600 }}>Historial reciente</h3>
+            {recentActivity.length > 0 ? (
+              <ul className="activity-list">
+                {recentActivity.map((item) => (
+                  <li key={item.id} className="activity-item">
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{item.title}</div>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--text-sec)' }}>{item.subtitle}</div>
+                    </div>
+                    <span style={{ fontSize: '0.74rem', color: 'var(--text-sec)', whiteSpace: 'nowrap' }}>{item.time}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-secondary" style={{ margin: 0, fontSize: '0.8rem', lineHeight: 1.4 }}>
+                Aún no hay movimientos recientes en esta sesión.
+              </p>
+            )}
+          </section>
         </div>
       ) : (
         <div className="center-content">
-          <p className="text-secondary">{accounts.length > 0 ? 'Choose an account from the wallet menu.' : 'No accounts are available. Open the wallet menu to create one.'}</p>
+          <p className="text-secondary">{accounts.length > 0 ? 'Selecciona una cuenta desde el menú superior.' : 'No hay cuentas disponibles. Abre el menú superior para crear una.'}</p>
         </div>
       )}
     </div>

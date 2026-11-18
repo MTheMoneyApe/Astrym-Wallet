@@ -59,4 +59,26 @@ describe('NymTransportPanel', () => {
     expect(markup).toContain('data-nym-connected="false"');
     expect(markup).not.toMatch(/Ready \(Mixnet\)/);
   });
+
+  it('groups technical diagnostics and advancedChildren inside a collapsible details disclosure', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(NymTransportPanel, {
+        snapshot: {
+          state: 'disconnected',
+          lastError: null,
+          connected: false,
+          implementation: 'mix-fetch-offscreen',
+          mode: 'direct',
+          documentReady: false,
+        },
+        onStellarHorizonProbe: () => undefined,
+        advancedChildren: React.createElement('div', { 'data-testid': 'spp-slot' }, 'SPP'),
+      }),
+    );
+    expect(markup).toContain('Bloqueo automático de protección');
+    expect(markup).toContain('<details class="advanced-accordion" data-testid="nym-advanced-diagnostics">');
+    expect(markup).toContain('Opciones avanzadas y diagnóstico');
+    expect(markup).toContain('data-testid="nym-stellar-horizon-panel"');
+    expect(markup).toContain('data-testid="spp-slot"');
+  });
 });

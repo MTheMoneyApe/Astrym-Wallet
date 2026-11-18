@@ -7,6 +7,7 @@ import {
   FRIENDBOT_MODE_CHECKING_NOTICE,
   FRIENDBOT_NYM_NOTICE,
   FriendbotFundButton,
+  PrivacyModeSelector,
   applyFriendbotModeStatus,
   createAccountOperationGate,
   copyPublicAddress,
@@ -238,7 +239,7 @@ describe('Friendbot fund button', () => {
     expect(nymConnected).not.toContain(FRIENDBOT_NYM_NOTICE);
     expect(nymConnected).not.toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
     expect(nymConnected).not.toContain('aria-describedby');
-    expect(nymConnected).toContain('Fund with Friendbot (10,000 Testnet XLM)');
+    expect(nymConnected).toContain('Fondear Testnet (10,000 XLM)');
 
     const directGate = applyFriendbotModeStatus({ ok: true, mode: 'direct' });
     const direct = renderFriendbot(directGate.mode, directGate.modeKnown, directGate.nymConnected);
@@ -246,6 +247,54 @@ describe('Friendbot fund button', () => {
     expect(direct).not.toContain(FRIENDBOT_NYM_NOTICE);
     expect(direct).not.toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
     expect(direct).not.toContain('aria-describedby');
-    expect(direct).toContain('Fund with Friendbot (10,000 Testnet XLM)');
+    expect(direct).toContain('Fondear Testnet (10,000 XLM)');
+  });
+});
+
+describe('PrivacyModeSelector', () => {
+  it('renders Modo Normal vs Modo Privado Nym with clear active aria-pressed states and status pill', () => {
+    const directMarkup = renderToStaticMarkup(
+      React.createElement(PrivacyModeSelector, {
+        snapshot: {
+          state: 'disconnected',
+          lastError: null,
+          connected: false,
+          implementation: 'mix-fetch-offscreen',
+          mode: 'direct',
+          preferenceHydrated: true,
+          egressBlocked: false,
+          privacyPreference: null,
+        },
+        busy: false,
+        onSelectDirect: vi.fn(),
+        onSelectNym: vi.fn(),
+      }),
+    );
+    expect(directMarkup).toContain('data-testid="dashboard-privacy-selector"');
+    expect(directMarkup).toContain('Modo Normal');
+    expect(directMarkup).toContain('Modo Privado Nym');
+    expect(directMarkup).toContain('data-testid="dashboard-mode-direct" aria-pressed="true"');
+    expect(directMarkup).toContain('data-testid="dashboard-mode-nym" aria-pressed="false"');
+    expect(directMarkup).toContain('data-testid="privacy-mode-indicator"');
+
+    const nymDisconnectedMarkup = renderToStaticMarkup(
+      React.createElement(PrivacyModeSelector, {
+        snapshot: {
+          state: 'disconnected',
+          lastError: null,
+          connected: false,
+          implementation: 'mix-fetch-offscreen',
+          mode: 'nym',
+          preferenceHydrated: true,
+          egressBlocked: true,
+          privacyPreference: 'nym',
+        },
+        busy: false,
+        onSelectDirect: vi.fn(),
+        onSelectNym: vi.fn(),
+      }),
+    );
+    expect(nymDisconnectedMarkup).toContain('data-testid="dashboard-mode-nym" aria-pressed="true"');
+    expect(nymDisconnectedMarkup).toContain('Red bloqueada por seguridad');
   });
 });

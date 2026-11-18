@@ -66,8 +66,8 @@ export function App() {
       const webapp = document.documentElement.classList.contains('astrym-webapp');
       const presetId = typeof storage['themePreset'] === 'string'
         ? String(storage['themePreset'])
-        : webapp ? 'astrym' : 'midnight';
-      const fallbackColors = (webapp ? THEME_PRESETS['astrym'] : THEME_PRESETS['midnight']) as ThemePalette;
+        : 'astrym';
+      const fallbackColors = THEME_PRESETS['astrym'] as ThemePalette;
       let colors: ThemePalette = fallbackColors;
       const presetColors = THEME_PRESETS[presetId] as ThemePalette | undefined;
       if (presetColors) {

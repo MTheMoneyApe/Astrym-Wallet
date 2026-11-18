@@ -134,15 +134,16 @@ export function PrivacyModeIndicator({
         : 'unknown';
   return (
     <div
+      className="privacy-pill"
       data-testid="privacy-mode-indicator"
       data-privacy-tone={view.tone}
       data-privacy-egress={view.egress}
       data-privacy-mode={snapshot.mode ?? 'unknown'}
       data-privacy-hydrated={hydrated}
       data-privacy-preference={snapshot.privacyPreference ?? 'none'}
-      style={{ fontSize: '0.75rem', lineHeight: 1.3 }}
     >
-      {view.label}
+      <span className={`privacy-dot privacy-dot--${view.tone}`} aria-hidden="true" />
+      <span>{view.label}</span>
     </div>
   );
 }
