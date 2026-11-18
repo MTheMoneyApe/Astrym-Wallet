@@ -21,6 +21,22 @@ import type {
   StorageOpenOptions,
 } from 'stellar-private-payments';
 
+export type { Storage, StorageOpenOptions };
+
+/**
+ * Pinned SDK storage open accepts the published worker URL plus the encrypted
+ * OPFS fields the wallet key provider supplies. Those fields are optional so
+ * the published `Storage.open` remains assignable.
+ */
+export type SppEncryptedStorageOpenOptions = StorageOpenOptions & {
+  createNew?: boolean;
+  directory?: string;
+  keyProvider?: (
+    databaseId: string,
+    purpose: 'create' | 'open',
+  ) => Promise<Uint8Array>;
+};
+
 /** Explicit session lifecycle states. */
 export type SppSessionState =
   | 'uninitialized'
@@ -111,7 +127,7 @@ export type SppSdkRuntimeDeps = {
   };
   /** Wallet-authorized encrypted OPFS open; no unapproved direct Storage.open path. */
   openEncryptedStorage: (input: {
-    storageOpen: (options: StorageOpenOptions) => Promise<Storage>;
+    storageOpen: (options: SppEncryptedStorageOpenOptions) => Promise<Storage>;
     workerUrl: string;
   }) => Promise<Storage>;
   Client: {

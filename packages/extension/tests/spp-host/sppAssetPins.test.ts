@@ -14,7 +14,7 @@ const manifestPath = join(
 );
 const commit = 'e6ce95c2a71ed6313f78bb19cfdd0de1d9663120';
 
-function sha(body) {
+function sha(body: string): string {
   return createHash('sha256').update(body).digest('hex');
 }
 

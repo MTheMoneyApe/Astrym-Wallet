@@ -1,5 +1,8 @@
 import { StrKey } from '@stellar/stellar-sdk';
-import type { Storage, StorageOpenOptions } from 'stellar-private-payments';
+import type {
+  SppEncryptedStorageOpenOptions,
+  Storage,
+} from '@solanym/wallet-core/src/stellar/spp/SppSession.js';
 import { hashSep53Message } from '@solanym/wallet-core/src/stellar/spp/sep53.js';
 import {
   createSppStorageUnlockMessage,
@@ -230,7 +233,7 @@ function readRecord(expectedOrigin: string): StorageKeyRecord | null {
  * pattern. The key itself exists only in memory and is zeroed after Storage.open.
  */
 export async function openSppEncryptedStorage(input: {
-  storageOpen: (options: StorageOpenOptions) => Promise<Storage>;
+  storageOpen: (options: SppEncryptedStorageOpenOptions) => Promise<Storage>;
   workerUrl: string;
   signer: Pick<SppHostRemoteSigner, 'signStorageUnlockMessage'>;
   activeStellarAddress: string;
@@ -388,7 +391,7 @@ export async function openSppEncryptedStorage(input: {
             workerUrl: input.workerUrl,
             createNew: false,
             ...(record.directory ? { directory: record.directory } : {}),
-            keyProvider: async (databaseId, purpose) => {
+            keyProvider: async (databaseId: string, purpose: 'create' | 'open') => {
               if (databaseId !== SPP_STORAGE_DATABASE_ID || purpose !== 'open') {
                 throw new Error('SPP storage recovery refused an unexpected database context.');
               }
@@ -404,10 +407,14 @@ export async function openSppEncryptedStorage(input: {
         localStorage.setItem(SPP_STORAGE_UNLOCK_RECORD_KEY, JSON.stringify(record));
       } catch (cause) {
         // Do not strand an OPFS worker when persisting the completed marker fails.
-        try {
-          await storage.close();
-        } catch {
-          /* preserve the metadata persistence error */
+        // The pinned runtime exposes close(); the published Storage declaration omits it.
+        const close = (storage as Storage & { close?: () => Promise<void> }).close;
+        if (typeof close === 'function') {
+          try {
+            await close.call(storage);
+          } catch {
+            /* preserve the metadata persistence error */
+          }
         }
         throw cause;
       }

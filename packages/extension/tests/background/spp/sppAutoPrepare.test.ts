@@ -52,7 +52,7 @@ describe('ensureSppAutoPrepareIfNeeded', () => {
           }),
         },
       } as unknown as typeof chrome.storage,
-    };
+    } as unknown as typeof chrome;
   });
 
   afterEach(() => {

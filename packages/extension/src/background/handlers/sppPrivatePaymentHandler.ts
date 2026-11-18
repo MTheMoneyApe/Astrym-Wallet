@@ -114,7 +114,7 @@ export function createSppPrivatePaymentHandler(deps: { keyManager: KeyManager })
       }
     }
 
-    return executeSppPrivatePayment({
+    const payment = await executeSppPrivatePayment({
       gate,
       request,
       rpcUrl,
@@ -124,5 +124,12 @@ export function createSppPrivatePaymentHandler(deps: { keyManager: KeyManager })
       authorizationFingerprint: payload.authorizationFingerprint,
       maxFeeStroops,
     });
+    return {
+      operation: payment.operation,
+      txHash: payment.txHash,
+      txHashes: [...payment.txHashes],
+      rpcRoutedViaNym: payment.rpcRoutedViaNym,
+      confirmation: payment.confirmation,
+    };
   };
 }

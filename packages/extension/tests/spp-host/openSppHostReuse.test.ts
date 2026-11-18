@@ -71,13 +71,15 @@ describe('openSppHostInternal tab reuse', () => {
     expect(runtime.getContexts).toHaveBeenCalledTimes(1);
     resolveContexts([]);
     await Promise.all([first, second]);
-    expect(tabs.create.mock.calls[0][0].url).toContain('spp-host.html');
+    const coalescedUrl = tabs.create.mock.calls[0]?.[0]?.url;
+    expect(coalescedUrl).toEqual(expect.stringContaining('spp-host.html'));
   });
 
   it('creates a tab when none exists', async () => {
     runtime.getContexts.mockResolvedValue([]);
     tabs.create.mockResolvedValue({ id: 1 });
     await openSppHostInternal({ active: false });
-    expect(tabs.create.mock.calls[0][0].url).toContain('spp-host.html');
+    const createdUrl = tabs.create.mock.calls[0]?.[0]?.url;
+    expect(createdUrl).toEqual(expect.stringContaining('spp-host.html'));
   });
 });

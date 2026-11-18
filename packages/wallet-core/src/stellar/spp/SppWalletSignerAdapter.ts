@@ -185,7 +185,7 @@ export class SppWalletSignerAdapter implements WalletSigner {
     approvalToken: string,
     prepareGeneration: number,
     opts?: SignOptions,
-  ): Promise<SignMessageResult> {
+  ): Promise<{ signedMessage: string; signerAddress: string }> {
     this._assertOptionalAddress(opts?.address);
     this._assertNetworkOption(opts?.networkPassphrase);
     if (typeof message !== 'string' || message.length === 0) {
