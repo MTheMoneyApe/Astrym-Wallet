@@ -170,11 +170,12 @@ describe('Dashboard account menu', () => {
   });
 });
 
-function renderFriendbot(mode: 'direct' | 'nym', modeKnown: boolean) {
+function renderFriendbot(mode: 'direct' | 'nym', modeKnown: boolean, nymConnected = false) {
   return renderToStaticMarkup(
     React.createElement(FriendbotFundButton, {
       mode,
       modeKnown,
+      nymConnected,
       fundingLoading: false,
       onFund: vi.fn(),
     }),
@@ -182,7 +183,7 @@ function renderFriendbot(mode: 'direct' | 'nym', modeKnown: boolean) {
 }
 
 describe('Friendbot fund button', () => {
-  it('stays disabled while routing mode is unknown, after an IPC error, and in Nym mode, and enables only for known Direct mode', () => {
+  it('stays disabled while routing mode is unknown, after an IPC error, or when Nym is disconnected, and enables for Direct or connected Nym', () => {
     const unknown = renderFriendbot('direct', false);
     expect(unknown).toContain('disabled=""');
     expect(unknown).toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
@@ -191,23 +192,56 @@ describe('Friendbot fund button', () => {
     expect(unknown).not.toContain(FRIENDBOT_NYM_NOTICE);
 
     const ipcError = applyFriendbotModeStatus({ ok: false });
-    expect(ipcError).toEqual({ mode: 'direct', modeKnown: false });
-    const errored = renderFriendbot(ipcError.mode, ipcError.modeKnown);
+    expect(ipcError).toEqual({ mode: 'direct', modeKnown: false, nymConnected: false });
+    const errored = renderFriendbot(ipcError.mode, ipcError.modeKnown, ipcError.nymConnected);
     expect(errored).toContain('disabled=""');
     expect(errored).toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
 
-    const nymGate = applyFriendbotModeStatus({ ok: true, mode: 'nym' });
-    const nym = renderFriendbot(nymGate.mode, nymGate.modeKnown);
-    expect(nym).toContain('disabled=""');
-    expect(nym).toContain(FRIENDBOT_NYM_NOTICE);
-    expect(nym).toContain('disabled in Nym mode');
-    expect(nym).not.toContain('unavailable');
-    expect(nym).toContain('role="status"');
-    expect(nym).toContain('aria-describedby="friendbot-fund-notice"');
-    expect(nym).not.toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
+    const unhydrated = applyFriendbotModeStatus({
+      ok: true,
+      mode: 'nym',
+      connected: true,
+      preferenceHydrated: false,
+    });
+    expect(unhydrated.modeKnown).toBe(false);
+    expect(renderFriendbot(unhydrated.mode, unhydrated.modeKnown, unhydrated.nymConnected)).toContain(
+      'disabled=""',
+    );
+
+    const nymDisconnectedGate = applyFriendbotModeStatus({
+      ok: true,
+      mode: 'nym',
+      connected: false,
+    });
+    const nymDisconnected = renderFriendbot(
+      nymDisconnectedGate.mode,
+      nymDisconnectedGate.modeKnown,
+      nymDisconnectedGate.nymConnected,
+    );
+    expect(nymDisconnected).toContain('disabled=""');
+    expect(nymDisconnected).toContain(FRIENDBOT_NYM_NOTICE);
+    expect(nymDisconnected).toContain('role="status"');
+    expect(nymDisconnected).toContain('aria-describedby="friendbot-fund-notice"');
+    expect(nymDisconnected).not.toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
+
+    const nymConnectedGate = applyFriendbotModeStatus({
+      ok: true,
+      mode: 'nym',
+      connected: true,
+    });
+    const nymConnected = renderFriendbot(
+      nymConnectedGate.mode,
+      nymConnectedGate.modeKnown,
+      nymConnectedGate.nymConnected,
+    );
+    expect(nymConnected).not.toContain('disabled');
+    expect(nymConnected).not.toContain(FRIENDBOT_NYM_NOTICE);
+    expect(nymConnected).not.toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
+    expect(nymConnected).not.toContain('aria-describedby');
+    expect(nymConnected).toContain('Fund with Friendbot (10,000 Testnet XLM)');
 
     const directGate = applyFriendbotModeStatus({ ok: true, mode: 'direct' });
-    const direct = renderFriendbot(directGate.mode, directGate.modeKnown);
+    const direct = renderFriendbot(directGate.mode, directGate.modeKnown, directGate.nymConnected);
     expect(direct).not.toContain('disabled');
     expect(direct).not.toContain(FRIENDBOT_NYM_NOTICE);
     expect(direct).not.toContain(FRIENDBOT_MODE_CHECKING_NOTICE);

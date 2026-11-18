@@ -8,8 +8,9 @@
  *   {@link resolveHorizonUrlForNym}, never clearnet fallback.
  *   Methods are GET, HEAD, or POST. GET/HEAD with a body are refused.
  *   POST is used for Soroban JSON-RPC, not forced onto Horizon lookups.
- *   Effective hosts must already be on the Horizon allowlist or the Testnet
- *   Soroban RPC origin. Mainnet Horizon and Ankr mainnet are refused.
+ *   Effective hosts must already be on the Horizon allowlist, the Testnet
+ *   Soroban RPC origin, or Testnet Friendbot (GET only, no body, when network
+ *   is Testnet). Mainnet Horizon and Ankr mainnet are refused.
  *   Unknown hosts fail closed.
  *
  * Does not create MixFetch instances. Does not touch Solana or non-Stellar traffic.
@@ -48,10 +49,14 @@ export type {
   StellarNymHorizonConfig,
 } from './stellarHorizonNymConfig.js';
 
+export type StellarTransportNetwork = 'testnet' | 'mainnet';
+
 export type StellarTransportFetchDeps = {
   getMode: () => NymTransportMode;
   /** FailClosedTransportRouter.fetch — fail-closed in nym mode. */
   fetchViaRouter: (url: string, init?: RequestInit) => Promise<Response>;
+  /** Configured Stellar network (defaults to 'testnet'). Friendbot is Testnet-only. */
+  getNetwork?: () => StellarTransportNetwork;
   /** Current validated Nym Horizon remap config (defaults to documented Ankr bases). */
   getNymHorizonConfig?: () => StellarNymHorizonConfig;
   nymTimeoutMs?: number;
@@ -75,6 +80,9 @@ const STELLAR_NYM_METHOD_ALLOWLIST = new Set(['GET', 'HEAD', 'POST']);
  * Kept here so this adapter does not import the SPP payment module.
  */
 const STELLAR_NYM_SOROBAN_TESTNET_RPC = 'https://soroban-testnet.stellar.org';
+
+/** Testnet Friendbot origin (`STELLAR_TESTNET_FRIENDBOT_URL`). GET only, no body, Testnet only. */
+const STELLAR_NYM_TESTNET_FRIENDBOT_URL = 'https://friendbot.stellar.org';
 
 function allowlistedStellarHeaders(headers: HeadersInit | undefined): Headers {
   const out = new Headers();
@@ -133,8 +141,37 @@ function isSorobanTestnetRpcUrl(url: string): boolean {
   );
 }
 
-function assertAllowlistedStellarNymTarget(effectiveUrl: string): void {
-  if (isAllowlistedHorizonTarget(effectiveUrl) || isSorobanTestnetRpcUrl(effectiveUrl)) return;
+/** Exact Testnet Friendbot origin and root path (`?addr=...` allowed; credentials/hash refused). */
+function isFriendbotTestnetUrl(url: string): boolean {
+  let given: URL;
+  let trusted: URL;
+  try {
+    given = new URL(url);
+    trusted = new URL(STELLAR_NYM_TESTNET_FRIENDBOT_URL);
+  } catch {
+    return false;
+  }
+  return (
+    given.protocol === 'https:' &&
+    given.username === '' &&
+    given.password === '' &&
+    given.hash === '' &&
+    given.origin === trusted.origin &&
+    given.pathname === trusted.pathname
+  );
+}
+
+function assertAllowlistedStellarNymTarget(
+  effectiveUrl: string,
+  network: StellarTransportNetwork,
+): void {
+  if (
+    isAllowlistedHorizonTarget(effectiveUrl) ||
+    isSorobanTestnetRpcUrl(effectiveUrl) ||
+    (network === 'testnet' && isFriendbotTestnetUrl(effectiveUrl))
+  ) {
+    return;
+  }
   let host = 'invalid-url';
   try {
     host = new URL(effectiveUrl).host;
@@ -172,6 +209,12 @@ function resolveStellarNymMethod(effectiveUrl: string, init: RequestInit | undef
   if (caller !== '' && !STELLAR_NYM_METHOD_ALLOWLIST.has(caller)) {
     throw new Error(`Stellar Nym fetch refused method: ${caller}`);
   }
+  if (isFriendbotTestnetUrl(effectiveUrl)) {
+    if (caller !== '' && caller !== 'GET') {
+      throw new Error(`Stellar Nym fetch refused method: ${caller}`);
+    }
+    return 'GET';
+  }
   if (caller === 'GET' || caller === 'HEAD') return caller;
   if (
     (caller === '' || caller === 'POST') &&
@@ -200,10 +243,11 @@ export function createStellarTransportFetch(
       return deps.fetchViaRouter(url, init);
     }
 
+    const network: StellarTransportNetwork = deps.getNetwork?.() ?? 'testnet';
     const config = deps.getNymHorizonConfig?.() ?? DEFAULT_STELLAR_NYM_HORIZON_CONFIG;
     const resolution = resolveHorizonUrlForNym(url, config);
-    assertAllowlistedStellarNymTarget(url);
-    assertAllowlistedStellarNymTarget(resolution.effectiveUrl);
+    assertAllowlistedStellarNymTarget(url, network);
+    assertAllowlistedStellarNymTarget(resolution.effectiveUrl, network);
     deps.onResolved?.(resolution);
     const effective = new URL(resolution.effectiveUrl);
 

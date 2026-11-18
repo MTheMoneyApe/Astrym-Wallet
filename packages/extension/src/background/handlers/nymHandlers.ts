@@ -5,10 +5,7 @@ import {
   getNymRuntimeController,
   type NymRuntimeUiSnapshot,
 } from '../nym/NymRuntimeController.js';
-import {
-  clearSppAutoPrepareOnNymDisconnect,
-  ensureSppAutoPrepareIfNeeded,
-} from '../spp/sppAutoPrepare.js';
+import { clearSppAutoPrepareOnNymDisconnect } from '../spp/sppAutoPrepare.js';
 import { clearSppPrivatePool } from '../spp/sppPrivatePoolRegistry.js';
 import { revokeSppSignApprovals } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 import { revokeSppStorageUnlockApprovals } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
@@ -69,16 +66,6 @@ export function createNymConnectHandler() {
       connectOpts.preferredGateway = payload.preferredGateway;
     }
     const snap = await ctrl.connect(connectOpts);
-    // Start SPP only after a successful Nym connection. The idempotent ensure
-    // path preserves an active generation and coalesces repeated Connect calls.
-    if (snap.connected && snap.mode === 'nym') {
-      void ensureSppAutoPrepareIfNeeded({
-        nymConnected: true,
-        nymMode: 'nym',
-      }).catch(() => {
-        /* prepare status publisher records failure */
-      });
-    }
     return toSnapshot(snap);
   };
 }
@@ -105,15 +92,6 @@ export function createNymStatusHandler() {
     const ctrl = getNymRuntimeController();
     await ctrl.whenPrivacyReady();
     const snap = await ctrl.refreshStatus();
-    // Reload / Settings: if already connected, re-arm prepare without fake ready.
-    if (snap.connected && snap.mode === 'nym') {
-      void ensureSppAutoPrepareIfNeeded({
-        nymConnected: true,
-        nymMode: 'nym',
-      }).catch(() => {
-        /* prepare status publisher records failure */
-      });
-    }
     return toSnapshot(snap);
   };
 }
@@ -123,7 +101,6 @@ export function createNymSetModeHandler() {
     payload: ValidatedRequestPayload<'NYM_SET_MODE'>,
   ): Promise<ValidatedResponsePayload<'NYM_SET_MODE'>> => {
     const ctrl = getNymRuntimeController();
-    const previous = ctrl.getSnapshot();
     // Leaving Nym invalidates approvals and clears both the SW registry and host pool.
     if (payload.mode !== 'nym') {
       revokeSppSignApprovals();
@@ -136,11 +113,6 @@ export function createNymSetModeHandler() {
     await ctrl.setMode(payload.mode);
     await ctrl.syncGatewayConfigUi();
     const snapshot = ctrl.getSnapshot();
-    if (payload.mode === 'nym' && snapshot.connected && previous.mode !== 'nym') {
-      void ensureSppAutoPrepareIfNeeded({ nymConnected: true, nymMode: 'nym' }).catch(() => {
-        /* prepare status publisher records failure */
-      });
-    }
     return toSnapshot(snapshot);
   };
 }

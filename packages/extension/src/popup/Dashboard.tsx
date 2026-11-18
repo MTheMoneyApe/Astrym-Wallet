@@ -502,7 +502,7 @@ function ReceiveAddressView({ account, onBack }: { account: { address: string; l
 }
 
 export const FRIENDBOT_NYM_NOTICE =
-  'Friendbot is disabled in Nym mode. Switch to Direct mode to fund this Testnet account.';
+  'Connect Nym Mixnet or switch to Direct mode to fund this Testnet account with Friendbot.';
 
 export const FRIENDBOT_MODE_CHECKING_NOTICE = 'Checking routing mode...';
 
@@ -511,29 +511,49 @@ const FRIENDBOT_FUND_NOTICE_ID = 'friendbot-fund-notice';
 export type FriendbotModeGate = {
   mode: NymTransportMode;
   modeKnown: boolean;
+  nymConnected: boolean;
 };
 
 export const FRIENDBOT_MODE_GATE_INITIAL: FriendbotModeGate = {
   mode: 'direct',
   modeKnown: false,
+  nymConnected: false,
 };
 
 export function applyFriendbotModeStatus(
-  result: { ok: true; mode: NymTransportMode } | { ok: false },
+  result:
+    | { ok: true; mode: NymTransportMode; connected?: boolean; preferenceHydrated?: boolean }
+    | { ok: false },
 ): FriendbotModeGate {
-  if (!result.ok) return FRIENDBOT_MODE_GATE_INITIAL;
-  return { mode: result.mode, modeKnown: true };
+  if (!result.ok || result.preferenceHydrated === false) return FRIENDBOT_MODE_GATE_INITIAL;
+  return {
+    mode: result.mode,
+    modeKnown: true,
+    nymConnected: result.connected === true,
+  };
 }
 
-export function friendbotFundBlocked(mode: NymTransportMode, modeKnown: boolean): boolean {
-  return mode !== 'direct' || !modeKnown;
+export function friendbotFundBlocked(
+  mode: NymTransportMode,
+  modeKnown: boolean,
+  nymConnected = false,
+): boolean {
+  if (!modeKnown) return true;
+  if (mode === 'direct') return false;
+  if (mode === 'nym') return !nymConnected;
+  const _exhaustive: never = mode;
+  return _exhaustive;
 }
 
-function friendbotFundNotice(mode: NymTransportMode, modeKnown: boolean): string | null {
+function friendbotFundNotice(
+  mode: NymTransportMode,
+  modeKnown: boolean,
+  nymConnected = false,
+): string | null {
   if (!modeKnown) return FRIENDBOT_MODE_CHECKING_NOTICE;
   switch (mode) {
     case 'nym':
-      return FRIENDBOT_NYM_NOTICE;
+      return nymConnected ? null : FRIENDBOT_NYM_NOTICE;
     case 'direct':
       return null;
     default: {
@@ -546,16 +566,18 @@ function friendbotFundNotice(mode: NymTransportMode, modeKnown: boolean): string
 export function FriendbotFundButton({
   mode,
   modeKnown,
+  nymConnected = false,
   fundingLoading,
   onFund,
 }: {
   mode: NymTransportMode;
   modeKnown: boolean;
+  nymConnected?: boolean;
   fundingLoading: boolean;
   onFund: () => void;
 }) {
-  const blocked = friendbotFundBlocked(mode, modeKnown);
-  const notice = friendbotFundNotice(mode, modeKnown);
+  const blocked = friendbotFundBlocked(mode, modeKnown, nymConnected);
+  const notice = friendbotFundNotice(mode, modeKnown, nymConnected);
   return (
     <>
       <button
@@ -1074,32 +1096,6 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     }
   }, [nymReadyForSpp, sppSelected, sendKind]);
 
-  // Auto-enable SPP option when Nym connects (user can still turn it off).
-  useEffect(() => {
-    if (nymReadyForSpp) setSppSelected(true);
-  }, [nymReadyForSpp]);
-
-  // Re-arm SPP auto-prepare when Nym is already connected (reload / Settings)
-  // without inventing readiness — host must still emit write_pool_ready.
-  useEffect(() => {
-    if (!nymReadyForSpp) return;
-    if (isSppWriteReady(sppPrepareStatus)) return;
-    let cancelled = false;
-    void ensureSppAutoPrepareIfNeeded({
-      nymConnected: true,
-      nymMode: 'nym',
-    })
-      .then((status) => {
-        if (!cancelled && status) setSppPrepareStatus(status);
-      })
-      .catch(() => {
-        /* prepare status publisher records failure */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [nymReadyForSpp, sppPrepareStatus?.phase, sppPrepareStatus?.updatedAt]);
-
   useEffect(() => {
     if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) return;
     chrome.storage.local.get(
@@ -1203,7 +1199,19 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     const unbindStatus = bindNymRuntimeStatus(
       typeof chrome !== 'undefined' ? chrome.runtime?.onMessage : undefined,
       (snapshot) => {
-        if (!cancelled) setNymSnapshot(coerceNymUiSnapshot(snapshot));
+        if (!cancelled) {
+          setNymSnapshot(coerceNymUiSnapshot(snapshot));
+          setFriendbotGate(
+            applyFriendbotModeStatus({
+              ok: true,
+              mode: snapshot.mode,
+              connected: snapshot.connected === true,
+              ...(snapshot.preferenceHydrated !== undefined
+                ? { preferenceHydrated: snapshot.preferenceHydrated }
+                : {}),
+            }),
+          );
+        }
       },
     );
     return () => {
@@ -1222,9 +1230,20 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     void sendIpcMessage('NYM_STATUS', {})
       .then((snap) => {
         if (cancelled) return;
-        const gate = applyFriendbotModeStatus({ ok: true, mode: snap.mode });
+        const gate = applyFriendbotModeStatus({
+          ok: true,
+          mode: snap.mode,
+          connected: snap.connected === true,
+          ...(snap.preferenceHydrated !== undefined
+            ? { preferenceHydrated: snap.preferenceHydrated }
+            : {}),
+        });
         setFriendbotGate(gate);
-        setNymSnapshot((prev) => (prev.mode === gate.mode ? prev : { ...prev, mode: gate.mode }));
+        setNymSnapshot((prev) =>
+          prev.mode === gate.mode && prev.connected === gate.nymConnected
+            ? prev
+            : { ...prev, mode: gate.mode, connected: gate.nymConnected },
+        );
       })
       .catch(() => {
         if (!cancelled) setFriendbotGate(applyFriendbotModeStatus({ ok: false }));
@@ -1708,7 +1727,21 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           privatePreparePhase={sppPrepareStatus?.phase ?? 'idle'}
           privatePoolContract={sppPoolContract}
           paymentMode={sendKind}
-          onPaymentModeChange={setSendKind}
+          onPaymentModeChange={(nextMode) => {
+            setSendKind(nextMode);
+            if (nextMode === 'private' && nymReadyForSpp && !isSppWriteReady(sppPrepareStatus)) {
+              void ensureSppAutoPrepareIfNeeded({
+                nymConnected: true,
+                nymMode: 'nym',
+              })
+                .then((status) => {
+                  if (status) setSppPrepareStatus(status);
+                })
+                .catch(() => {
+                  /* prepare status publisher records failure */
+                });
+            }
+          }}
         />
       </>
     );
@@ -1743,7 +1776,22 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           onToggleSpp={(next) => {
             if (!nymReadyForSpp) return;
             setSppSelected(next);
-            if (!next) setSendKind('clear');
+            if (next) {
+              if (!isSppWriteReady(sppPrepareStatus)) {
+                void ensureSppAutoPrepareIfNeeded({
+                  nymConnected: true,
+                  nymMode: 'nym',
+                })
+                  .then((status) => {
+                    if (status) setSppPrepareStatus(status);
+                  })
+                  .catch(() => {
+                    /* prepare status publisher records failure */
+                  });
+              }
+            } else {
+              setSendKind('clear');
+            }
           }}
           onPoolContractChange={(contract) => {
             setSppPoolContract(contract);
@@ -1981,6 +2029,7 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
                 <FriendbotFundButton
                   mode={friendbotGate.mode}
                   modeKnown={friendbotGate.modeKnown}
+                  nymConnected={friendbotGate.nymConnected}
                   fundingLoading={fundingLoading}
                   onFund={() => handleFundTestnet(account.address)}
                 />

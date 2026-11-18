@@ -181,6 +181,92 @@ describe('createStellarTransportFetch', () => {
     expect(fetchViaRouter).not.toHaveBeenCalled();
     expect(onResolved).not.toHaveBeenCalled();
   });
+
+  it('allows Testnet Friendbot GET without body in Nym mode and strips AbortSignal', async () => {
+    const fetchViaRouter = vi.fn(async (url: string, init?: RequestInit & { mode?: string }) => {
+      expect(url).toBe('https://friendbot.stellar.org/?addr=GABC');
+      expect(init?.method).toBe('GET');
+      expect(init?.body).toBeUndefined();
+      expect(init?.mode).toBe('unsafe-ignore-cors');
+      expect(init?.redirect).toBe('error');
+      expect(init?.signal).toBeUndefined();
+      const headers = new Headers(init?.headers);
+      expect(headers.get('accept')).toBe('application/json');
+      expect(headers.get('cookie')).toBeNull();
+      return new Response('{"hash":"tx123"}', { status: 200 });
+    });
+    const onResolved = vi.fn();
+    const fetchImpl = createStellarTransportFetch({
+      getMode: () => 'nym',
+      getNetwork: () => 'testnet',
+      fetchViaRouter,
+      nymTimeoutMs: 5_000,
+      onResolved,
+    });
+
+    const res = await fetchImpl('https://friendbot.stellar.org?addr=GABC', {
+      headers: { Accept: 'application/json', Cookie: 'session=secret' },
+      signal: AbortSignal.timeout(1000),
+    });
+    expect(res.status).toBe(200);
+    expect(fetchViaRouter).toHaveBeenCalledOnce();
+    expect(onResolved).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rewritten: false,
+        logicalUrl: 'https://friendbot.stellar.org?addr=GABC',
+        effectiveUrl: 'https://friendbot.stellar.org?addr=GABC',
+      }),
+    );
+  });
+
+  it('refuses non-GET methods, bodies, and non-Testnet networks for Friendbot in Nym mode', async () => {
+    const { fetchViaRouter, fetchImpl } = nymHarness();
+    for (const method of ['POST', 'HEAD', 'PUT']) {
+      await expect(
+        fetchImpl('https://friendbot.stellar.org?addr=GABC', { method }),
+      ).rejects.toThrow(new RegExp(`refused method: ${method}`));
+    }
+    await expect(
+      fetchImpl('https://friendbot.stellar.org?addr=GABC', {
+        method: 'GET',
+        body: 'addr=GABC',
+      }),
+    ).rejects.toThrow(/refused body on GET/);
+    await expect(
+      fetchImpl('https://friendbot.stellar.org/other?addr=GABC', { method: 'GET' }),
+    ).rejects.toThrow(/non-allowlisted host: friendbot\.stellar\.org/);
+    expect(fetchViaRouter).not.toHaveBeenCalled();
+
+    const mainnetFetch = createStellarTransportFetch({
+      getMode: () => 'nym',
+      getNetwork: () => 'mainnet',
+      fetchViaRouter,
+      nymTimeoutMs: 5_000,
+    });
+    await expect(
+      mainnetFetch('https://friendbot.stellar.org?addr=GABC', { method: 'GET' }),
+    ).rejects.toThrow(/non-allowlisted host: friendbot\.stellar\.org/);
+    expect(fetchViaRouter).not.toHaveBeenCalled();
+  });
+
+  it('stays fail-closed for Friendbot when Nym router is disconnected', async () => {
+    const fetchViaRouter = vi.fn(async () => {
+      throw Object.assign(
+        new Error('Nym mode enabled but mixnet is not connected; refusing clearnet fallback'),
+        { code: 'NOT_CONNECTED' },
+      );
+    });
+    const fetchImpl = createStellarTransportFetch({
+      getMode: () => 'nym',
+      getNetwork: () => 'testnet',
+      fetchViaRouter,
+      nymTimeoutMs: 5_000,
+    });
+    await expect(
+      fetchImpl('https://friendbot.stellar.org?addr=GABC', { method: 'GET' }),
+    ).rejects.toMatchObject({ code: 'NOT_CONNECTED' });
+    expect(fetchViaRouter).toHaveBeenCalledOnce();
+  });
 });
 
 describe('rewriteSdfHorizonUrlForMixFetch', () => {
