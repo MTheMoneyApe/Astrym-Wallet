@@ -35,7 +35,7 @@ async function sha256File(path) {
   return hash.digest('hex');
 }
 
-for (const path of ['webapp.html', 'manifest.webmanifest', 'webapp-sw.js', 'spp-host.html']) {
+for (const path of ['webapp.html', 'manifest.webmanifest', 'webapp-sw.js']) {
   await requireFile(resolve(webappDist, path), `WebApp asset ${path}`);
 }
 for (const path of ['manifest.json', 'popup.html', 'spp-host.html', 'nym-offscreen.html', 'background.js', 'content.js', 'provider.js']) {
