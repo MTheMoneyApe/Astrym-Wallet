@@ -337,8 +337,8 @@ export function SppAccountPanel({
             maxFee techo: {maxFeeStroopsForOperation('register_public_keys')} stroops
           </span>
           <span className="text-secondary" data-testid="spp-register-derived">
-            Las claves note/encryption salen de ese mensaje Derivation v3. Esta pantalla no pide pegarlas.
-            La firma del registro queda detrás del sign gate y se detiene con el broadcast apagado.
+            La solicitud usa el mensaje Derivation v3. Esta pantalla no pide pegar note_key, encryption_key ni firmas.
+            La firma queda detrás del sign gate y se detiene con el broadcast apagado.
           </span>
           <span className="text-secondary">
             El mensaje v3 crea una clave nueva. Una firma v2 no se reutiliza ni se migra.
