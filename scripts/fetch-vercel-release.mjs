@@ -145,7 +145,7 @@ console.log(JSON.stringify({
   webapp: '/webapp.html',
   pwa: '/manifest.webmanifest',
   extension: '/downloads/astrym-wallet-mv3.zip',
-  extensionBytes: extensionStat.size,
+  extensionBytes: extensionMetadata.sizeBytes,
   extensionSha256: extensionMetadata.sha256,
   outputDirectory: output,
 }, null, 2));
