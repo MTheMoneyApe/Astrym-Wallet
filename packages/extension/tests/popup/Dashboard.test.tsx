@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sendIpcMessage } from '../../src/popup/ipc.js';
 import {
   AccountMenu,
+  FriendbotFundButton,
   createAccountOperationGate,
   copyPublicAddress,
   dismissAccountMenuOnEscape,
@@ -163,5 +164,34 @@ describe('Dashboard account menu', () => {
     expect(isCurrentBalanceResponse(2, 2, 0, 1)).toBe(false);
     expect(isCurrentBalanceResponse(2, 2, 1, 1)).toBe(true);
     expect(isCurrentBalanceResponse(2, 2, 1, null)).toBe(false);
+  });
+});
+
+const FRIENDBOT_NYM_NOTICE =
+  'Friendbot is unavailable in Nym mode. Switch to Direct mode to fund this Testnet account.';
+
+describe('Friendbot fund button', () => {
+  it('disables the button and shows the notice in Nym mode, and leaves it enabled in Direct mode', () => {
+    const nym = renderToStaticMarkup(
+      React.createElement(FriendbotFundButton, {
+        mode: 'nym',
+        fundingLoading: false,
+        onFund: vi.fn(),
+      }),
+    );
+    expect(nym).toContain('disabled=""');
+    expect(nym).toContain(FRIENDBOT_NYM_NOTICE);
+    expect(nym).toContain('Fund with Friendbot (10,000 Testnet XLM)');
+
+    const direct = renderToStaticMarkup(
+      React.createElement(FriendbotFundButton, {
+        mode: 'direct',
+        fundingLoading: false,
+        onFund: vi.fn(),
+      }),
+    );
+    expect(direct).not.toContain('disabled');
+    expect(direct).not.toContain(FRIENDBOT_NYM_NOTICE);
+    expect(direct).toContain('Fund with Friendbot (10,000 Testnet XLM)');
   });
 });
