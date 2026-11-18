@@ -654,6 +654,7 @@ web = Path(sys.argv[1])
 replacements = (
     (b"/rust/deps/", b"/sppx/deps/"),
     (b"/rustc/", b"/sppxc/"),
+    (b"/rustc-", b"/sppxc-"),
 )
 for old, new in replacements:
     if len(old) != len(new):
