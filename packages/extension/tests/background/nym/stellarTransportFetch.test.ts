@@ -14,7 +14,7 @@ describe('createStellarTransportFetch', () => {
     const fetchViaRouter = vi.fn(async (url: string, init?: RequestInit & { mode?: string }) => {
       expect(url).toBe(`${STELLAR_MIXFETCH_TESTNET_HORIZON_URL}/fee_stats`);
       expect(init?.mode).toBe('unsafe-ignore-cors');
-      expect(init?.method).toBe('POST');
+      expect(init?.method).toBe('GET');
       expect(init?.redirect).toBe('error');
       expect(init?.signal).toBeUndefined();
       const headers = new Headers(init?.headers);
