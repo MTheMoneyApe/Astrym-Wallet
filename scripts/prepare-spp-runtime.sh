@@ -33,8 +33,12 @@ command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
 # remap inputs before assigning the isolated build homes used by this script.
 CARGO_HOME_REMAP="${CARGO_HOME:-/rust}"
 RUSTUP_HOME_REMAP="${RUSTUP_HOME:-/rust}"
-export CARGO_HOME="${CARGO_HOME:-/tmp/spp-path-a/cargo}"
-export RUSTUP_HOME="${RUSTUP_HOME:-/tmp/spp-path-a/rustup}"
+# Keep the build toolchain homes inside the isolated build root even when the
+# CI image preconfigures global homes under /rust. Preserve those original
+# locations separately so RUSTFLAGS can remap them and the scanner can still
+# reject any leaked host paths.
+export CARGO_HOME="$BUILD_ROOT/cargo"
+export RUSTUP_HOME="$BUILD_ROOT/rustup"
 # The pinned rustup 1.97.1 proxy must win over any image toolchain.
 export PATH="$CARGO_HOME/bin${PATH:+:$PATH}"
 
@@ -274,9 +278,9 @@ if missing:
 tokens = {
     "src": "/spp-src",
     "cargo": "/cargo",
-    "rustup": "/rustup",
+    "rustup": "/spp-rustup",
     "cargo-remap": "/cargo",
-    "rustup-remap": "/rustup",
+    "rustup-remap": "/spp-rustup",
     "build": "/spp-build",
     "target": "/spp-target",
     "home": "/spp-home",
@@ -627,8 +631,8 @@ fi
 
 log "COMMAND: scan shipped files for host paths and wasm memory limits"
 python3 - "$SRC/sdk/web" "$SRC" "$CARGO_HOME" "$RUSTUP_HOME" "$BUILD_ROOT" \
-  "$CARGO_TARGET_DIR" "$HOME" "$SRC/circuits" "$SRC/target/circuits-artifacts" \
-  "$SRC/deployments/testnet/circuit_keys" <<'PY'
+  "$CARGO_TARGET_DIR" "$HOME" "$CARGO_HOME_REMAP" "$RUSTUP_HOME_REMAP" \
+  "$SRC/circuits" "$SRC/target/circuits-artifacts" "$SRC/deployments/testnet/circuit_keys" <<'PY'
 import os, sys
 from pathlib import Path
 
