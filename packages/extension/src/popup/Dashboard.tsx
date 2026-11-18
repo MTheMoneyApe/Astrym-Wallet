@@ -490,6 +490,91 @@ function ReceiveAddressView({ account, onBack }: { account: { address: string; l
   );
 }
 
+export const FRIENDBOT_NYM_NOTICE =
+  'Friendbot is disabled in Nym mode. Switch to Direct mode to fund this Testnet account.';
+
+export const FRIENDBOT_MODE_CHECKING_NOTICE = 'Checking routing mode...';
+
+const FRIENDBOT_FUND_NOTICE_ID = 'friendbot-fund-notice';
+
+export type FriendbotModeGate = {
+  mode: NymTransportMode;
+  modeKnown: boolean;
+};
+
+export const FRIENDBOT_MODE_GATE_INITIAL: FriendbotModeGate = {
+  mode: 'direct',
+  modeKnown: false,
+};
+
+export function applyFriendbotModeStatus(
+  result: { ok: true; mode: NymTransportMode } | { ok: false },
+): FriendbotModeGate {
+  if (!result.ok) return FRIENDBOT_MODE_GATE_INITIAL;
+  return { mode: result.mode, modeKnown: true };
+}
+
+export function friendbotFundBlocked(mode: NymTransportMode, modeKnown: boolean): boolean {
+  return mode !== 'direct' || !modeKnown;
+}
+
+function friendbotFundNotice(mode: NymTransportMode, modeKnown: boolean): string | null {
+  if (!modeKnown) return FRIENDBOT_MODE_CHECKING_NOTICE;
+  switch (mode) {
+    case 'nym':
+      return FRIENDBOT_NYM_NOTICE;
+    case 'direct':
+      return null;
+    default: {
+      const _exhaustive: never = mode;
+      return _exhaustive;
+    }
+  }
+}
+
+export function FriendbotFundButton({
+  mode,
+  modeKnown,
+  fundingLoading,
+  onFund,
+}: {
+  mode: NymTransportMode;
+  modeKnown: boolean;
+  fundingLoading: boolean;
+  onFund: () => void;
+}) {
+  const blocked = friendbotFundBlocked(mode, modeKnown);
+  const notice = friendbotFundNotice(mode, modeKnown);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onFund}
+        disabled={fundingLoading || blocked}
+        aria-describedby={notice ? FRIENDBOT_FUND_NOTICE_ID : undefined}
+        className="btn-outline"
+        style={{
+          width: '100%',
+          padding: '8px 12px',
+          fontSize: '0.82rem',
+          fontWeight: 600,
+          color: 'var(--accent-color)',
+          borderColor: 'var(--accent-color)',
+          cursor: blocked ? 'not-allowed' : 'pointer',
+          opacity: blocked ? 0.55 : 1,
+        }}
+      >
+        {fundingLoading ? 'Funding from Friendbot...' : 'Fund with Friendbot (10,000 Testnet XLM)'}
+      </button>
+      {notice ? (
+        <p id={FRIENDBOT_FUND_NOTICE_ID} role="status" style={{ margin: '8px 0 0', fontSize: '0.78rem', color: 'var(--text-main)' }}>
+          {notice}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 export function Dashboard({ onLock }: { onLock: () => void }) {
   const [account, setAccount] = useState<{ address: string; label: string; index: number } | null>(null);
   const [balance, setBalance] = useState<string>('--');
@@ -952,6 +1037,7 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     mode: 'direct',
     documentReady: false,
   });
+  const [friendbotGate, setFriendbotGate] = useState<FriendbotModeGate>(FRIENDBOT_MODE_GATE_INITIAL);
   const nymReadyForSpp = nymSnapshot.mode === 'nym' && nymSnapshot.connected;
   const sppStatusSnapshot: SppIntegrationSnapshot = useMemo(
     () =>
@@ -1089,6 +1175,25 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         }
       }
     })();
+    return () => {
+      cancelled = true;
+    };
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== 'dashboard') return;
+    let cancelled = false;
+    setFriendbotGate(FRIENDBOT_MODE_GATE_INITIAL);
+    void sendIpcMessage('NYM_STATUS', {})
+      .then((snap) => {
+        if (cancelled) return;
+        const gate = applyFriendbotModeStatus({ ok: true, mode: snap.mode });
+        setFriendbotGate(gate);
+        setNymSnapshot((prev) => (prev.mode === gate.mode ? prev : { ...prev, mode: gate.mode }));
+      })
+      .catch(() => {
+        if (!cancelled) setFriendbotGate(applyFriendbotModeStatus({ ok: false }));
+      });
     return () => {
       cancelled = true;
     };
@@ -1823,15 +1928,12 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
                 <p style={{ margin: '0 0 8px 0', fontSize: '0.82rem', color: 'var(--text-main)' }}>
                   This account is unfunded on Stellar Testnet. You can request free Testnet XLM to fund it.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => handleFundTestnet(account.address)}
-                  disabled={fundingLoading}
-                  className="btn-outline"
-                  style={{ width: '100%', padding: '8px 12px', fontSize: '0.82rem', fontWeight: 600, color: 'var(--accent-color)', borderColor: 'var(--accent-color)', cursor: 'pointer' }}
-                >
-                  {fundingLoading ? 'Funding from Friendbot...' : 'Fund with Friendbot (10,000 Testnet XLM)'}
-                </button>
+                <FriendbotFundButton
+                  mode={friendbotGate.mode}
+                  modeKnown={friendbotGate.modeKnown}
+                  fundingLoading={fundingLoading}
+                  onFund={() => handleFundTestnet(account.address)}
+                />
                 {fundingMessage && (
                   <p style={{ margin: '8px 0 0', fontSize: '0.78rem', color: 'var(--accent-color)' }}>{fundingMessage}</p>
                 )}

@@ -22,9 +22,11 @@ export type StellarHttpOperation =
 
 /**
  * Operations that the policy can route. Documented for operators:
- * - Through Nym (when mode=nym): Horizon account GET, Friendbot fund GET,
+ * - Through Nym (when mode=nym): Horizon account GET,
  *   Horizon root probe (public metadata). StellarTransactionClient uses the
  *   same injected fetch for account load, fee, submit, and confirm.
+ * - Friendbot fund GET is blocked in Nym mode and is Direct only. The dashboard
+ *   button stays disabled until routing mode is known, and is disabled in Nym mode.
  * - Not covered here: Solana RPC, SPP SDK, extension chrome APIs, signing.
  */
 export const STELLAR_HTTP_OPERATIONS_VIA_POLICY: readonly StellarHttpOperation[] = [
