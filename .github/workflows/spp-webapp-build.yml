@@ -3,9 +3,6 @@ name: SPP webapp build
 on:
   pull_request:
   workflow_dispatch:
-  push:
-    branches:
-      - astrym/release-products-v3
 
 permissions:
   contents: read
@@ -462,12 +459,14 @@ jobs:
 
       - name: Assemble canonical-domain release output
         if: success()
+        env:
+          VERCEL_GIT_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: node scripts/assemble-vercel-release.mjs
 
       - name: Package immutable Vercel output
         if: success()
         env:
-          SOURCE_COMMIT: ${{ github.sha }}
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           bundle="$RUNNER_TEMP/astrym-vercel-products.tar.gz"
@@ -510,7 +509,7 @@ jobs:
           retention-days: 30
 
   publish-vercel-release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/astrym/release-products-v3'
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'astrym/release-products-v3' && github.event.pull_request.head.repo.full_name == github.repository
     needs: vercel-build
     runs-on: ubuntu-24.04
     permissions:
@@ -520,21 +519,23 @@ jobs:
       - name: Download immutable Vercel output
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/astrym-vercel-release"
           gh run download "$GITHUB_RUN_ID" \\
             --repo "$GITHUB_REPOSITORY" \\
-            --name "astrym-vercel-output-$GITHUB_SHA" \\
+            --name "astrym-vercel-output-$SOURCE_COMMIT" \\
             --dir "$RUNNER_TEMP/astrym-vercel-release"
 
       - name: Verify and publish commit-pinned prerelease asset
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/astrym-vercel-release"
-          python3 - "$GITHUB_SHA" astrym-vercel-products.json <<'PY'
+          python3 - "$SOURCE_COMMIT" astrym-vercel-products.json <<'PY'
           import hashlib, json, sys
           from pathlib import Path
           commit, metadata_path = sys.argv[1], Path(sys.argv[2])
@@ -552,13 +553,13 @@ jobs:
           if len(data) != metadata["sizeBytes"] or hashlib.sha256(data).hexdigest() != metadata["sha256"]:
               raise SystemExit("Vercel bundle archive integrity check failed")
           PY
-          tag="astrym-products-$GITHUB_SHA"
+          tag="astrym-products-$SOURCE_COMMIT"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" astrym-vercel-products.tar.gz astrym-vercel-products.json \\
               --clobber --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$tag" astrym-vercel-products.tar.gz astrym-vercel-products.json \\
-              --title "Astrym product bundle (${GITHUB_SHA:0:12})" \\
+              --title "Astrym product bundle (${SOURCE_COMMIT:0:12})" \\
               --notes "Commit-pinned static WebApp, installable PWA and MV3 extension bundle for the canonical Vercel deployment. Generated only after the SPP runtime manifest and MV3 package validators pass." \\
               --prerelease --latest=false --repo "$GITHUB_REPOSITORY"
           fi
