@@ -525,10 +525,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/astrym-vercel-release"
-          gh run download "$GITHUB_RUN_ID" \\
-            --repo "$GITHUB_REPOSITORY" \\
-            --name "astrym-vercel-output-$GITHUB_SHA" \\
-            --dir "$RUNNER_TEMP/astrym-vercel-release"
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "astrym-vercel-output-$GITHUB_SHA" --dir "$RUNNER_TEMP/astrym-vercel-release"
 
       - name: Verify and publish commit-pinned prerelease asset
         env:
@@ -589,22 +586,15 @@ jobs:
           PY
           tag="astrym-products-$SOURCE_COMMIT"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$tag" astrym-vercel-products.tar.gz astrym-vercel-products.json \\
-              --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$tag" astrym-vercel-products.tar.gz astrym-vercel-products.json --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$tag" astrym-vercel-products.tar.gz astrym-vercel-products.json \\
-              --title "Astrym product bundle (${SOURCE_COMMIT:0:12})" \\
-              --notes "Commit-pinned static WebApp, installable PWA and MV3 extension bundle for the canonical Vercel deployment. Generated only after the SPP runtime manifest and MV3 package validators pass." \\
-              --target "$SOURCE_COMMIT" --prerelease --latest=false --repo "$GITHUB_REPOSITORY"
+            gh release create "$tag" astrym-vercel-products.tar.gz astrym-vercel-products.json --title "Astrym product bundle (${SOURCE_COMMIT:0:12})" --notes "Commit-pinned static WebApp, installable PWA and MV3 extension bundle for the canonical Vercel deployment. Generated only after the SPP runtime manifest and MV3 package validators pass." --target "$SOURCE_COMMIT" --prerelease --latest=false --repo "$GITHUB_REPOSITORY"
           fi
           stable_tag="astrym-extension-downloads"
           if gh release view "$stable_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$stable_tag" astrym-wallet-mv3.zip --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$stable_tag" astrym-wallet-mv3.zip \\
-              --title "Astrym Wallet MV3 downloads" \\
-              --notes "Rolling download asset for the latest validated Astrym Chrome/Chromium MV3 extension. The canonical URL is proxied through https://astrym-wallet.vercel.app/downloads/astrym-wallet-mv3.zip. Integrity information is published in /downloads/astrym-wallet-mv3.json." \\
-              --prerelease --latest=false --repo "$GITHUB_REPOSITORY"
+            gh release create "$stable_tag" astrym-wallet-mv3.zip --title "Astrym Wallet MV3 downloads" --notes "Rolling download asset for the latest validated Astrym Chrome/Chromium MV3 extension. The canonical URL is proxied through https://astrym-wallet.vercel.app/downloads/astrym-wallet-mv3.zip. Integrity information is published in /downloads/astrym-wallet-mv3.json." --prerelease --latest=false --repo "$GITHUB_REPOSITORY"
           fi
           gh release view "$stable_tag" --repo "$GITHUB_REPOSITORY" --json tagName,isPrerelease,assets
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName,isPrerelease,assets
