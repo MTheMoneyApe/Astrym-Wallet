@@ -1037,6 +1037,11 @@ if manifest["sourceCommit"] != commit:
 # and size. The /rust -> /cargo remap intentionally changes path-string lengths;
 # compare the reconstructed source bytes, not the remapped distribution size.
 reverse_replacements = (
+    # Reverse the explicit rustc --remap-path-prefix destinations first.
+    # These longer aliases are distinct from the equal-length /sppx and /sppxc
+    # placeholders used only to normalize precompiled sysroot strings below.
+    (b"/spp-rust-deps/", b"/rust/deps/"),
+    (b"/spp-rustc/", b"/rustc/"),
     (b"/sppx/deps/", b"/rust/deps/"),
     (b"/sppxc/", b"/rustc/"),
     (b"/sppxc-", b"/rustc-"),
