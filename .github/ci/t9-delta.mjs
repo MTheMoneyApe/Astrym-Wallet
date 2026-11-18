@@ -20,7 +20,7 @@ function bump(map, key) {
 }
 
 function errorKey(entry) {
-  return [entry.package, entry.file, String(entry.line), entry.code].join('\0');
+  return [entry.package, entry.file, entry.code].join('\0');
 }
 
 function testKey(entry) {
@@ -83,8 +83,8 @@ export function compareFingerprints(baseline, candidate) {
   for (const [key, count] of candErrors) {
     const extra = count - (baseErrors.get(key) ?? 0);
     if (extra > 0) {
-      const [pkg, file, line, code] = key.split('\0');
-      addedErrors.push({ package: pkg, file, line: Number(line), code, count: extra });
+      const [pkg, file, code] = key.split('\0');
+      addedErrors.push({ package: pkg, file, code, count: extra });
     }
   }
 

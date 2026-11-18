@@ -34,7 +34,7 @@ fi
 if [ -f "$BASE_DIR/.github/ci/t9-delta.mjs" ] && [ -f "$BASE_DIR/.github/ci/t9-check.sh" ] && [ -f "$BASE_DIR/.github/ci/t9-fingerprint.mjs" ]; then
   SCRIPT_DIR="$BASE_DIR/.github/ci"
   SCRIPT_SOURCE="base:${BASE}"
-elif [ -f "$ROOT/.github/ci/t9-delta.mjs" ] && [ -f "$ROOT/.github/ci/t9-check.sh" ] && [ -f "$ROOT/.github/ci/t9-fingerprint.mjs" ]; then
+elif [ "${T9_SCRIPT_FALLBACK:-}" = "workflow" ] && [ -f "$ROOT/.github/ci/t9-delta.mjs" ] && [ -f "$ROOT/.github/ci/t9-check.sh" ] && [ -f "$ROOT/.github/ci/t9-fingerprint.mjs" ]; then
   # The base commit does not contain this CI yet. Record that and use the
   # workflow checkout so the two trees are still installed and compared.
   SCRIPT_DIR="$ROOT/.github/ci"

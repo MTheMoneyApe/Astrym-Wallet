@@ -39,6 +39,7 @@ check('resolved-failure', compareFingerprints(base, tree(baseErr, [{ ...baseFail
 check('deleted-test', compareFingerprints(base, tree(baseErr, [baseFail[1]], { exits: { ...exits, 'test-full-extension': 0 } })), false);
 check('became-skip', compareFingerprints(base, tree(baseErr, [{ ...baseFail[0], status: 'skipped' }, baseFail[1]])), false);
 check('message-not-in-key', compareFingerprints(base, tree([{ ...baseErr[0], message: 'different wording' }], baseFail)), true);
+check('line-not-in-key', compareFingerprints(base, tree([{ ...baseErr[0], line: 99 }], baseFail)), true);
 check('empty-tests', compareFingerprints(base, tree(baseErr, [baseFail[1]])), false);
 const loaded = parseVitest(JSON.stringify({
   testResults: [{

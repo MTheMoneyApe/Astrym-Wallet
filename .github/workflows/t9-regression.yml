@@ -45,6 +45,8 @@ jobs:
           node-version: 22.23.4
           cache: pnpm
       - name: Focal invariants
+        env:
+          T9_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: bash .github/ci/t9-check.sh focal
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
@@ -69,6 +71,8 @@ jobs:
           node-version: 22.23.4
           cache: pnpm
       - name: Full typecheck and vitest
+        env:
+          T9_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: bash .github/ci/t9-check.sh full
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
