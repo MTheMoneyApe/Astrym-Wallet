@@ -7,7 +7,7 @@ Nym protects **network metadata** (client IP vs destination). It does **not** hi
 | Operation | Client method | Notes |
 | --- | --- | --- |
 | Horizon account balance | `StellarReadClient.getBalance` | HTTPS GET via mix-fetch |
-| Friendbot fund (testnet) | `StellarReadClient.fundTestnetAccount` | HTTPS GET via mix-fetch |
+| Friendbot fund (testnet) | `StellarReadClient.fundTestnetAccount` | Button disabled in Nym mode; switch to Direct mode to fund |
 | Account load, fee, submit, confirm | `StellarTransactionClient` | Same injected fetch via Horizon `httpClient` adapter |
 
 Requires: mixnet `connect()` succeeded (`connected: true`). On mixnet failure → typed error, **no clearnet retry**.
