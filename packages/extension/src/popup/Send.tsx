@@ -128,7 +128,8 @@ export function Send({
     transport: TxTransportKind;
   }) => void;
 }) {
-  const isStellar = accountAddress.startsWith('G') && accountAddress.length === 56;
+  const safeAccountAddress = typeof accountAddress === 'string' ? accountAddress : '';
+  const isStellar = safeAccountAddress.startsWith('G') && safeAccountAddress.length === 56;
   const privateMode = paymentMode === 'private' && privatePaymentsEnabled && isStellar;
 
   const [destination, setDestination] = useState('');
@@ -350,13 +351,15 @@ export function Send({
       try {
         const res = await sendIpcMessage('SEND_STELLAR_TRANSFER', { id: stellarReview.id });
         const actualTransport: TxTransportKind = transportMode === 'nym' ? 'nym' : 'direct';
-        void recordTxTransport(res.txHash, actualTransport);
-        onStellarSent?.({
-          txHash: res.txHash,
-          amountXlm: stellarReview.amountXlm,
-          createdAt: new Date().toISOString(),
-          transport: actualTransport,
-        });
+        if (typeof res?.txHash === 'string' && res.txHash.length > 0) {
+          void recordTxTransport(res.txHash, actualTransport).catch(() => undefined);
+          onStellarSent?.({
+            txHash: res.txHash,
+            amountXlm: stellarReview.amountXlm,
+            createdAt: new Date().toISOString(),
+            transport: actualTransport,
+          });
+        }
         setSignature(res.txHash);
         setStatus('pending');
         const confirmation = await sendIpcMessage('CONFIRM_STELLAR_TRANSFER', { txHash: res.txHash });

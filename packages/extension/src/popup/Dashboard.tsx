@@ -1454,6 +1454,11 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     [sppFacadePackaged, sppSessionHandle, sppSelected, nymReadyForSpp],
   );
 
+  const mergedRecentTxs = useMemo(
+    () => mergeRecentTransactions(horizonPayments, sessionTxs, txTransportHistory, 5),
+    [horizonPayments, sessionTxs, txTransportHistory],
+  );
+
   useEffect(() => {
     if (!nymReadyForSpp && (sppSelected || sendKind === 'private')) {
       setSppSelected(false);
@@ -2410,11 +2415,6 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
       </div>
     );
   }
-
-  const mergedRecentTxs = useMemo(
-    () => mergeRecentTransactions(horizonPayments, sessionTxs, txTransportHistory, 5),
-    [horizonPayments, sessionTxs, txTransportHistory],
-  );
 
   return (
     <div className="view-container dashboard">

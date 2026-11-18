@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { Component, useEffect, useState, type ErrorInfo, type ReactNode } from 'react';
 import { sendIpcMessage } from './ipc.js';
 import { Onboarding } from './Onboarding.js';
 import { Unlock } from './Unlock.js';
@@ -6,6 +6,73 @@ import { Dashboard } from './Dashboard.js';
 import { OpenAndroidWebappBar } from './OpenAndroidWebappBar.js';
 // Founder Decision A: ApproveConnect and ApproveSign removed from active startup flow.
 // Legacy component sources preserved in ./ApproveConnect.tsx and ./ApproveSign.tsx.
+
+type PopupErrorBoundaryProps = {
+  children: ReactNode;
+  onReset?: () => void;
+};
+
+type PopupErrorBoundaryState = {
+  hasError: boolean;
+  errorMessage: string;
+};
+
+export class PopupErrorBoundary extends Component<
+  PopupErrorBoundaryProps,
+  PopupErrorBoundaryState
+> {
+  override state: PopupErrorBoundaryState = {
+    hasError: false,
+    errorMessage: '',
+  };
+
+  static getDerivedStateFromError(error: unknown): PopupErrorBoundaryState {
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : 'Error inesperado al mostrar esta pantalla.';
+    return { hasError: true, errorMessage: message };
+  }
+
+  override componentDidCatch(_error: unknown, _info: ErrorInfo): void {
+    // Error is rendered cleanly in the fallback UI so the popup never turns blank.
+  }
+
+  private readonly handleReset = () => {
+    this.setState({ hasError: false, errorMessage: '' });
+    this.props.onReset?.();
+  };
+
+  override render() {
+    if (this.state.hasError) {
+      return (
+        <div className="view-container" role="alert" data-testid="popup-error-boundary">
+          <div className="card" style={{ display: 'grid', gap: 12, marginTop: 12 }}>
+            <h2 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--error-color)' }}>
+              Ocurrió un error inesperado
+            </h2>
+            <p
+              className="text-secondary"
+              style={{ margin: 0, fontSize: '0.82rem', lineHeight: 1.45, overflowWrap: 'anywhere' }}
+              data-testid="popup-error-message"
+            >
+              {this.state.errorMessage}
+            </p>
+            <button
+              type="button"
+              className="btn-primary"
+              data-testid="popup-error-reset"
+              onClick={this.handleReset}
+            >
+              Volver al inicio
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export type ThemePalette = {
   '--bg-color': string;
@@ -58,6 +125,7 @@ export const THEME_PRESETS: Record<string, ThemePalette> = {
 export function App() {
   const [appState, setAppState] = useState<AppState>('LOADING');
   const [error, setError] = useState<string | null>(null);
+  const [boundaryKey, setBoundaryKey] = useState(0);
 
   useEffect(() => {
     // Load theme
@@ -157,10 +225,18 @@ export function App() {
     typeof document !== 'undefined' &&
     document.documentElement.classList.contains('astrym-webapp');
 
+  const handleBoundaryReset = () => {
+    setError(null);
+    setBoundaryKey((prev) => prev + 1);
+    void checkWalletState();
+  };
+
   return (
     <div className="wallet-shell app-shell">
       {showWebappBrandBar ? <OpenAndroidWebappBar /> : null}
-      {screen}
+      <PopupErrorBoundary key={boundaryKey} onReset={handleBoundaryReset}>
+        {screen}
+      </PopupErrorBoundary>
     </div>
   );
 }
