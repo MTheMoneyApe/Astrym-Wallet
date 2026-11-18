@@ -78,7 +78,19 @@ export function parseVitest(jsonText) {
   const tests = [];
   for (const result of data.testResults ?? []) {
     const loc = testFile(result.name);
-    for (const assertion of result.assertionResults ?? []) {
+    const assertions = result.assertionResults ?? [];
+    if (assertions.length === 0 && (result.status === 'failed' || result.message)) {
+      tests.push({
+        package: loc.package,
+        file: loc.file,
+        fullName: `${loc.file} <file load>`,
+        status: 'failed',
+        fileLoad: true,
+        reason: normalizeText(String(result.message ?? result.status ?? '').split(/\r?\n/, 1)[0] ?? ''),
+      });
+      continue;
+    }
+    for (const assertion of assertions) {
       const reason = Array.isArray(assertion.failureMessages) ? assertion.failureMessages[0] ?? '' : '';
       tests.push({
         package: loc.package,

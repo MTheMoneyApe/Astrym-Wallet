@@ -60,6 +60,10 @@ function exitProblem(side, fingerprint) {
     const parsed = tests.filter((entry) => entry.package === packageName);
     const failed = parsed.filter((entry) => entry.status === 'failed').length;
     if (parsed.length === 0) problems.push({ side, name, reason: 'tests=0' });
+    const fileLoads = parsed.filter((entry) => entry.fileLoad).map((entry) => entry.file);
+    if (fileLoads.length > 0) {
+      problems.push({ side, name, reason: 'file-load-failure', files: fileLoads, exit: code ?? null });
+    }
     if (code === null || code === undefined) continue;
     if (Number(code) !== 0 && failed === 0) problems.push({ side, name, reason: 'nonzero-exit-without-failures', exit: Number(code) });
     if (Number(code) === 0 && failed > 0) problems.push({ side, name, reason: 'zero-exit-with-failures', exit: 0 });
@@ -121,12 +125,23 @@ export function compareFingerprints(baseline, candidate) {
   }
 
   const problems = [...exitProblem('baseline', baseline), ...exitProblem('candidate', candidate)];
+  const loadFiles = (fp) => new Set((fp.tests ?? []).filter((entry) => entry.fileLoad).map((entry) => fileKey(entry)));
+  const baseLoads = loadFiles(baseline);
+  const candLoads = loadFiles(candidate);
+  const addedFileLoads = [];
+  for (const key of candLoads) {
+    if (!baseLoads.has(key)) {
+      const [pkg, file] = key.split('\0');
+      addedFileLoads.push({ package: pkg, file });
+    }
+  }
+  const hardProblems = problems.filter((entry) => entry.reason !== 'file-load-failure');
   const baseNode = baseline.toolchain?.node ?? '';
   const candNode = candidate.toolchain?.node ?? '';
   const basePnpm = baseline.toolchain?.pnpm ?? '';
   const candPnpm = candidate.toolchain?.pnpm ?? '';
   const sameTools = Boolean(baseNode && candNode && baseNode === candNode && basePnpm && candPnpm && basePnpm === candPnpm);
-  const ok = addedErrors.length === 0 && addedFailures.length === 0 && addedFailingFiles.length === 0 && deletedTests.length === 0 && becameSkipped.length === 0 && problems.length === 0 && sameTools;
+  const ok = addedErrors.length === 0 && addedFailures.length === 0 && addedFailingFiles.length === 0 && addedFileLoads.length === 0 && deletedTests.length === 0 && becameSkipped.length === 0 && hardProblems.length === 0 && sameTools;
   return {
     ok,
     baselineSha: baseline.git?.sha ?? null,
@@ -143,6 +158,7 @@ export function compareFingerprints(baseline, candidate) {
     addedErrors,
     addedFailures,
     addedFailingFiles,
+    addedFileLoads,
     deletedTests,
     becameSkipped,
     problems,

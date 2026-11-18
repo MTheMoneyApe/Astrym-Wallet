@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { compareFingerprints } from './t9-delta.mjs';
+import { parseVitest } from './t9-fingerprint.mjs';
 
 const tool = { node: 'v22.23.4', pnpm: '10.33.4' };
 const exits = {
@@ -39,6 +40,22 @@ check('deleted-test', compareFingerprints(base, tree(baseErr, [baseFail[1]], { e
 check('became-skip', compareFingerprints(base, tree(baseErr, [{ ...baseFail[0], status: 'skipped' }, baseFail[1]])), false);
 check('message-not-in-key', compareFingerprints(base, tree([{ ...baseErr[0], message: 'different wording' }], baseFail)), true);
 check('empty-tests', compareFingerprints(base, tree(baseErr, [baseFail[1]])), false);
+const loaded = parseVitest(JSON.stringify({
+  testResults: [{
+    name: '/repo/packages/wallet-core/tests/new.load.test.ts',
+    status: 'failed',
+    message: 'Failed to load url',
+    assertionResults: [],
+  }],
+}));
+const withLoad = tree(baseErr, [...baseFail, ...loaded]);
+const loadDelta = compareFingerprints(base, withLoad);
+if (loadDelta.ok || !loadDelta.addedFailingFiles.some((entry) => entry.file === 'tests/new.load.test.ts')) {
+  process.stderr.write(`file-load not visible ${JSON.stringify(loadDelta.addedFailingFiles)}\n`);
+  process.exitCode = 1;
+} else {
+  process.stdout.write('file-load-while-red=FAIL\n');
+}
 
 const dir = mkdtempSync(join(tmpdir(), 't9-delta-'));
 const basePath = join(dir, 'base.json');
