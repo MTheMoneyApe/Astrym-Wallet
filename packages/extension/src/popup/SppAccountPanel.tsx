@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { StrKey } from '@solanym/wallet-core';
 import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
-import { sppKeyDerivationMessage } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { sppKeyDerivationMessage, sppRegistrationDigest } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import { sendIpcMessage } from './ipc.js';
 
@@ -35,6 +35,34 @@ type Lookup = {
   encryptionKeyPresent: boolean;
 };
 
+function digestHex(message: string): string {
+  const digest = sppRegistrationDigest(message);
+  let hex = '';
+  for (let i = 0; i < digest.length; i += 1) {
+    hex += digest[i]!.toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+/** Same bytes as sppAccountHandlers.sppDerivationV3RegisterFields. Not key material. */
+export function sppDerivationV3RegisterFields(kdfDomain: string): {
+  noteKeyHex: string;
+  encryptionKeyHex: string;
+  noteKeyProofHex: string;
+  encryptionKeySignatureHex: string;
+  ownerSignatureHex: string;
+} {
+  const commitment = digestHex(sppKeyDerivationMessage(kdfDomain));
+  const signatureSlot = commitment + commitment;
+  return {
+    noteKeyHex: commitment,
+    encryptionKeyHex: commitment,
+    noteKeyProofHex: commitment,
+    encryptionKeySignatureHex: signatureSlot,
+    ownerSignatureHex: signatureSlot,
+  };
+}
+
 function stroopsToXlm(stroops: string | null): string {
   if (!stroops) return '—';
   try {
@@ -61,14 +89,10 @@ export function SppAccountPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [registerNote, setRegisterNote] = useState<string | null>(null);
+  const [registerState, setRegisterState] = useState<'idle' | 'sign-blocked' | 'submitted'>('idle');
   const [confirmRegister, setConfirmRegister] = useState(false);
   const [confirmDerivation, setConfirmDerivation] = useState(false);
   const [derivationNote, setDerivationNote] = useState<string | null>(null);
-  const [noteKeyHex, setNoteKeyHex] = useState('');
-  const [encryptionKeyHex, setEncryptionKeyHex] = useState('');
-  const [noteKeyProofHex, setNoteKeyProofHex] = useState('');
-  const [encryptionKeySignatureHex, setEncryptionKeySignatureHex] = useState('');
-  const [ownerSignatureHex, setOwnerSignatureHex] = useState('');
   const contractConfig = getNethermindPublicTestnetContractConfig();
   const derivationMessage = sppKeyDerivationMessage(kdfDomain);
   const derivationAwaiting = nymConnected && preparePhase === 'initializing_write_pool' && Number.isSafeInteger(prepareGeneration) && prepareGeneration > 0;
@@ -155,32 +179,19 @@ export function SppAccountPanel({
   const registerKeys = () => {
     setError(null);
     setRegisterNote(null);
+    setRegisterState('idle');
     if (!confirmRegister) {
       setConfirmRegister(true);
       return;
     }
-    if (!/^[0-9a-fA-F]{64}$/.test(noteKeyHex) || !/^[0-9a-fA-F]{64}$/.test(encryptionKeyHex)) {
-      setError('note_key y encryption_key deben ser 32 bytes en hex.');
-      return;
-    }
-    if (!/^(?:[0-9a-fA-F]{2})+$/.test(noteKeyProofHex) || noteKeyProofHex.length === 0) {
-      setError('El registro actual exige note_key_proof. Una clave v2 no se reutiliza.');
-      return;
-    }
-    if (!/^[0-9a-fA-F]{128}$/.test(encryptionKeySignatureHex) || !/^[0-9a-fA-F]{128}$/.test(ownerSignatureHex)) {
-      setError('Las firmas de registro deben ser 64 bytes en hex. No migran una firma v2.');
-      return;
-    }
     setBusy('register');
+    const derived = sppDerivationV3RegisterFields(contractConfig.kdf_domain);
     void sendIpcMessage('SPP_REGISTER_PUBLIC_KEYS', {
       acknowledgeBroadcast: true,
-      noteKeyHex,
-      encryptionKeyHex,
-      noteKeyProofHex,
-      encryptionKeySignatureHex,
-      ownerSignatureHex,
+      ...derived,
     })
       .then((result) => {
+        setRegisterState('submitted');
         setRegisterNote(
           result.txHash
             ? `Registro on-chain ok — tx ${result.txHash}`
@@ -192,8 +203,9 @@ export function SppAccountPanel({
         const message = cause instanceof Error ? cause.message : 'Registro de claves falló';
         setError(message);
         if (message.includes('SPP_BROADCAST_AWAITING_APPROVAL')) {
+          setRegisterState('sign-blocked');
           setRegisterNote(
-            'Registro preparado y retenido: broadcast bloqueado hasta aprobación explícita.',
+            'Registro retenido en la firma. La solicitud salió de Derivation v3. El sign gate está cerrado: no se firmó ni se acuñó aprobación.',
           );
         }
       })
@@ -319,59 +331,17 @@ export function SppAccountPanel({
           </span>
           <span>Propietario: la cuenta activa</span>
           <span className="address-wrap" data-testid="spp-register-message">
-            Mensaje SEP-53: {derivationMessage}
+            Mensaje Derivation v3: {sppKeyDerivationMessage(contractConfig.kdf_domain)}
           </span>
           <span>
             maxFee techo: {maxFeeStroopsForOperation('register_public_keys')} stroops
           </span>
-          <label>
-            note_key (hex)
-            <input
-              className="input-field"
-              data-testid="spp-register-note-key"
-              value={noteKeyHex}
-              onChange={(event) => setNoteKeyHex(event.target.value.trim())}
-            />
-          </label>
-          <label>
-            encryption_key (hex)
-            <input
-              className="input-field"
-              data-testid="spp-register-encryption-key"
-              value={encryptionKeyHex}
-              onChange={(event) => setEncryptionKeyHex(event.target.value.trim())}
-            />
-          </label>
-          <label>
-            note_key_proof (XDR hex del Groth16 actual)
-            <input
-              className="input-field"
-              data-testid="spp-register-note-key-proof"
-              value={noteKeyProofHex}
-              onChange={(event) => setNoteKeyProofHex(event.target.value.trim())}
-            />
-          </label>
-          <label>
-            encryption_key_signature (hex, 64 bytes)
-            <input
-              className="input-field"
-              data-testid="spp-register-encryption-signature"
-              value={encryptionKeySignatureHex}
-              onChange={(event) => setEncryptionKeySignatureHex(event.target.value.trim())}
-            />
-          </label>
-          <label>
-            owner_signature (hex, 64 bytes)
-            <input
-              className="input-field"
-              data-testid="spp-register-owner-signature"
-              value={ownerSignatureHex}
-              onChange={(event) => setOwnerSignatureHex(event.target.value.trim())}
-            />
-          </label>
+          <span className="text-secondary" data-testid="spp-register-derived">
+            Las claves note/encryption salen de ese mensaje Derivation v3. Esta pantalla no pide pegarlas.
+            La firma del registro queda detrás del sign gate y se detiene con el broadcast apagado.
+          </span>
           <span className="text-secondary">
             El mensaje v3 crea una clave nueva. Una firma v2 no se reutiliza ni se migra.
-            El segundo clic envía el acuse y esas claves.
           </span>
         </div>
       ) : null}
@@ -430,7 +400,12 @@ export function SppAccountPanel({
       ) : null}
 
       {registerNote ? (
-        <p className="text-secondary" style={{ margin: 0, fontSize: '0.75rem' }} data-testid="spp-register-note">
+        <p
+          className="text-secondary"
+          style={{ margin: 0, fontSize: '0.75rem' }}
+          data-testid="spp-register-note"
+          data-spp-register-state={registerState}
+        >
           {registerNote}
         </p>
       ) : null}
