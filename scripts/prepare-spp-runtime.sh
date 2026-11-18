@@ -609,6 +609,9 @@ tools = {
     "host-cc": shutil.which("cc"),
     # cc-rs selects this compiler for its actual wasm32 C invocations.
     "clang-wasm-target": os.environ.get("CC_wasm32_unknown_unknown") or shutil.which("clang"),
+    "cxx-wasm-target-env": os.environ.get("CXX_wasm32_unknown_unknown"),
+    "ar-wasm-target-env": os.environ.get("AR_wasm32_unknown_unknown"),
+    "ranlib-wasm-target-env": os.environ.get("RANLIB_wasm32_unknown_unknown"),
     "clang-18": shutil.which("clang-18") or shutil.which("clang18"),
     "ar": shutil.which("ar"),
     "llvm-ar": shutil.which("llvm-ar"),
@@ -783,6 +786,74 @@ for directory in report.get("directories", []):
 print("DIAGNOSTIC sqlite-build-status", report.get("buildStatus"))
 PY
 fi
+
+# Send the complete stage summary as one Vercel event. Individual log events
+# emitted in the same millisecond are paginated by the provider, which hid the
+# tail of cc-rs output containing its archive invocation and stage hashes.
+python3 - "$DIAGNOSTIC_DIR" <<'PY'
+import json, re, sys
+from pathlib import Path
+
+diag = Path(sys.argv[1])
+summary = {}
+
+def read_json(name):
+    path = diag / name
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception as exc:
+        return {"readError": str(exc)}
+
+tools = read_json("toolchain.json") or {}
+wanted_tools = (
+    "clang-wasm-target", "cxx-wasm-target-env", "ar-wasm-target-env",
+    "ranlib-wasm-target-env", "clang-18", "llvm-ar", "ar",
+    "wasm-ld", "rustc", "cargo", "wasm-bindgen", "wasm-opt",
+)
+summary["toolchain"] = {key: tools.get(key) for key in wanted_tools if key in tools}
+summary["rawWasm"] = read_json("raw-wasm.json")
+
+for name in ("wasm-bindgen.jsonl", "wasm-opt.jsonl"):
+    path = diag / name
+    rows = []
+    if path.is_file():
+        for line in path.read_text(errors="replace").splitlines():
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                rows.append({"raw": line[:500]})
+    summary[name] = rows
+
+sqlite = read_json("sqlite-build-report.json") or {}
+summary["sqliteBuildStatus"] = sqlite.get("buildStatus")
+summary["sqliteArchives"] = sqlite.get("archives", [])
+directories = []
+for directory in sqlite.get("directories", []):
+    item = {"directory": directory.get("directory"), "commands": []}
+    for key in ("output", "stderr", "root-output"):
+        raw = directory.get(key, "")
+        if not raw:
+            continue
+        selected = [
+            line for line in raw.splitlines()
+            if re.search(
+                r"AR_wasm32|RANLIB_wasm32|llvm-ar|llvm-ranlib|"
+                r"running:.*(clang|llvm-ar|llvm-ranlib)|"
+                r"cargo:warning=.*(clang|archive|link)|"
+                r"libwsqlite3\.a|ar:|ranlib:",
+                line, re.I
+            )
+        ]
+        item["commands"].extend(
+            {"stream": key, "line": line[:900]}
+            for line in selected[-30:]
+        )
+    directories.append(item)
+summary["sqliteDirectories"] = directories
+print("DIAGNOSTIC_REPRO_SUMMARY " + json.dumps(summary, sort_keys=True, separators=(",", ":")))
+PY
 if [ "$SPP_BUILD_STATUS" -ne 0 ]; then
   die "upstream SDK build failed with status $SPP_BUILD_STATUS; diagnostics preserved at $DIAGNOSTIC_DIR"
 fi
