@@ -7,12 +7,13 @@ Nym protects **network metadata** (client IP vs destination). It does **not** hi
 | Operation | Client method | Notes |
 | --- | --- | --- |
 | Horizon account balance | `StellarReadClient.getBalance` | HTTPS GET via mix-fetch |
-| Friendbot fund (testnet) | `StellarReadClient.fundTestnetAccount` | Button disabled in Nym mode; switch to Direct mode to fund |
 | Account load, fee, submit, confirm | `StellarTransactionClient` | Same injected fetch via Horizon `httpClient` adapter |
 
 Requires: mixnet `connect()` succeeded (`connected: true`). On mixnet failure → typed error, **no clearnet retry**.
 
 ## Direct only when mode = `direct` (user disabled Nym)
+
+Friendbot fund (testnet) (`StellarReadClient.fundTestnetAccount`) is blocked in Nym mode and is Direct only. The dashboard button is disabled in Nym mode; switch to Direct mode to fund. It stays disabled until routing mode is known.
 
 Those Stellar operations use the injected fetch (clearnet). Disconnect sets mode back to `direct`. Errors while mode is still `nym` do not retry on clearnet.
 

@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sendIpcMessage } from '../../src/popup/ipc.js';
 import {
   AccountMenu,
+  FRIENDBOT_MODE_CHECKING_NOTICE,
+  FRIENDBOT_NYM_NOTICE,
   FriendbotFundButton,
+  applyFriendbotModeStatus,
   createAccountOperationGate,
   copyPublicAddress,
   dismissAccountMenuOnEscape,
@@ -167,31 +170,48 @@ describe('Dashboard account menu', () => {
   });
 });
 
-const FRIENDBOT_NYM_NOTICE =
-  'Friendbot is unavailable in Nym mode. Switch to Direct mode to fund this Testnet account.';
+function renderFriendbot(mode: 'direct' | 'nym', modeKnown: boolean) {
+  return renderToStaticMarkup(
+    React.createElement(FriendbotFundButton, {
+      mode,
+      modeKnown,
+      fundingLoading: false,
+      onFund: vi.fn(),
+    }),
+  );
+}
 
 describe('Friendbot fund button', () => {
-  it('disables the button and shows the notice in Nym mode, and leaves it enabled in Direct mode', () => {
-    const nym = renderToStaticMarkup(
-      React.createElement(FriendbotFundButton, {
-        mode: 'nym',
-        fundingLoading: false,
-        onFund: vi.fn(),
-      }),
-    );
+  it('stays disabled while routing mode is unknown, after an IPC error, and in Nym mode, and enables only for known Direct mode', () => {
+    const unknown = renderFriendbot('direct', false);
+    expect(unknown).toContain('disabled=""');
+    expect(unknown).toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
+    expect(unknown).toContain('role="status"');
+    expect(unknown).toContain('aria-describedby="friendbot-fund-notice"');
+    expect(unknown).not.toContain(FRIENDBOT_NYM_NOTICE);
+
+    const ipcError = applyFriendbotModeStatus({ ok: false });
+    expect(ipcError).toEqual({ mode: 'direct', modeKnown: false });
+    const errored = renderFriendbot(ipcError.mode, ipcError.modeKnown);
+    expect(errored).toContain('disabled=""');
+    expect(errored).toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
+
+    const nymGate = applyFriendbotModeStatus({ ok: true, mode: 'nym' });
+    const nym = renderFriendbot(nymGate.mode, nymGate.modeKnown);
     expect(nym).toContain('disabled=""');
     expect(nym).toContain(FRIENDBOT_NYM_NOTICE);
-    expect(nym).toContain('Fund with Friendbot (10,000 Testnet XLM)');
+    expect(nym).toContain('disabled in Nym mode');
+    expect(nym).not.toContain('unavailable');
+    expect(nym).toContain('role="status"');
+    expect(nym).toContain('aria-describedby="friendbot-fund-notice"');
+    expect(nym).not.toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
 
-    const direct = renderToStaticMarkup(
-      React.createElement(FriendbotFundButton, {
-        mode: 'direct',
-        fundingLoading: false,
-        onFund: vi.fn(),
-      }),
-    );
+    const directGate = applyFriendbotModeStatus({ ok: true, mode: 'direct' });
+    const direct = renderFriendbot(directGate.mode, directGate.modeKnown);
     expect(direct).not.toContain('disabled');
     expect(direct).not.toContain(FRIENDBOT_NYM_NOTICE);
+    expect(direct).not.toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
+    expect(direct).not.toContain('aria-describedby');
     expect(direct).toContain('Fund with Friendbot (10,000 Testnet XLM)');
   });
 });
