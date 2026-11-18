@@ -1,4 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resetSppBroadcastGateForTests } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
+import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
+import {
+  resetSppSignApprovalsForTests,
+  sppSignApprovalCount,
+} from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 
 vi.mock('webextension-polyfill', () => ({
   default: {
@@ -28,7 +34,9 @@ import {
   createSppAccountSnapshotHandler,
   createSppRecipientLookupHandler,
   createSppRegisterPublicKeysHandler,
+  sppDerivationV3RegisterFields as handlerDerivationFields,
 } from '../../../src/background/handlers/sppAccountHandlers.js';
+import { sppDerivationV3RegisterFields as panelDerivationFields } from '../../../src/popup/SppAccountPanel.js';
 
 afterEach(() => {
   queryMock.mockReset();
@@ -132,5 +140,33 @@ describe('sppAccountHandlers IPC', () => {
       }, undefined),
     ).rejects.toMatchObject({ name: 'UNAUTHORIZED' });
     expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('holds a Derivation v3 register request at the sign step', async () => {
+    resetSppBroadcastGateForTests();
+    resetSppSignApprovalsForTests();
+    const domain = getNethermindPublicTestnetContractConfig().kdf_domain;
+    const fields = panelDerivationFields(domain);
+    expect(fields).toEqual(handlerDerivationFields(domain));
+    expect(fields.noteKeyHex).toHaveLength(64);
+    expect(fields.ownerSignatureHex).toHaveLength(128);
+    const trusted = {
+      id: 'test-extension-id',
+      url: 'chrome-extension://test-extension-id/popup.html',
+    };
+    await expect(
+      createSppRegisterPublicKeysHandler({
+        resolveAccount: async () => 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6',
+      })({
+        acknowledgeBroadcast: true,
+        ...fields,
+      }, trusted as never),
+    ).rejects.toMatchObject({
+      name: 'UNAUTHORIZED',
+      code: 'BROADCAST_AWAITING_APPROVAL',
+      message: expect.stringContaining('held at the sign step'),
+    });
+    expect(queryMock).not.toHaveBeenCalled();
+    expect(sppSignApprovalCount()).toBe(0);
   });
 });
