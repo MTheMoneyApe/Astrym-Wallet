@@ -2,10 +2,10 @@
  * Solanym SPP isolated host page entry.
  * Extension page only — not the service worker, popup React tree, or dapp provider.
  *
- * A current service-worker auto-prepare intent may run the packaged facade probe,
- * WASM initialization, and an SPP read-only session on host load. Opening the
- * encrypted OPFS database requires the separate, visible wallet-unlock consent
- * dialog and a one-shot vault signature bound to the active account/generation.
+ * Nothing runs on load. Probe, WASM init, and storage lab prep/run/free stay on
+ * their buttons. A later storage change may start auto-prepare; opening the
+ * encrypted OPFS database still requires the visible unlock consent dialog and
+ * a one-shot vault signature bound to the active account/generation.
  *
  * Manual lab controls remain separate:
  * - Storage lab prep only evaluates operator gates.
@@ -268,7 +268,7 @@ function main(): void {
   }
 
   statusBoot.textContent =
-    'Host listo — el auto-prepare puede ejecutar una intención Nym activa. El desbloqueo cifrado requiere consentimiento explícito. Storage Lab sigue bloqueado.';
+    'Idle — Nothing runs on load. Open limit = one per page instance (reload resets). Auth gate false by default.';
   render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
 
   (window as unknown as { __SOLANYM_SPP_HOST__?: unknown }).__SOLANYM_SPP_HOST__ = {
@@ -537,7 +537,6 @@ function main(): void {
       }
     });
   }
-  processAutoPrepareIntent();
 }
 
 try {

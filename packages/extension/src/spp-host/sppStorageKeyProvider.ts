@@ -18,6 +18,7 @@ const DIRECTORY_PREFIX = `${DIRECTORY}-`;
 const validDirectory = (value: unknown): value is string =>
   value === DIRECTORY || (typeof value === 'string' && /^\.opfs-sahpool-encrypted-[0-9a-f-]{36}$/.test(value));
 const WRAP_INFO = 'spp.browser.storage-key-wrap.v1';
+const SPP_STORAGE_UNLOCK_DIALOG_ALARM = 'spp-storage-unlock-dialog';
 const encoder = new TextEncoder();
 
 /** WebCrypto BufferSource requires an ArrayBuffer-backed view under strict TS. */
@@ -159,10 +160,11 @@ async function confirmStorageUnlock(details: {
     authorize.type = 'button';
     authorize.textContent = 'Autorizar firma de desbloqueo';
     authorize.style.cssText = 'padding:10px 16px;border-radius:10px;background:#155e75;color:white;font-weight:600';
-    let timeoutId: number | null = null;
+    let cancelAlarm: (() => void) | null = null;
     const finish = (accepted: boolean) => {
+      cancelAlarm?.();
+      cancelAlarm = null;
       if (!dialog.isConnected) return;
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
       if (dialog.open) dialog.close();
       dialog.remove();
       resolve(accepted);
@@ -179,7 +181,25 @@ async function confirmStorageUnlock(details: {
     try {
       dialog.showModal();
       window.focus();
-      timeoutId = window.setTimeout(() => finish(false), SPP_STORAGE_UNLOCK_TTL_MS);
+      const alarms = typeof chrome !== 'undefined' ? chrome.alarms : undefined;
+      if (!alarms?.create || !alarms.onAlarm?.addListener || !alarms.clear) {
+        finish(false);
+        return;
+      }
+      const onAlarm = (alarm: chrome.alarms.Alarm) => {
+        if (alarm.name === SPP_STORAGE_UNLOCK_DIALOG_ALARM) finish(false);
+      };
+      alarms.onAlarm.addListener(onAlarm);
+      cancelAlarm = () => {
+        alarms.onAlarm.removeListener(onAlarm);
+        void alarms.clear(SPP_STORAGE_UNLOCK_DIALOG_ALARM);
+      };
+      // Same TTL as the one-shot unlock approval. A missing alarm refuses the dialog.
+      void Promise.resolve(
+        alarms.create(SPP_STORAGE_UNLOCK_DIALOG_ALARM, {
+          when: Date.now() + SPP_STORAGE_UNLOCK_TTL_MS,
+        }),
+      ).catch(() => finish(false));
     } catch {
       finish(false);
     }

@@ -18,7 +18,7 @@ CIRCUITS_URL="https://github.com/NethermindEth/stellar-private-payments/releases
 CIRCUITS_SHA256="c4ad54de6cc146bd8323e502341d545e09d0cd95d21b4f60ad2388188f64a2f9"
 CIRCUITS_LOCK_SHA256="35c36f4d0f7055514156b67df9995cb9550e5f380e9a84d85dddb457d17b241e"
 CIRCOMLIB_REPO="https://github.com/iden3/circomlib.git"
-BUILD_ROOT="${SPP_BUILD_ROOT:-$REPO_ROOT/.cache/spp-upstream}"
+BUILD_ROOT="${SPP_BUILD_ROOT:-/tmp/spp-path-a/cache}"
 SRC="$BUILD_ROOT/stellar-private-payments"
 MANIFEST="$REPO_ROOT/packages/wallet-core/src/stellar/spp/nethermind/spp-runtime-manifest.json"
 
@@ -29,8 +29,8 @@ command -v git >/dev/null 2>&1 || die "git is required"
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
 
-export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+export CARGO_HOME="${CARGO_HOME:-/tmp/spp-path-a/cargo}"
+export RUSTUP_HOME="${RUSTUP_HOME:-/tmp/spp-path-a/rustup}"
 # The pinned rustup 1.97.1 proxy must win over any image toolchain.
 export PATH="$CARGO_HOME/bin${PATH:+:$PATH}"
 

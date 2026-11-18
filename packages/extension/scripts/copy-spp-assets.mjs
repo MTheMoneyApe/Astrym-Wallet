@@ -73,10 +73,10 @@ function repoRoot() {
 }
 
 function candidateRoots() {
-  const buildRoot = process.env.SPP_BUILD_ROOT;
+  const buildRoot = process.env.SPP_BUILD_ROOT || '/tmp/spp-path-a/cache';
   return [
     process.env.SPP_SDK_ROOT,
-    buildRoot ? join(buildRoot, 'stellar-private-payments/sdk/web') : '',
+    join(buildRoot, 'stellar-private-payments/sdk/web'),
     join(repoRoot(), '.cache/spp-upstream/stellar-private-payments/sdk/web'),
   ].filter((value) => typeof value === 'string' && value.length > 0);
 }

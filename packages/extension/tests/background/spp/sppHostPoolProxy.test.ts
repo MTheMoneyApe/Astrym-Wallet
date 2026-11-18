@@ -36,7 +36,10 @@ describe('createSppHostPoolProxy', () => {
       poolContract: POOL,
       send,
     });
-    await expect(proxy.deposit(10n)).resolves.toEqual({ txHash: 'hash-1' });
+    await expect(proxy.deposit(10n)).resolves.toEqual({
+      txHash: 'hash-1',
+      txHashes: ['hash-1'],
+    });
     expect(send.mock.calls[0]?.[0]?.payload.operation).toBe('deposit');
   });
 
