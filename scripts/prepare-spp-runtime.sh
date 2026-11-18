@@ -812,30 +812,41 @@ manifest = json.loads(manifest_path.read_text())
 if manifest["sourceCommit"] != commit:
     raise SystemExit("manifest sourceCommit drifted")
 # The pinned upstream manifest hashes the original SDK outputs. For WASM,
-# reconstruct those original bytes by reversing only the equal-length sysroot
-# path substitutions above, then verify the upstream SHA and size. This keeps
-# the immutable upstream hashes authoritative while proving the published
-# modules differ only by the explicitly recorded path normalization.
+# reconstruct those original bytes by reversing the exact compile-time path
+# remaps and the equal-length sysroot aliases above, then verify upstream SHA
+# and size. The /rust -> /cargo remap intentionally changes path-string lengths;
+# compare the reconstructed source bytes, not the remapped distribution size.
 reverse_replacements = (
     (b"/sppx/deps/", b"/rust/deps/"),
     (b"/sppxc/", b"/rustc/"),
     (b"/sppxc-", b"/rustc-"),
+    (b"/cargo", b"/rust"),
 )
-for normalized, original in reverse_replacements:
+for normalized, original in reverse_replacements[:-1]:
     if len(normalized) != len(original):
         raise SystemExit(f"unsafe reverse normalization length mismatch: {normalized!r} -> {original!r}")
+if len(reverse_replacements[-1][0]) != len(reverse_replacements[-1][1]) + 1:
+    raise SystemExit("unexpected /rust -> /cargo remap length; refusing manifest verification")
 
 for rel, expect in manifest["files"].items():
     path = web / rel
     data = path.read_bytes()
     source_data = data
+    remapped_path_count = 0
     if rel.endswith(".wasm"):
+        remapped_path_count = source_data.count(b"/cargo")
         for normalized, original in reverse_replacements:
             source_data = source_data.replace(normalized, original)
     got = hashlib.sha256(source_data).hexdigest()
-    if got != expect["sha256"] or len(data) != expect["size"] or len(source_data) != expect["size"]:
-        raise SystemExit(f"hash mismatch {rel}: {got} {len(data)}")
-    print(f"ok {rel}")
+    if got != expect["sha256"] or len(source_data) != expect["size"]:
+        raise SystemExit(
+            f"hash mismatch {rel}: reconstructed_sha256={got} "
+            f"reconstructed_size={len(source_data)} distributed_size={len(data)}"
+        )
+    if rel.endswith(".wasm"):
+        print(f"ok {rel} (reconstructed upstream bytes; /cargo path remaps reversed: {remapped_path_count})")
+    else:
+        print(f"ok {rel}")
 prov = {
     "sourceRepository": manifest["sourceRepository"],
     "sourceCommit": commit,
