@@ -12,6 +12,8 @@
   - Cambio de privacidad en 1 clic (`executeOneClickPrivacyMode`: `setMode('nym')` + `connect`, o `setMode('direct')` + `disconnect` si activo).
   - Menú de cuentas compacto (`account-menu-row`, copia inline) sin desbordes (`left: 12px; right: 12px; width: auto`) y responsividad móvil (`360px–430px`).
   - Detalles técnicos (`Conectar`/`Desconectar`, Logical/Effective URL, gateway, Probe Horizon y panel SPP) agrupados en el acordeón **"Opciones avanzadas y diagnóstico"**.
+  - **Historial real + etiquetas (`512097f`):** últimos 5 pagos desde Horizon (`GET_STELLAR_RECENT_PAYMENTS`, fail-closed) + mapa local `astrym.txTransportHistory` con insignia **`Nym`** / **`Directo`** y enlace a Stellar Expert.
+  - **Estabilidad popup (`512097f` / `f0e9ff7`):** ancho/padding raíz (`box-sizing: border-box`, sin recortes laterales), fix de orden de hooks en `Dashboard.tsx` (`mergedRecentTxs` antes de returns tempranos) y `PopupErrorBoundary` en `App.tsx`.
   - Tests unitarios focales en verde; builds `build:nym-dev` y `vite.webapp.config.ts` OK (nota Windows: `copy-spp-assets.mjs` requiere ruta POSIX/caché SPP para `prepare-spp-runtime.sh`).
 
 ## 3. Pendiente para cerrar `dev` -> `master` (Ronda 22 nov)
