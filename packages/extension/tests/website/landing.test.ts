@@ -39,9 +39,10 @@ describe('Astrym landing page', () => {
     expect(css).toContain('system-ui');
   });
 
-  it('points Vercel at the webapp build', () => {
-    expect(vercel).toContain('pnpm build:webapp');
+  it('points Vercel at the verified immutable product bundle', () => {
+    expect(vercel).toContain('node scripts/fetch-vercel-release.mjs');
     expect(vercel).toContain('packages/extension/dist-webapp');
     expect(vercel).toContain('application/wasm');
+    expect(vercel).toContain('/downloads/astrym-wallet-mv3.zip');
   });
 });
