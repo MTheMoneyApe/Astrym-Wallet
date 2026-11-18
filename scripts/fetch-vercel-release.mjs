@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { access, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -28,15 +28,20 @@ async function fetchResponse(url, label) {
     headers: { 'User-Agent': 'Astrym-Vercel-Release-Assembler' },
   });
   if (!response.ok) fail(`${label} download returned HTTP ${response.status}`);
+  if (!response.body) fail(`${label} response has no body`);
   return response;
 }
 async function sha256File(path) {
   const hash = createHash('sha256');
-  for await (const chunk of (await import('node:fs')).createReadStream(path)) hash.update(chunk);
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
   return hash.digest('hex');
 }
 function gitBlobSha1(data) {
-  return createHash('sha1').update(`blob ${data.length}\\0`).update(data).digest('hex');
+  return createHash('sha1')
+    .update(Buffer.from(`blob ${data.length}`))
+    .update(Buffer.from([0]))
+    .update(data)
+    .digest('hex');
 }
 async function requireFile(relative) {
   const path = resolve(output, relative);
@@ -69,9 +74,9 @@ const listing = spawnSync('tar', ['-tzf', temporaryArchive], {
   maxBuffer: 32 * 1024 * 1024,
 });
 if (listing.status !== 0) fail(`cannot inspect release archive: ${listing.stderr || listing.error || listing.status}`);
-for (const entry of listing.stdout.split(/\\r?\\n/).filter(Boolean)) {
-  const normalized = entry.replace(/^\\.\\//, '');
-  if (entry.startsWith('/') || normalized.split('/').includes('..') || normalized.includes('\\\\')) {
+for (const entry of listing.stdout.split(/\r?\n/).filter(Boolean)) {
+  const normalized = entry.replace(/^\.\//, '');
+  if (entry.startsWith('/') || normalized.split('/').includes('..') || normalized.includes('\\')) {
     fail(`unsafe path in release archive: ${entry}`);
   }
 }
