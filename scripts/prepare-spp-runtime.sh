@@ -544,7 +544,7 @@ export WASM_OPT="$WRAPPER_DIR/wasm-opt"
 export PATH="$WRAPPER_DIR:$PATH"
 
 python3 - "$DIAGNOSTIC_DIR/toolchain.json" "$REAL_WASM_OPT" "$REAL_WASM_BINDGEN" "$RUST_CHANNEL" <<'PY'
-import hashlib, json, shutil, subprocess, sys
+import hashlib, json, os, shutil, subprocess, sys
 from pathlib import Path
 
 output = Path(sys.argv[1])
