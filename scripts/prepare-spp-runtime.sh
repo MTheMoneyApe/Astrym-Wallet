@@ -381,12 +381,11 @@ tokens = {
     "circuits": "/spp-circuits",
 }
 # Rust's prebuilt sysroot contributes virtual source paths under /rustc
-# and /rust/deps. Remap those longer prefixes too, so the unchanged strict
-# /rust scan does not mistake compiler source roots for leaked host paths.
-# The general /rust mapping remains the deterministic fallback for image homes.
+# and /rust/deps. Use equal-length, specific aliases shared with the
+# post-build normalizer before the general /rust fallback.
 pairs = [
-    ("/rust/deps", "/spp-rust-deps"),
-    ("/rustc", "/spp-rustc"),
+    ("/rust/deps", "/sppx/deps"),
+    ("/rustc", "/sppxc"),
     ("/rust", "/cargo"),
 ]
 home_remap_paths = {}
@@ -1037,11 +1036,8 @@ if manifest["sourceCommit"] != commit:
 # and size. The /rust -> /cargo remap intentionally changes path-string lengths;
 # compare the reconstructed source bytes, not the remapped distribution size.
 reverse_replacements = (
-    # Reverse the explicit rustc --remap-path-prefix destinations first.
-    # These longer aliases are distinct from the equal-length /sppx and /sppxc
-    # placeholders used only to normalize precompiled sysroot strings below.
-    (b"/spp-rust-deps/", b"/rust/deps/"),
-    (b"/spp-rustc/", b"/rustc/"),
+    # Reverse the equal-length aliases used by RUSTFLAGS and the post-build
+    # normalizer. The broad /rust -> /cargo remap is reversed separately below.
     (b"/sppx/deps/", b"/rust/deps/"),
     (b"/sppxc/", b"/rustc/"),
     (b"/sppxc-", b"/rustc-"),
