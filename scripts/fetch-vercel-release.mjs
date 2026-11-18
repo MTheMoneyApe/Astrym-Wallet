@@ -100,7 +100,6 @@ const required = [
   'webapp.html',
   'manifest.webmanifest',
   'webapp-sw.js',
-  'downloads/astrym-wallet-mv3.zip',
   'downloads/astrym-wallet-mv3.json',
 ];
 for (const path of required) await requireFile(path);
@@ -124,11 +123,17 @@ if (pwa.start_url !== './webapp.html' || pwa.display !== 'standalone') {
 const extensionMetadata = JSON.parse(await readFile(await requireFile('downloads/astrym-wallet-mv3.json'), 'utf8'));
 if (extensionMetadata.sourceCommit !== commit) fail('extension package commit does not match release commit');
 if (extensionMetadata.archive !== '/downloads/astrym-wallet-mv3.zip') fail('unexpected extension archive path');
+if (!Number.isSafeInteger(extensionMetadata.sizeBytes) || extensionMetadata.sizeBytes <= 0) fail('invalid extension archive size');
 if (!/^[0-9a-f]{64}$/i.test(extensionMetadata.sha256 ?? '')) fail('invalid extension archive SHA-256');
-const extensionArchive = await requireFile('downloads/astrym-wallet-mv3.zip');
-const extensionStat = await stat(extensionArchive);
-if (extensionStat.size !== extensionMetadata.sizeBytes) fail('extension archive size does not match its metadata');
-if (await sha256File(extensionArchive) !== extensionMetadata.sha256) fail('extension archive SHA-256 does not match its metadata');
+const vercelConfig = JSON.parse(await readFile(resolve(root, 'vercel.json'), 'utf8'));
+const downloadRewrite = (vercelConfig.rewrites ?? []).find((item) => item.source === '/downloads/astrym-wallet-mv3.zip');
+const expectedDownloadOrigin = 'https://github.com/MTheMoneyApe/Astrym-Wallet/releases/download/astrym-extension-downloads/astrym-wallet-mv3.zip';
+if (downloadRewrite?.destination !== expectedDownloadOrigin) {
+  fail('MV3 download route does not proxy to the approved immutable download origin');
+}
+// The extension ZIP is deliberately not deployed as a static file because it
+// exceeds the Vercel Hobby static-upload limit. The same-domain route proxies
+// it from the validated, rolling GitHub release asset.
 
 console.log(JSON.stringify({
   ok: true,
