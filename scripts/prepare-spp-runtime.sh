@@ -640,6 +640,42 @@ if [ "$SPP_BUILD_STATUS" -ne 0 ]; then
   die "upstream SDK build failed with status $SPP_BUILD_STATUS; diagnostics preserved at $DIAGNOSTIC_DIR"
 fi
 
+# rust-std is precompiled with virtual source-root strings that RUSTFLAGS
+# cannot rewrite in downstream crates. Normalize only those two known prefixes
+# in shipped WASM data, using byte-for-byte equal-length replacements. This
+# preserves every WASM section length and offset; the strict host-path scanner
+# below still scans every shipped artifact and fails on any remaining path.
+log "COMMAND: normalize precompiled Rust sysroot source-path strings in WASM"
+python3 - "$SRC/sdk/web" <<'PY'
+import os, sys
+from pathlib import Path
+
+web = Path(sys.argv[1])
+replacements = (
+    (b"/rust/deps/", b"/sppx/deps/"),
+    (b"/rustc/", b"/sppxc/"),
+)
+for old, new in replacements:
+    if len(old) != len(new):
+        raise SystemExit(f"unsafe path normalization length mismatch: {old!r} -> {new!r}")
+
+total = 0
+for path in sorted(web.rglob("*.wasm")):
+    original = path.read_bytes()
+    normalized = original
+    for old, new in replacements:
+        normalized = normalized.replace(old, new)
+    if normalized == original:
+        continue
+    temp = path.with_name(path.name + ".pathfix.tmp")
+    temp.write_bytes(normalized)
+    os.replace(temp, path)
+    changed = sum(original.count(old) for old, _ in replacements)
+    total += changed
+    print(f"normalized {changed} precompiled sysroot path strings in {path.name}")
+print(f"normalized {total} Rust sysroot path strings across shipped WASM modules")
+PY
+
 log "COMMAND: scan shipped files for host paths and wasm memory limits"
 python3 - "$SRC/sdk/web" "$SRC" "$CARGO_HOME" "$RUSTUP_HOME" "$BUILD_ROOT" \
   "$CARGO_TARGET_DIR" "$HOME" "$CARGO_HOME_REMAP" "$RUSTUP_HOME_REMAP" \
