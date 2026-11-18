@@ -200,16 +200,6 @@ export function SppAccountPanel({
       acknowledgeBroadcast: true,
       ...derived,
     })
-      .then((result) => {
-        setConfirmRegister(false);
-        setRegisterState('idle');
-        setRegisterNote(
-          result.txHash
-            ? `Registro on-chain ok — tx ${result.txHash}`
-            : 'Registro devolvió confirmación ambigua (sin hash).',
-        );
-        refresh();
-      })
       .catch((cause: unknown) => {
         if (isBroadcastAwaitingApproval(cause)) {
           setError(null);
@@ -232,7 +222,6 @@ export function SppAccountPanel({
       style={{ display: 'grid', gap: 10, marginTop: 12 }}
       data-testid="spp-account-panel"
       data-spp-account-ready={writeReady ? 'yes' : 'no'}
-      data-spp-register-state={registerFlowState}
     >
       <h4 style={{ margin: 0, fontSize: '0.9rem' }}>Cuenta privada SPP</h4>
       <p className="text-secondary" style={{ margin: 0, fontSize: '0.75rem' }}>
@@ -346,7 +335,6 @@ export function SppAccountPanel({
           </span>
           <span className="text-secondary" data-testid="spp-register-derived">
             La solicitud usa el mensaje Derivation v3. Esta pantalla no pide pegar note_key, encryption_key ni firmas.
-            La firma queda detrás del sign gate y se detiene con el broadcast apagado.
           </span>
           <span className="text-secondary">
             El mensaje v3 crea una clave nueva. Una firma v2 no se reutiliza ni se migra.
@@ -355,7 +343,13 @@ export function SppAccountPanel({
             type="button"
             className="btn-secondary"
             data-testid="spp-register-cancel"
-            onClick={() => setConfirmRegister(false)}
+            disabled={busy !== null}
+            onClick={() => {
+              setConfirmRegister(false);
+              setRegisterNote(null);
+              setRegisterState('idle');
+              setError(null);
+            }}
           >
             Cancelar
           </button>
