@@ -482,7 +482,7 @@ jobs:
               "sizeBytes": len(data),
               "sha256": hashlib.sha256(data).hexdigest(),
           }
-          metadata.write_text(json.dumps(result, indent=2) + "\\n")
+          metadata.write_text(json.dumps(result, indent=2))
           print(json.dumps(result, indent=2))
           PY
 
@@ -525,7 +525,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/astrym-vercel-release"
           gh run download "$GITHUB_RUN_ID" \\
             --repo "$GITHUB_REPOSITORY" \\
-            --name "astrym-vercel-output-$SOURCE_COMMIT" \\
+            --name "astrym-vercel-output-$GITHUB_SHA" \\
             --dir "$RUNNER_TEMP/astrym-vercel-release"
 
       - name: Verify and publish commit-pinned prerelease asset
