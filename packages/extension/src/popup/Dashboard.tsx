@@ -490,6 +490,46 @@ function ReceiveAddressView({ account, onBack }: { account: { address: string; l
   );
 }
 
+const FRIENDBOT_NYM_NOTICE =
+  'Friendbot is unavailable in Nym mode. Switch to Direct mode to fund this Testnet account.';
+
+export function FriendbotFundButton({
+  mode,
+  fundingLoading,
+  onFund,
+}: {
+  mode: NymTransportMode;
+  fundingLoading: boolean;
+  onFund: () => void;
+}) {
+  const blocked = mode === 'nym';
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onFund}
+        disabled={fundingLoading || blocked}
+        className="btn-outline"
+        style={{
+          width: '100%',
+          padding: '8px 12px',
+          fontSize: '0.82rem',
+          fontWeight: 600,
+          color: 'var(--accent-color)',
+          borderColor: 'var(--accent-color)',
+          cursor: blocked ? 'not-allowed' : 'pointer',
+          opacity: blocked ? 0.55 : 1,
+        }}
+      >
+        {fundingLoading ? 'Funding from Friendbot...' : 'Fund with Friendbot (10,000 Testnet XLM)'}
+      </button>
+      {blocked ? (
+        <p style={{ margin: '8px 0 0', fontSize: '0.78rem', color: 'var(--text-main)' }}>{FRIENDBOT_NYM_NOTICE}</p>
+      ) : null}
+    </>
+  );
+}
+
 export function Dashboard({ onLock }: { onLock: () => void }) {
   const [account, setAccount] = useState<{ address: string; label: string; index: number } | null>(null);
   const [balance, setBalance] = useState<string>('--');
@@ -1089,6 +1129,22 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         }
       }
     })();
+    return () => {
+      cancelled = true;
+    };
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== 'dashboard') return;
+    let cancelled = false;
+    void sendIpcMessage('NYM_STATUS', {})
+      .then((snap) => {
+        if (cancelled) return;
+        setNymSnapshot((prev) => (prev.mode === snap.mode ? prev : { ...prev, mode: snap.mode }));
+      })
+      .catch(() => {
+        /* Last known mode stands. Friendbot transport still fail-closes in Nym. */
+      });
     return () => {
       cancelled = true;
     };
@@ -1823,15 +1879,11 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
                 <p style={{ margin: '0 0 8px 0', fontSize: '0.82rem', color: 'var(--text-main)' }}>
                   This account is unfunded on Stellar Testnet. You can request free Testnet XLM to fund it.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => handleFundTestnet(account.address)}
-                  disabled={fundingLoading}
-                  className="btn-outline"
-                  style={{ width: '100%', padding: '8px 12px', fontSize: '0.82rem', fontWeight: 600, color: 'var(--accent-color)', borderColor: 'var(--accent-color)', cursor: 'pointer' }}
-                >
-                  {fundingLoading ? 'Funding from Friendbot...' : 'Fund with Friendbot (10,000 Testnet XLM)'}
-                </button>
+                <FriendbotFundButton
+                  mode={nymSnapshot.mode === 'nym' ? 'nym' : 'direct'}
+                  fundingLoading={fundingLoading}
+                  onFund={() => handleFundTestnet(account.address)}
+                />
                 {fundingMessage && (
                   <p style={{ margin: '8px 0 0', fontSize: '0.78rem', color: 'var(--accent-color)' }}>{fundingMessage}</p>
                 )}
