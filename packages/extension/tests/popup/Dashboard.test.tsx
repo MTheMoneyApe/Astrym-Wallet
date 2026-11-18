@@ -12,6 +12,7 @@ import {
   createAccountOperationGate,
   copyPublicAddress,
   dismissAccountMenuOnEscape,
+  executeOneClickPrivacyMode,
   formatPublicAddress,
   includeCreatedAccount,
   isCurrentBalanceResponse,
@@ -60,6 +61,8 @@ describe('Dashboard account menu', () => {
     const markup = renderToStaticMarkup(React.createElement(AccountMenu, { ...baseMenuProps, open: true }));
 
     expect(markup).toContain('role="menu"');
+    expect(markup).toContain('class="account-menu-row');
+    expect(markup).toContain('class="account-copy-inline"');
     expect(markup).toContain('Active account: Account 1');
     expect(markup).toContain('Select account: Account 2');
     expect(markup).toContain('Copy full public address for Account 1');
@@ -296,5 +299,77 @@ describe('PrivacyModeSelector', () => {
     );
     expect(nymDisconnectedMarkup).toContain('data-testid="dashboard-mode-nym" aria-pressed="true"');
     expect(nymDisconnectedMarkup).toContain('Red bloqueada por seguridad');
+  });
+});
+
+describe('executeOneClickPrivacyMode', () => {
+  it('switches to Nym and immediately connects in one click without falling back to direct on failure', async () => {
+    const order: string[] = [];
+    const setMode = vi.fn(async (mode: 'direct' | 'nym') => {
+      order.push(`setMode:${mode}`);
+    });
+    const connect = vi.fn(async () => {
+      order.push('connect');
+    });
+    const disconnect = vi.fn(async () => {
+      order.push('disconnect');
+    });
+
+    await executeOneClickPrivacyMode('nym', {
+      isNymActive: false,
+      setMode,
+      connect,
+      disconnect,
+    });
+    expect(order).toEqual(['setMode:nym', 'connect']);
+    expect(disconnect).not.toHaveBeenCalled();
+
+    // Fail-closed: if connect fails, never calls setMode('direct')
+    order.length = 0;
+    const failingConnect = vi.fn(async () => {
+      order.push('connect:fail');
+      throw new Error('mixnet unreachable');
+    });
+    await expect(
+      executeOneClickPrivacyMode('nym', {
+        isNymActive: false,
+        setMode,
+        connect: failingConnect,
+        disconnect,
+      }),
+    ).rejects.toThrow('mixnet unreachable');
+    expect(order).toEqual(['setMode:nym', 'connect:fail']);
+    expect(setMode).not.toHaveBeenCalledWith('direct');
+  });
+
+  it('switches to Direct and disconnects Nym only when Nym was active', async () => {
+    const order: string[] = [];
+    const setMode = vi.fn(async (mode: 'direct' | 'nym') => {
+      order.push(`setMode:${mode}`);
+    });
+    const connect = vi.fn(async () => {
+      order.push('connect');
+    });
+    const disconnect = vi.fn(async () => {
+      order.push('disconnect');
+    });
+
+    await executeOneClickPrivacyMode('direct', {
+      isNymActive: true,
+      setMode,
+      connect,
+      disconnect,
+    });
+    expect(order).toEqual(['setMode:direct', 'disconnect']);
+    expect(connect).not.toHaveBeenCalled();
+
+    order.length = 0;
+    await executeOneClickPrivacyMode('direct', {
+      isNymActive: false,
+      setMode,
+      connect,
+      disconnect,
+    });
+    expect(order).toEqual(['setMode:direct']);
   });
 });

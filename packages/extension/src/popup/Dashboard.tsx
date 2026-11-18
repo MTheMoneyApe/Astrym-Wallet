@@ -168,7 +168,17 @@ export async function copyPublicAddress(
   return '¡Dirección copiada!';
 }
 
-function CopyAddressButton({ address, label, menuItem = false }: { address: string; label: string; menuItem?: boolean }) {
+function CopyAddressButton({
+  address,
+  label,
+  menuItem = false,
+  compact = false,
+}: {
+  address: string;
+  label: string;
+  menuItem?: boolean;
+  compact?: boolean;
+}) {
   const [copyStatus, setCopyStatus] = useState('');
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -186,6 +196,27 @@ function CopyAddressButton({ address, label, menuItem = false }: { address: stri
     if (statusTimer.current !== null) clearTimeout(statusTimer.current);
     statusTimer.current = setTimeout(() => setCopyStatus(''), 2200);
   };
+
+  if (compact) {
+    return (
+      <div style={{ minWidth: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <button
+          type="button"
+          role={menuItem ? 'menuitem' : undefined}
+          onClick={handleCopy}
+          aria-label={`Copy full public address for ${label}`}
+          title={copyStatus || 'Copy full public address'}
+          className="account-copy-inline"
+        >
+          <span>{copyStatus === '¡Dirección copiada!' ? 'Copiada ✓' : formatPublicAddress(address)}</span>
+          <span aria-hidden="true" style={{ position: 'relative', flex: '0 0 12px', width: 12, height: 12 }}>
+            <span style={{ position: 'absolute', top: 0, left: 3, width: 7, height: 8, border: '1px solid currentColor', borderRadius: 1.5 }} />
+            <span style={{ position: 'absolute', top: 3, left: 0, width: 7, height: 8, border: '1px solid currentColor', borderRadius: 1.5, background: 'var(--bg-color)' }} />
+          </span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minWidth: 0 }}>
@@ -347,14 +378,19 @@ export function AccountMenu({
           aria-busy={loading || busy}
         >
           {loading ? (
-            <p className="text-secondary" style={{ margin: 0, padding: '10px 8px', fontSize: '0.82rem' }}>Loading accounts...</p>
+            <p className="text-secondary" style={{ margin: 0, padding: '8px 6px', fontSize: '0.8rem' }}>Loading accounts...</p>
           ) : accounts.length === 0 ? (
-            <p className="text-secondary" style={{ margin: 0, padding: '10px 8px', fontSize: '0.82rem' }}>No accounts yet.</p>
+            <p className="text-secondary" style={{ margin: 0, padding: '8px 6px', fontSize: '0.8rem' }}>No accounts yet.</p>
           ) : accounts.map((accountItem) => {
             const isActive = activeIndex === accountItem.index;
             const isEditing = editingIndex === accountItem.index;
             return (
-              <div key={accountItem.index} role="group" aria-label={accountItem.label} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: 4, borderRadius: 8, background: isActive ? 'rgba(143,232,208,0.08)' : 'transparent' }}>
+              <div
+                key={accountItem.index}
+                role="group"
+                aria-label={accountItem.label}
+                className={`account-menu-row ${isActive ? 'account-menu-row--active' : ''}`}
+              >
                 {isEditing ? (
                   <form onSubmit={handleRename} style={{ display: 'flex', gap: 6, flex: 1, minWidth: 0 }}>
                     <input
@@ -364,33 +400,35 @@ export function AccountMenu({
                       maxLength={40}
                       onChange={(event) => setEditingLabel(event.target.value)}
                       disabled={actionsDisabled}
-                      style={{ minWidth: 0, flex: 1, padding: '7px 8px', border: '1px solid var(--border-dark)', borderRadius: 6, background: 'var(--bg-color)', color: 'var(--text-main)' }}
+                      style={{ minWidth: 0, flex: 1, padding: '5px 8px', border: '1px solid var(--border-dark)', borderRadius: 6, background: 'var(--bg-color)', color: 'var(--text-main)', fontSize: '0.8rem' }}
                     />
-                    <button type="submit" className="btn-outline" disabled={actionsDisabled || !editingLabel.trim()} aria-label={`Save name for ${accountItem.label}`}>Save</button>
-                    <button type="button" className="btn-outline" disabled={actionsDisabled} onClick={() => setEditingIndex(null)} aria-label="Cancel rename">Cancel</button>
+                    <button type="submit" className="btn-outline" disabled={actionsDisabled || !editingLabel.trim()} aria-label={`Save name for ${accountItem.label}`} style={{ padding: '4px 8px', fontSize: '0.72rem' }}>Save</button>
+                    <button type="button" className="btn-outline" disabled={actionsDisabled} onClick={() => setEditingIndex(null)} aria-label="Cancel rename" style={{ padding: '4px 8px', fontSize: '0.72rem' }}>Cancel</button>
                   </form>
                 ) : (
                   <>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={async () => {
-                          await selectMenuAccount(accountItem.index, onSelect, onClose, () => triggerRef.current?.focus());
-                        }}
-                        disabled={actionsDisabled}
-                        aria-current={isActive ? 'true' : undefined}
-                        aria-label={`${isActive ? 'Active account' : 'Select account'}: ${accountItem.label}`}
-                        style={{ display: 'flex', alignItems: 'center', gap: 9, flex: 1, minWidth: 0, padding: '8px 7px', border: 0, borderRadius: 6, background: 'transparent', color: 'var(--text-main)', textAlign: 'left', cursor: busy ? 'wait' : 'pointer' }}
-                      >
-                        <span aria-hidden="true" style={{ display: 'grid', placeItems: 'center', flex: '0 0 28px', width: 28, height: 28, borderRadius: '50%', border: `1px solid ${isActive ? 'var(--accent-color)' : 'var(--border-dark)'}`, color: isActive ? 'var(--accent-color)' : 'var(--text-sec)', fontSize: '0.75rem', fontWeight: 700 }}>
-                          {accountItem.label.trim().slice(0, 1).toUpperCase() || '?'}
-                        </span>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1, fontSize: '0.84rem', fontWeight: 600 }}>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{accountItem.label}</span>
-                          {isActive && <span style={{ flex: '0 0 auto', color: 'var(--accent-color)', fontSize: '0.68rem' }}>Active</span>}
-                        </span>
-                      </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="account-menu-row__select"
+                      onClick={async () => {
+                        await selectMenuAccount(accountItem.index, onSelect, onClose, () => triggerRef.current?.focus());
+                      }}
+                      disabled={actionsDisabled}
+                      aria-current={isActive ? 'true' : undefined}
+                      aria-label={`${isActive ? 'Active account' : 'Select account'}: ${accountItem.label}`}
+                      style={{ cursor: busy ? 'wait' : 'pointer' }}
+                    >
+                      <span aria-hidden="true" style={{ display: 'grid', placeItems: 'center', flex: '0 0 22px', width: 22, height: 22, borderRadius: '50%', border: `1px solid ${isActive ? 'var(--accent-color)' : 'var(--border-dark)'}`, color: isActive ? 'var(--accent-color)' : 'var(--text-sec)', fontSize: '0.7rem', fontWeight: 700 }}>
+                        {accountItem.label.trim().slice(0, 1).toUpperCase() || '?'}
+                      </span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flex: 1, fontSize: '0.8rem', fontWeight: 600 }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{accountItem.label}</span>
+                        {isActive && <span style={{ flex: '0 0 auto', color: 'var(--accent-color)', fontSize: '0.65rem' }}>Active</span>}
+                      </span>
+                    </button>
+                    <div className="account-menu-row__actions">
+                      <CopyAddressButton address={accountItem.publicKey} label={accountItem.label} menuItem compact />
                       <button
                         type="button"
                         role="menuitem"
@@ -402,28 +440,29 @@ export function AccountMenu({
                           setEditingIndex(accountItem.index);
                           setEditingLabel(accountItem.label);
                         }}
-                        style={{ padding: '6px 8px', fontSize: '0.72rem' }}
+                        style={{ padding: '4px 6px', fontSize: '0.69rem', minBlockSize: 26 }}
                       >
                         Rename
                       </button>
                     </div>
-                    <CopyAddressButton address={accountItem.publicKey} label={accountItem.label} menuItem />
                   </>
                 )}
               </div>
             );
           })}
 
-          <div style={{ height: 1, margin: '6px 4px', background: 'var(--border-dark)' }} />
-          <button type="button" role="menuitem" className="btn-outline" onClick={() => void onCreate()} disabled={actionsDisabled} style={{ width: '100%', textAlign: 'left', padding: '9px 10px' }}>
-            {busy ? 'Working...' : '+  Create account'}
-          </button>
-          <button type="button" role="menuitem" className="btn-outline" disabled title="Account import is not available yet." style={{ width: '100%', marginTop: 6, textAlign: 'left', padding: '9px 10px', opacity: 0.5, cursor: 'not-allowed' }}>
-            Import account
-          </button>
-          <p className="text-secondary" style={{ margin: '4px 4px 2px', fontSize: '0.68rem' }}>Account import is not available yet.</p>
-          {error && <p role="alert" className="error-text" style={{ margin: '8px 4px 2px', fontSize: '0.78rem' }}>{error}</p>}
-          {notice && <p role="status" className="text-secondary" style={{ margin: '8px 4px 2px', fontSize: '0.78rem' }}>{notice}</p>}
+          <div style={{ height: 1, margin: '5px 4px', background: 'var(--border-color)' }} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 6 }}>
+            <button type="button" role="menuitem" className="btn-outline" onClick={() => void onCreate()} disabled={actionsDisabled} style={{ width: '100%', textAlign: 'center', padding: '6px 8px', fontSize: '0.76rem' }}>
+              {busy ? 'Working...' : '+ Create account'}
+            </button>
+            <button type="button" role="menuitem" className="btn-outline" disabled title="Account import is not available yet." style={{ width: '100%', textAlign: 'center', padding: '6px 8px', fontSize: '0.76rem', opacity: 0.5, cursor: 'not-allowed' }}>
+              Import account
+            </button>
+          </div>
+          <p className="text-secondary" style={{ margin: '4px 4px 0', fontSize: '0.66rem' }}>Account import is not available yet.</p>
+          {error && <p role="alert" className="error-text" style={{ margin: '6px 4px 2px', fontSize: '0.76rem' }}>{error}</p>}
+          {notice && <p role="status" className="text-secondary" style={{ margin: '6px 4px 2px', fontSize: '0.76rem' }}>{notice}</p>}
         </div>
       )}
     </div>
@@ -604,6 +643,36 @@ export function FriendbotFundButton({
       ) : null}
     </>
   );
+}
+
+/**
+ * 1-click privacy switch orchestration without breaking fail-closed semantics:
+ * - `'nym'` persists Nym mode first and immediately connects MixFetch.
+ *   If connect fails, mode stays `'nym'` (fail-closed; never reverts to Direct).
+ * - `'direct'` persists Direct mode explicitly and tears down Nym if active.
+ */
+export async function executeOneClickPrivacyMode(
+  targetMode: NymTransportMode,
+  deps: {
+    isNymActive: boolean;
+    setMode: (mode: NymTransportMode) => Promise<void>;
+    connect: () => Promise<void>;
+    disconnect: () => Promise<void>;
+  },
+): Promise<void> {
+  if (targetMode === 'nym') {
+    await deps.setMode('nym');
+    await deps.connect();
+    return;
+  }
+  await deps.setMode('direct');
+  if (deps.isNymActive) {
+    try {
+      await deps.disconnect();
+    } catch {
+      /* explicit Direct choice is already persisted; ignore teardown error */
+    }
+  }
 }
 
 export function PrivacyModeSelector({
@@ -1317,77 +1386,111 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     };
   }, [view]);
 
-  const handleNymConnect = () => {
+  const syncGateFromSnapshot = (snap: {
+    mode: NymTransportMode;
+    connected: boolean;
+    preferenceHydrated?: boolean;
+  }) => {
+    setFriendbotGate(
+      applyFriendbotModeStatus({
+        ok: true,
+        mode: snap.mode,
+        connected: snap.connected === true,
+        ...(snap.preferenceHydrated !== undefined
+          ? { preferenceHydrated: snap.preferenceHydrated }
+          : {}),
+      }),
+    );
+  };
+
+  const startGatewayPermissionGesture = (): ReturnType<
+    typeof beginGatewayPermissionRequestFromUserGesture
+  > | null => {
     const origin = nymSnapshot.selectedGateway || NYM_VERIFIED_GATEWAY.wssOrigin;
     const permissionsApi = typeof chrome !== 'undefined' ? chrome.permissions : undefined;
-    let permissionPending: ReturnType<typeof beginGatewayPermissionRequestFromUserGesture> | null =
-      null;
-    if (permissionsApi && typeof permissionsApi.request === 'function') {
-      try {
-        permissionPending = beginGatewayPermissionRequestFromUserGesture(origin);
-      } catch (err: unknown) {
-        setNymSnapshot((prev) => ({
-          ...prev,
-          state: 'error',
-          connected: false,
-          documentReady: false,
-          lastError: err instanceof Error ? err.message : 'Host permission request failed to start',
-          diagnosticCode:
-            err && typeof err === 'object' && 'code' in err
-              ? String((err as { code: unknown }).code)
-              : 'PERMISSION_REQUEST_FAILED',
-          gatewayHostPermissionGranted: false,
-        }));
-        return;
-      }
+    if (!permissionsApi || typeof permissionsApi.request !== 'function') return null;
+    try {
+      return beginGatewayPermissionRequestFromUserGesture(origin);
+    } catch (err: unknown) {
+      setNymSnapshot((prev) => ({
+        ...prev,
+        state: 'error',
+        connected: false,
+        documentReady: false,
+        lastError: err instanceof Error ? err.message : 'Host permission request failed to start',
+        diagnosticCode:
+          err && typeof err === 'object' && 'code' in err
+            ? String((err as { code: unknown }).code)
+            : 'PERMISSION_REQUEST_FAILED',
+        gatewayHostPermissionGranted: false,
+      }));
+      return null;
     }
+  };
 
-    setNymBusy(true);
+  const runNymConnect = async (
+    permissionPending: ReturnType<typeof beginGatewayPermissionRequestFromUserGesture> | null,
+  ): Promise<void> => {
     setNymSnapshot((prev) => ({
       ...prev,
       state: 'connecting',
       connected: false,
       lastError: null,
     }));
-    void (async () => {
-      try {
-        if (permissionPending) {
-          const gesture = await permissionPending;
-          if (!gesture.granted) {
-            setNymSnapshot((prev) => ({
-              ...prev,
-              state: 'error',
-              connected: false,
-              documentReady: false,
-              lastError:
-                'Host permission not granted. Grant the gateway, then Connect. Permission ≠ Mixnet Ready.',
-              diagnosticCode: 'PERMISSION_DENIED',
-              gatewayHostPermissionGranted: false,
-            }));
-            return;
-          }
+    try {
+      if (permissionPending) {
+        const gesture = await permissionPending;
+        if (!gesture.granted) {
+          setNymSnapshot((prev) => ({
+            ...prev,
+            state: 'error',
+            connected: false,
+            documentReady: false,
+            lastError:
+              'Host permission not granted. Grant the gateway, then Connect. Permission ≠ Mixnet Ready.',
+            diagnosticCode: 'PERMISSION_DENIED',
+            gatewayHostPermissionGranted: false,
+          }));
+          return;
         }
-        const snap = await sendIpcMessage('NYM_CONNECT', {});
-        setNymSnapshot(coerceNymUiSnapshot(snap));
-      } catch (err: unknown) {
-        setNymSnapshot((prev) => ({
-          ...prev,
-          state: 'error',
-          connected: false,
-          documentReady: false,
-          lastError: err instanceof Error ? err.message : 'NYM_CONNECT failed',
-        }));
-      } finally {
-        setNymBusy(false);
       }
-    })();
+      const snap = await sendIpcMessage('NYM_CONNECT', {});
+      const coerced = coerceNymUiSnapshot(snap);
+      setNymSnapshot(coerced);
+      syncGateFromSnapshot(coerced);
+    } catch (err: unknown) {
+      setNymSnapshot((prev) => ({
+        ...prev,
+        state: 'error',
+        connected: false,
+        documentReady: false,
+        lastError: err instanceof Error ? err.message : 'NYM_CONNECT failed',
+      }));
+    }
+  };
+
+  const handleNymConnect = () => {
+    const permissionPending = startGatewayPermissionGesture();
+    if (
+      typeof chrome !== 'undefined' &&
+      typeof chrome.permissions?.request === 'function' &&
+      permissionPending === null
+    ) {
+      return;
+    }
+    setNymBusy(true);
+    void runNymConnect(permissionPending).finally(() => {
+      setNymBusy(false);
+    });
   };
 
   const handleNymDisconnect = async () => {
     setNymBusy(true);
     try {
       const snap = await sendIpcMessage('NYM_DISCONNECT', {});
-      setNymSnapshot(coerceNymUiSnapshot(snap));
+      const coerced = coerceNymUiSnapshot(snap);
+      setNymSnapshot(coerced);
+      syncGateFromSnapshot(coerced);
     } catch (err: unknown) {
       setNymSnapshot((prev) => ({
         ...prev,
@@ -1400,19 +1503,51 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     }
   };
 
-  const handleNymSetMode = async (mode: NymTransportMode) => {
+  const handleNymSetMode = async (mode: NymTransportMode): Promise<void> => {
+    const snap = await sendIpcMessage('NYM_SET_MODE', { mode });
+    const coerced = coerceNymUiSnapshot(snap);
+    setNymSnapshot(coerced);
+    syncGateFromSnapshot(coerced);
+  };
+
+  const handleOneClickPrivacyMode = (targetMode: NymTransportMode) => {
+    // Capture MV3 optional host permission synchronously on the user click stack before awaiting IPC.
+    const permissionPending = targetMode === 'nym' ? startGatewayPermissionGesture() : null;
+    const isNymActive =
+      nymSnapshot.connected ||
+      nymSnapshot.state === 'connected' ||
+      nymSnapshot.state === 'connecting';
+
     setNymBusy(true);
-    try {
-      const snap = await sendIpcMessage('NYM_SET_MODE', { mode });
-      setNymSnapshot(coerceNymUiSnapshot(snap));
-    } catch (err: unknown) {
-      setNymSnapshot((prev) => ({
-        ...prev,
-        lastError: err instanceof Error ? err.message : 'NYM_SET_MODE failed',
-      }));
-    } finally {
-      setNymBusy(false);
-    }
+    void executeOneClickPrivacyMode(targetMode, {
+      isNymActive,
+      setMode: handleNymSetMode,
+      connect: async () => {
+        if (
+          typeof chrome !== 'undefined' &&
+          typeof chrome.permissions?.request === 'function' &&
+          permissionPending === null
+        ) {
+          return;
+        }
+        await runNymConnect(permissionPending);
+      },
+      disconnect: async () => {
+        const snap = await sendIpcMessage('NYM_DISCONNECT', {});
+        const coerced = coerceNymUiSnapshot(snap);
+        setNymSnapshot(coerced);
+        syncGateFromSnapshot(coerced);
+      },
+    })
+      .catch((err: unknown) => {
+        setNymSnapshot((prev) => ({
+          ...prev,
+          lastError: err instanceof Error ? err.message : 'Failed to switch privacy mode',
+        }));
+      })
+      .finally(() => {
+        setNymBusy(false);
+      });
   };
 
   const handleNymConfigureGateway = async (origin: string, identityKey?: string) => {
@@ -1919,7 +2054,7 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           busy={nymBusy}
           onConnect={handleNymConnect}
           onDisconnect={handleNymDisconnect}
-          onSetMode={handleNymSetMode}
+          onSetMode={handleOneClickPrivacyMode}
           onConfigureGateway={handleNymConfigureGateway}
           onRequestGatewayPermission={handleNymRequestPermission}
           onLiveSmokeDryRun={handleNymLiveSmokeDryRun}
@@ -2080,14 +2215,8 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           <PrivacyModeSelector
             snapshot={nymSnapshot}
             busy={nymBusy}
-            onSelectDirect={() => void handleNymSetMode('direct')}
-            onSelectNym={() => {
-              if (nymSnapshot.connected) {
-                void handleNymSetMode('nym');
-              } else {
-                handleNymConnect();
-              }
-            }}
+            onSelectDirect={() => handleOneClickPrivacyMode('direct')}
+            onSelectNym={() => handleOneClickPrivacyMode('nym')}
           />
 
           <div className="card balance-card">

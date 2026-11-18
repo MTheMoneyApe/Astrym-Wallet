@@ -209,57 +209,39 @@ export function NymTransportPanel({
           </p>
         ) : null}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          {onConnect ? (
+        {onSetMode ? (
+          <div className="privacy-switcher" role="group" aria-label="Modo de privacidad">
             <button
               type="button"
-              className="btn-primary"
-              disabled={busy || ready}
-              onClick={onConnect}
-              data-testid="nym-connect"
-              style={{ padding: '10px 12px', fontSize: '0.84rem' }}
+              className="privacy-switcher__btn"
+              aria-pressed={mode === 'direct' && snapshot.egressBlocked !== true}
+              disabled={busy || (mode === 'direct' && snapshot.egressBlocked !== true && !ready)}
+              onClick={() => onSetMode('direct')}
+              data-testid="nym-mode-direct"
+              title="Cambio explícito a conexión directa. Desconectar Nym no activa este modo."
             >
-              {snapshot.state === 'connecting' ? 'Conectando…' : 'Conectar a Nym'}
+              <span
+                className={`privacy-dot ${mode === 'direct' && snapshot.egressBlocked !== true ? 'privacy-dot--direct' : ''}`}
+                aria-hidden="true"
+              />
+              Modo Normal
             </button>
-          ) : null}
-          {onDisconnect ? (
             <button
               type="button"
-              className="btn-outline"
-              disabled={busy || snapshot.state === 'disconnected' || snapshot.state === 'closed'}
-              onClick={onDisconnect}
-              data-testid="nym-disconnect"
-              style={{ padding: '10px 12px', fontSize: '0.84rem' }}
+              className="privacy-switcher__btn"
+              aria-pressed={mode === 'nym'}
+              disabled={busy || (mode === 'nym' && ready)}
+              onClick={() => onSetMode('nym')}
+              data-testid="nym-mode-nym"
             >
-              Desconectar
+              <span
+                className={`privacy-dot ${mode === 'nym' ? (ready ? 'privacy-dot--nym' : 'privacy-dot--blocked') : ''}`}
+                aria-hidden="true"
+              />
+              {snapshot.state === 'connecting' ? 'Conectando Nym…' : 'Modo Privado Nym'}
             </button>
-          ) : null}
-          {onSetMode ? (
-            <>
-              <button
-                type="button"
-                className="btn-secondary"
-                disabled={busy || snapshot.privacyPreference === 'nym'}
-                onClick={() => onSetMode('nym')}
-                data-testid="nym-mode-nym"
-                style={{ padding: '10px 12px', fontSize: '0.82rem' }}
-              >
-                Modo Privado (Nym)
-              </button>
-              <button
-                type="button"
-                className="btn-outline"
-                disabled={busy || snapshot.privacyPreference === 'direct'}
-                onClick={() => onSetMode('direct')}
-                data-testid="nym-mode-direct"
-                title="Cambio explícito a conexión directa. Desconectar Nym no activa este modo."
-                style={{ padding: '10px 12px', fontSize: '0.82rem' }}
-              >
-                Modo Normal
-              </button>
-            </>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </div>
 
       <details className="advanced-accordion" data-testid="nym-advanced-diagnostics">
@@ -282,6 +264,35 @@ export function NymTransportPanel({
             <h4 style={{ margin: 0, fontSize: '0.86rem', color: 'var(--text-main)' }}>
               Detalles técnicos de Nym y pruebas de red
             </h4>
+
+            {onConnect || onDisconnect ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8 }}>
+                {onConnect ? (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={busy || ready}
+                    onClick={onConnect}
+                    data-testid="nym-connect"
+                    style={{ padding: '8px 10px', fontSize: '0.8rem', minBlockSize: 36 }}
+                  >
+                    {snapshot.state === 'connecting' ? 'Conectando…' : 'Conectar a Nym'}
+                  </button>
+                ) : null}
+                {onDisconnect ? (
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    disabled={busy || snapshot.state === 'disconnected' || snapshot.state === 'closed'}
+                    onClick={onDisconnect}
+                    data-testid="nym-disconnect"
+                    style={{ padding: '8px 10px', fontSize: '0.8rem', minBlockSize: 36 }}
+                  >
+                    Desconectar
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
 
             <ul
               style={{

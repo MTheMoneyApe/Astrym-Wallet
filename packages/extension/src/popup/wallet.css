@@ -97,11 +97,12 @@ body {
 
 .balance-amount {
   margin: 0;
-  font-size: 2.5rem;
+  font-size: clamp(1.85rem, 8vw, 2.5rem);
   font-weight: 700;
   line-height: 1.1;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .balance-indicator {
@@ -131,12 +132,13 @@ body {
 
 .privacy-switcher {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 6px;
   padding: 4px;
   background-color: var(--bg-color);
   border: 1px solid var(--border-color);
   border-radius: 10px;
+  min-width: 0;
 }
 
 .privacy-switcher__btn {
@@ -146,14 +148,17 @@ body {
   border-radius: 8px;
   color: var(--text-sec);
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 600;
-  min-block-size: 36px;
-  padding: 8px 10px;
+  line-height: 1.25;
+  min-width: 0;
+  min-block-size: 38px;
+  padding: 8px 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  text-align: center;
   transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
@@ -204,9 +209,12 @@ body {
   gap: 8px;
   padding: 6px 10px;
   border-radius: 999px;
-  font-size: 0.76rem;
+  font-size: 0.75rem;
   font-weight: 500;
   line-height: 1.3;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   border: 1px solid var(--border-color);
   background-color: var(--bg-color);
   color: var(--text-sec);
@@ -494,8 +502,9 @@ textarea:focus-visible {
 
 .action-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
 }
 
 .center-content {
@@ -712,28 +721,84 @@ html:not(.astrym-webapp) .unlock-logo {
 }
 
 .account-menu-wrap {
-  position: relative;
+  position: static;
   min-width: 0;
-  flex: 1;
+  flex: 1 1 110px;
 }
 
 .account-menu-panel {
   position: absolute;
-  z-index: 20;
-  top: calc(100% + 8px);
-  right: 0;
-  left: auto;
-  width: min(320px, calc(100vw - 40px));
-  max-width: calc(100vw - 24px);
-  max-height: min(440px, calc(100dvh - 84px));
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 12px;
+  right: 12px;
+  width: auto;
+  max-width: 100%;
+  max-height: min(380px, calc(100dvh - 84px));
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 8px;
+  padding: 6px;
   border: 1px solid var(--border-dark);
   border-radius: 12px;
   background: var(--surface-color);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
   box-sizing: border-box;
+}
+
+.account-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.account-menu-row--active {
+  background: rgba(60, 232, 148, 0.1);
+}
+
+.account-menu-row__select {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-main);
+  text-align: left;
+  cursor: pointer;
+}
+
+.account-menu-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.account-copy-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-color);
+  color: var(--text-sec);
+  font-family: var(--font-mono);
+  font-size: 0.69rem;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.account-copy-inline:hover {
+  color: var(--text-main);
+  border-color: var(--border-dark);
 }
 
 .modal-sheet {
@@ -903,10 +968,17 @@ html.astrym-webapp .onboarding-flow {
 }
 
 html.astrym-webapp .account-menu-panel {
-  width: min(100%, calc(100vw - 24px));
-  right: 0;
-  left: 0;
-  margin: 0 auto;
+  left: 12px;
+  right: 12px;
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+html.astrym-webapp .account-menu-row__select,
+html.astrym-webapp .account-copy-inline,
+html.astrym-webapp .account-menu-row__actions .btn-outline {
+  min-height: 36px;
 }
 
 html.astrym-webapp .android-webapp-bar {
@@ -923,11 +995,12 @@ html.astrym-webapp .android-webapp-bar button {
 }
 
 html.astrym-webapp .action-grid {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 html.astrym-webapp .header {
   flex-wrap: wrap;
+  row-gap: 8px;
 }
 
 html.astrym-webapp .card,
@@ -963,23 +1036,37 @@ html.astrym-webapp .android-webapp-bar__logo {
   max-width: min(42%, 140px);
 }
 
-/* Compact phones */
-@media (max-width: 429px) {
+/* Compact phones (360px - 430px) */
+@media (max-width: 430px) {
   html.astrym-webapp .view-container {
     padding-left: max(12px, env(safe-area-inset-left, 0px));
     padding-right: max(12px, env(safe-area-inset-right, 0px));
   }
 
   html.astrym-webapp .action-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
   }
 
   html.astrym-webapp .card {
-    padding: var(--space-3);
+    padding: 12px;
+  }
+
+  html.astrym-webapp .balance-card {
+    padding: 16px;
+  }
+
+  html.astrym-webapp .header {
+    gap: 6px;
   }
 
   html.astrym-webapp .header h2 {
-    font-size: 1.05rem;
+    font-size: 1rem;
+  }
+
+  html.astrym-webapp .account-menu-panel {
+    left: 0;
+    right: 0;
   }
 
   html.astrym-webapp .onboarding-phrase-grid,
@@ -1015,6 +1102,11 @@ html.astrym-webapp .android-webapp-bar__logo {
 
   html.astrym-webapp .action-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  html.astrym-webapp .account-menu-panel {
+    max-width: 400px;
+    margin-inline: auto;
   }
 }
 

@@ -60,7 +60,7 @@ describe('NymTransportPanel', () => {
     expect(markup).not.toMatch(/Ready \(Mixnet\)/);
   });
 
-  it('groups technical diagnostics and advancedChildren inside a collapsible details disclosure', () => {
+  it('keeps only the 2-option privacy selector on the main card and moves Connect/Disconnect + diagnostics into the accordion', () => {
     const markup = renderToStaticMarkup(
       React.createElement(NymTransportPanel, {
         snapshot: {
@@ -71,6 +71,9 @@ describe('NymTransportPanel', () => {
           mode: 'direct',
           documentReady: false,
         },
+        onSetMode: () => undefined,
+        onConnect: () => undefined,
+        onDisconnect: () => undefined,
         onStellarHorizonProbe: () => undefined,
         advancedChildren: React.createElement('div', { 'data-testid': 'spp-slot' }, 'SPP'),
       }),
@@ -80,5 +83,13 @@ describe('NymTransportPanel', () => {
     expect(markup).toContain('Opciones avanzadas y diagnóstico');
     expect(markup).toContain('data-testid="nym-stellar-horizon-panel"');
     expect(markup).toContain('data-testid="spp-slot"');
+
+    const [mainCard, advancedSection] = markup.split('data-testid="nym-advanced-diagnostics"');
+    expect(mainCard).toContain('data-testid="nym-mode-direct"');
+    expect(mainCard).toContain('data-testid="nym-mode-nym"');
+    expect(mainCard).not.toContain('data-testid="nym-connect"');
+    expect(mainCard).not.toContain('data-testid="nym-disconnect"');
+    expect(advancedSection).toContain('data-testid="nym-connect"');
+    expect(advancedSection).toContain('data-testid="nym-disconnect"');
   });
 });
