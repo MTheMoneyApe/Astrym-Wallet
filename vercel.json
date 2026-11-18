@@ -46,7 +46,7 @@
       ]
     },
     {
-      "source": "/downloads/(.*)\\\\.zip",
+      "source": "/downloads/(.*)\\.zip",
       "headers": [
         {
           "key": "Content-Type",
@@ -63,7 +63,7 @@
       ]
     },
     {
-      "source": "/downloads/(.*)\\\\.json",
+      "source": "/downloads/(.*)\\.json",
       "headers": [
         {
           "key": "Content-Type",
