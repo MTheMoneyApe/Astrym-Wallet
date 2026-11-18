@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resetSppBroadcastGateForTests } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
+import {
+  resetSppBroadcastGateForTests,
+  setSppTestnetBroadcastAuthorized,
+} from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
 import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
+import * as sppSignGate from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 import {
   resetSppSignApprovalsForTests,
   sppSignApprovalCount,
@@ -154,19 +158,58 @@ describe('sppAccountHandlers IPC', () => {
       id: 'test-extension-id',
       url: 'chrome-extension://test-extension-id/popup.html',
     };
-    await expect(
-      createSppRegisterPublicKeysHandler({
-        resolveAccount: async () => 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6',
-      })({
-        acknowledgeBroadcast: true,
-        ...fields,
-      }, trusted as never),
-    ).rejects.toMatchObject({
-      name: 'UNAUTHORIZED',
-      code: 'BROADCAST_AWAITING_APPROVAL',
-      message: expect.stringContaining('held at the sign step'),
-    });
-    expect(queryMock).not.toHaveBeenCalled();
-    expect(sppSignApprovalCount()).toBe(0);
+    const bind = vi.spyOn(sppSignGate, 'bindSppRegistrationBeforeMint');
+    try {
+      await expect(
+        createSppRegisterPublicKeysHandler({
+          resolveAccount: async () => 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6',
+        })({
+          acknowledgeBroadcast: true,
+          ...fields,
+        }, trusted as never),
+      ).rejects.toMatchObject({
+        name: 'UNAUTHORIZED',
+        code: 'BROADCAST_AWAITING_APPROVAL',
+        message: 'Registro retenido: aún no hay firma Registration v1',
+      });
+      expect(bind).toHaveBeenCalledTimes(1);
+      expect(queryMock).not.toHaveBeenCalled();
+      expect(sppSignApprovalCount()).toBe(0);
+    } finally {
+      bind.mockRestore();
+    }
+  });
+
+  it('does not bind a Derivation v3 register when the broadcast gate is on', async () => {
+    resetSppBroadcastGateForTests();
+    resetSppSignApprovalsForTests();
+    setSppTestnetBroadcastAuthorized(true);
+    const bind = vi.spyOn(sppSignGate, 'bindSppRegistrationBeforeMint');
+    const domain = getNethermindPublicTestnetContractConfig().kdf_domain;
+    const trusted = {
+      id: 'test-extension-id',
+      url: 'chrome-extension://test-extension-id/popup.html',
+    };
+    try {
+      await expect(
+        createSppRegisterPublicKeysHandler({
+          resolveAccount: async () => 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6',
+        })({
+          acknowledgeBroadcast: true,
+          ...handlerDerivationFields(domain),
+        }, trusted as never),
+      ).rejects.toMatchObject({
+        name: 'UNAUTHORIZED',
+        code: 'BROADCAST_AWAITING_APPROVAL',
+        message: 'Registro retenido: aún no hay firma Registration v1',
+      });
+      expect(bind).not.toHaveBeenCalled();
+      expect(sppSignApprovalCount()).toBe(0);
+      expect(queryMock).not.toHaveBeenCalled();
+    } finally {
+      bind.mockRestore();
+      resetSppBroadcastGateForTests();
+      resetSppSignApprovalsForTests();
+    }
   });
 });

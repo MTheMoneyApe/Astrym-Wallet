@@ -101,8 +101,10 @@ function isSppDerivationV3Register(
     && payload.ownerSignatureHex.toLowerCase() === fields.ownerSignatureHex;
 }
 
-function heldAtSign(message: string): never {
-  throw Object.assign(new Error(message), {
+const HELD_REGISTRATION_NOTE = 'Registro retenido: aún no hay firma Registration v1';
+
+function heldAtSign(): never {
+  throw Object.assign(new Error(HELD_REGISTRATION_NOTE), {
     name: 'UNAUTHORIZED',
     code: 'BROADCAST_AWAITING_APPROVAL',
   });
@@ -132,13 +134,9 @@ function refuseSppDerivationV3RegisterAtSign(
       const message = cause instanceof Error ? cause.message : '';
       if (!message.includes('SPP_BROADCAST_AWAITING_APPROVAL')) throw cause;
     }
-    heldAtSign(
-      'SPP_BROADCAST_AWAITING_APPROVAL: Derivation v3 register request is held at the sign step. No approval was minted.',
-    );
+    heldAtSign();
   }
-  heldAtSign(
-    'SPP_BROADCAST_AWAITING_APPROVAL: Derivation v3 registration stays unsigned behind the sign gate. No approval was minted.',
-  );
+  heldAtSign();
 }
 
 export function createSppAccountSnapshotHandler() {
