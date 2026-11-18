@@ -6,10 +6,11 @@
  * - mode=nym: MixFetch path — strip AbortSignal (unsupported by mix-fetch@1.4.2),
  *   set unsafe-ignore-cors (v1 Go WASM), resolve logical→effective via
  *   {@link resolveHorizonUrlForNym}, never clearnet fallback.
- *   Caller method is preserved (Horizon GET stays GET; GET/HEAD send no body).
+ *   Methods are GET, HEAD, or POST. GET/HEAD with a body are refused.
  *   POST is used for Soroban JSON-RPC, not forced onto Horizon lookups.
  *   Effective hosts must already be on the Horizon allowlist or the Testnet
- *   Soroban RPC origin. Unknown hosts fail closed.
+ *   Soroban RPC origin. Mainnet Horizon and Ankr mainnet are refused.
+ *   Unknown hosts fail closed.
  *
  * Does not create MixFetch instances. Does not touch Solana or non-Stellar traffic.
  */
@@ -20,6 +21,8 @@ import {
   DEFAULT_STELLAR_NYM_HORIZON_CONFIG,
   normalizeHorizonBase,
   resolveHorizonUrlForNym,
+  STELLAR_LOGICAL_MAINNET_HORIZON_URL,
+  STELLAR_NYM_EFFECTIVE_MAINNET_HORIZON_DEFAULT,
   STELLAR_NYM_HORIZON_EFFECTIVE_ALLOWLIST,
   type HorizonUrlResolution,
   type StellarNymHorizonConfig,
@@ -65,6 +68,7 @@ export function rewriteSdfHorizonUrlForMixFetch(url: string): string {
 }
 
 const STELLAR_NYM_HEADER_ALLOWLIST = new Set(['accept', 'content-type']);
+const STELLAR_NYM_METHOD_ALLOWLIST = new Set(['GET', 'HEAD', 'POST']);
 
 /**
  * Same origin as `STELLAR_SOROBAN_TESTNET_RPC`. Not an additional host.
@@ -92,10 +96,20 @@ function isAllowlistedHorizonTarget(url: string): boolean {
     return false;
   }
   const pathOnly = normalizeHorizonBase(`${parsed.origin}${parsed.pathname}`);
+  if (isRefusedMainnetHorizonTarget(pathOnly)) return false;
   return STELLAR_NYM_HORIZON_EFFECTIVE_ALLOWLIST.some((base) => {
     const normalized = normalizeHorizonBase(base);
     return pathOnly === normalized || pathOnly.startsWith(`${normalized}/`);
   });
+}
+
+/** This wallet is Testnet-only. Mainnet Horizon and Ankr mainnet stay refused. */
+function isRefusedMainnetHorizonTarget(pathOnly: string): boolean {
+  const refused = [
+    normalizeHorizonBase(STELLAR_LOGICAL_MAINNET_HORIZON_URL),
+    normalizeHorizonBase(STELLAR_NYM_EFFECTIVE_MAINNET_HORIZON_DEFAULT),
+  ];
+  return refused.some((base) => pathOnly === base || pathOnly.startsWith(`${base}/`));
 }
 
 /** Exact Testnet Soroban RPC URL. Query, fragment, and credentials stay refused. */
@@ -149,12 +163,15 @@ function isSorobanJsonRpcBody(body: BodyInit | null | undefined): boolean {
 }
 
 /**
- * Horizon lookups keep the caller method (default GET).
+ * Horizon lookups keep GET/HEAD (default GET).
  * POST is selected for Soroban JSON-RPC, including when the caller omitted a method.
- * Any other explicit method is preserved.
+ * Any other method is refused.
  */
 function resolveStellarNymMethod(effectiveUrl: string, init: RequestInit | undefined): string {
   const caller = init?.method?.trim().toUpperCase() ?? '';
+  if (caller !== '' && !STELLAR_NYM_METHOD_ALLOWLIST.has(caller)) {
+    throw new Error(`Stellar Nym fetch refused method: ${caller}`);
+  }
   if (caller === 'GET' || caller === 'HEAD') return caller;
   if (
     (caller === '' || caller === 'POST') &&
@@ -185,30 +202,33 @@ export function createStellarTransportFetch(
 
     const config = deps.getNymHorizonConfig?.() ?? DEFAULT_STELLAR_NYM_HORIZON_CONFIG;
     const resolution = resolveHorizonUrlForNym(url, config);
-    deps.onResolved?.(resolution);
+    assertAllowlistedStellarNymTarget(url);
     assertAllowlistedStellarNymTarget(resolution.effectiveUrl);
+    deps.onResolved?.(resolution);
+    const effective = new URL(resolution.effectiveUrl);
 
     // Explicit nym: MixFetch only. Strip signal — AbortController unsupported in v1 mix-fetch.
-    const method = resolveStellarNymMethod(resolution.effectiveUrl, init);
+    const method = resolveStellarNymMethod(effective.href, init);
     const headers = allowlistedStellarHeaders(init?.headers);
+    if ((method === 'GET' || method === 'HEAD') && init?.body != null) {
+      throw new Error(`Stellar Nym fetch refused body on ${method}`);
+    }
     const nymInit: RequestInit & { mode?: string } = {
       method,
       redirect: 'error',
       mode: 'unsafe-ignore-cors',
       headers,
     };
-    if (init?.body != null && method !== 'GET' && method !== 'HEAD') {
-      nymInit.body = init.body;
-    }
+    if (init?.body != null) nymInit.body = init.body;
 
     try {
       return await Promise.race([
-        deps.fetchViaRouter(resolution.effectiveUrl, nymInit),
+        deps.fetchViaRouter(effective.href, nymInit),
         new Promise<Response>((_, reject) => {
           setTimeout(() => {
             const remap = resolution.rewritten
-              ? ` logical=${resolution.logicalUrl} effective=${resolution.effectiveUrl}`
-              : ` url=${resolution.effectiveUrl}`;
+              ? ` logical=${resolution.logicalUrl} effective=${effective.href}`
+              : ` url=${effective.href}`;
             reject(
               new Error(
                 `Stellar request via MixFetch timed out after ${nymTimeoutMs}ms` +

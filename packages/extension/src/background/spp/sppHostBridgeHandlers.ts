@@ -414,7 +414,7 @@ export async function handleSppHostNymFetchRequest(
     };
   }
 
-  const { rpcUrl, url, method, headers, body } = request.payload;
+  const { rpcUrl, url, headers, body } = request.payload;
   try {
     if (!isTrustedSorobanEndpoint(url) || !isTrustedSorobanEndpoint(rpcUrl)) {
       return {
@@ -442,12 +442,10 @@ export async function handleSppHostNymFetchRequest(
 
     const nymFetch = ctrl.getStellarFetch();
     const init: RequestInit = {
-      method,
+      method: 'POST',
       headers: headers ?? {},
     };
-    if (body !== undefined && method.toUpperCase() !== 'GET' && method.toUpperCase() !== 'HEAD') {
-      init.body = body;
-    }
+    if (body !== undefined) init.body = body;
     const response = await nymFetch(STELLAR_SOROBAN_TESTNET_RPC, init);
     const responseHeaders: Record<string, string> = {};
     response.headers.forEach((value, key) => {
