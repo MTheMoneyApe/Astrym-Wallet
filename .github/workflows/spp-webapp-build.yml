@@ -538,22 +538,54 @@ jobs:
           set -euo pipefail
           cd "$RUNNER_TEMP/astrym-vercel-release"
           python3 - "$SOURCE_COMMIT" astrym-vercel-products.json <<'PY'
-          import hashlib, json, sys
+          import hashlib, json, sys, tarfile
           from pathlib import Path
+
           commit, metadata_path = sys.argv[1], Path(sys.argv[2])
           metadata = json.loads(metadata_path.read_text())
           if metadata.get("sourceCommit") != commit:
-              raise SystemExit("Vercel bundle commit does not match workflow commit")
+              raise SystemExit("Vercel bundle does not match workflow commit")
           if metadata.get("archiveName") != "astrym-vercel-products.tar.gz":
               raise SystemExit("Unexpected Vercel bundle archive name")
           if not isinstance(metadata.get("sizeBytes"), int) or metadata["sizeBytes"] <= 0:
               raise SystemExit("Invalid Vercel bundle size")
           if not isinstance(metadata.get("sha256"), str) or len(metadata["sha256"]) != 64:
               raise SystemExit("Invalid Vercel bundle SHA-256")
-          archive = Path(metadata["archiveName"])
-          data = archive.read_bytes()
-          if len(data) != metadata["sizeBytes"] or hashlib.sha256(data).hexdigest() != metadata["sha256"]:
+
+          bundle = Path(metadata["archiveName"])
+          bundle_data = bundle.read_bytes()
+          if len(bundle_data) != metadata["sizeBytes"] or hashlib.sha256(bundle_data).hexdigest() != metadata["sha256"]:
               raise SystemExit("Vercel bundle archive integrity check failed")
+
+          extension_zip = Path("astrym-wallet-mv3.zip")
+          extension_data = extension_zip.read_bytes()
+          with tarfile.open(bundle, "r:gz") as archive:
+              members = [
+                  member for member in archive.getmembers()
+                  if member.name.lstrip("./") == "downloads/astrym-wallet-mv3.json"
+              ]
+              if len(members) != 1:
+                  raise SystemExit("Expected exactly one extension metadata file in the Vercel bundle")
+              stream = archive.extractfile(members[0])
+              if stream is None:
+                  raise SystemExit("Cannot read extension metadata from the Vercel bundle")
+              extension_metadata = json.load(stream)
+
+          if extension_metadata.get("sourceCommit") != commit:
+              raise SystemExit("MV3 package does not match workflow commit")
+          if extension_metadata.get("archive") != "/downloads/astrym-wallet-mv3.zip":
+              raise SystemExit("Unexpected MV3 download path")
+          if extension_metadata.get("sizeBytes") != len(extension_data):
+              raise SystemExit("MV3 ZIP size does not match its metadata")
+          if extension_metadata.get("sha256") != hashlib.sha256(extension_data).hexdigest():
+              raise SystemExit("MV3 ZIP SHA-256 does not match its metadata")
+          print(json.dumps({
+              "sourceCommit": commit,
+              "vercelBundleBytes": len(bundle_data),
+              "vercelBundleSha256": metadata["sha256"],
+              "extensionBytes": len(extension_data),
+              "extensionSha256": extension_metadata["sha256"],
+          }, indent=2))
           PY
           tag="astrym-products-$SOURCE_COMMIT"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -563,7 +595,7 @@ jobs:
             gh release create "$tag" astrym-vercel-products.tar.gz astrym-vercel-products.json \\
               --title "Astrym product bundle (${SOURCE_COMMIT:0:12})" \\
               --notes "Commit-pinned static WebApp, installable PWA and MV3 extension bundle for the canonical Vercel deployment. Generated only after the SPP runtime manifest and MV3 package validators pass." \\
-              --prerelease --latest=false --repo "$GITHUB_REPOSITORY"
+              --target "$SOURCE_COMMIT" --prerelease --latest=false --repo "$GITHUB_REPOSITORY"
           fi
           stable_tag="astrym-extension-downloads"
           if gh release view "$stable_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
