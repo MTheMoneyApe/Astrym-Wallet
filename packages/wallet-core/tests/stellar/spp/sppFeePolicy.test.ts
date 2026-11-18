@@ -16,6 +16,15 @@ describe('sppFeePolicy', () => {
     expect(SPP_PROPOSED_MAX_FEE_STROOPS.deposit).toBe(15_000_000);
     expect(SPP_PROPOSED_MAX_FEE_STROOPS.transfer).toBe(15_000_000);
     expect(SPP_PROPOSED_MAX_FEE_STROOPS.withdraw).toBe(15_000_000);
+    expect(SPP_PROPOSED_MAX_FEE_STROOPS.deposit).toBeLessThanOrEqual(
+      SPP_PREVIOUS_MAX_FEE_STROOPS.deposit,
+    );
+    expect(SPP_PROPOSED_MAX_FEE_STROOPS.transfer).toBeLessThanOrEqual(
+      SPP_PREVIOUS_MAX_FEE_STROOPS.transfer,
+    );
+    expect(SPP_PROPOSED_MAX_FEE_STROOPS.withdraw).toBeLessThanOrEqual(
+      SPP_PREVIOUS_MAX_FEE_STROOPS.withdraw,
+    );
     expect(maxFeeStroopsForOperation('transfer')).toBe('15000000');
   });
 

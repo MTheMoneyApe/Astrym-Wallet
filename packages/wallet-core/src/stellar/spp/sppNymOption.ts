@@ -371,25 +371,64 @@ export async function executeSppPrivatePayment(input: {
     );
   }
 
-  const pool = input.pool;
-  const preferInjected = input.preferInjectedTransport !== false;
-  let completed = false;
-  let reconcile = false;
+  const flags = { completed: false, reconcile: false };
+  try {
+    return await runSppProbedPoolPayment({
+      request,
+      rpcUrl: input.rpcUrl,
+      nymFetch: input.nymFetch,
+      pool: input.pool,
+      ...(input.preferInjectedTransport === undefined
+        ? {}
+        : { preferInjectedTransport: input.preferInjectedTransport }),
+    }, flags);
+  } finally {
+    release(flags.completed ? { completed: true } : flags.reconcile ? { reconcile: true } : undefined);
+  }
+}
 
+/**
+ * Probe and pool execution that sits below the economics gate.
+ * Exported so tests can exercise this path without opening that gate.
+ * `flags` is the same completion record `executeSppPrivatePayment` releases.
+ */
+export async function runSppProbedPoolPayment(
+  input: {
+    request: {
+      operation: SppPrivateOperation;
+      amount: bigint;
+      recipient: string | null;
+    };
+    rpcUrl: string;
+    nymFetch: SppRpcFetch;
+    pool: SppPrivatePool;
+    preferInjectedTransport?: boolean;
+  },
+  flags: { completed: boolean; reconcile: boolean } = { completed: false, reconcile: false },
+): Promise<{
+  operation: SppPrivateOperation;
+  txHash: string | null;
+  txHashes: readonly string[];
+  rpcRoutedViaNym: true;
+  confirmation: 'confirmed' | 'unknown';
+}> {
+  const pool = input.pool;
+  const request = input.request;
+  const preferInjected = input.preferInjectedTransport !== false;
   const run = async () => {
     await probeSorobanRpc(input.rpcUrl, input.nymFetch);
     try {
       const result = await runPool(pool, request);
       const hashes = reportedPoolHashes(result);
       if (hashes.length !== 1) {
-        reconcile = true;
+        flags.reconcile = true;
         throw new SppPrivatePaymentError(
           'SUBMISSION_UNKNOWN',
           `El SDK devolvió ${hashes.length} hash(es). No se confirma solo el primero y no hay reintento. hashes=${hashes.join(',')}`,
           { txHashes: hashes },
         );
       }
-      completed = true;
+      flags.completed = true;
       return {
         operation: request.operation,
         txHash: hashes[0] ?? null,
@@ -399,12 +438,12 @@ export async function executeSppPrivatePayment(input: {
       };
     } catch (cause) {
       if (cause instanceof SppPrivatePaymentError) {
-        if (cause.txHashes.length > 0) reconcile = true;
+        if (cause.txHashes.length > 0) flags.reconcile = true;
         throw cause;
       }
       const message = cause instanceof Error ? cause.message : 'El pago privado SPP falló';
       const recovered = hashesCarriedBy(cause);
-      if (recovered.length > 0) reconcile = true;
+      if (recovered.length > 0) flags.reconcile = true;
       throw new SppPrivatePaymentError(
         'EXECUTION_FAILED',
         recovered.length > 0 ? `${message} completedHashes=${recovered.join(',')}` : message,
@@ -413,14 +452,10 @@ export async function executeSppPrivatePayment(input: {
     }
   };
 
-  try {
-    if (preferInjected) {
-      return await run();
-    }
-    return await withSppRpcThroughNym(input.rpcUrl, input.nymFetch, run);
-  } finally {
-    release(completed ? { completed: true } : reconcile ? { reconcile: true } : undefined);
+  if (preferInjected) {
+    return await run();
   }
+  return await withSppRpcThroughNym(input.rpcUrl, input.nymFetch, run);
 }
 
 async function runPool(

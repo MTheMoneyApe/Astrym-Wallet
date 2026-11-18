@@ -203,7 +203,8 @@ function beginSequenceTracking(
   return { ok: true, begun: { address: signingAccount, fingerprint } };
 }
 
-function confirmOrAbortSequence(
+/** Exported for tests. Production callers are unchanged. */
+export function confirmOrAbortSequence(
   begun: SequenceInFlight,
   txHash: string | null,
   nextFreshSequence: string | undefined,

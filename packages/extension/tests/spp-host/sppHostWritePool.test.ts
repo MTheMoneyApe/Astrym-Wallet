@@ -3,10 +3,14 @@ import {
   resetSppBroadcastGateForTests,
   setSppTestnetBroadcastAuthorized,
 } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
-import { SppMultiAccountSequenceTracker } from '@solanym/wallet-core/src/stellar/spp/sppAccountSequenceTracker.js';
+import {
+  SppMultiAccountSequenceTracker,
+  beginSppAccountOperation,
+} from '@solanym/wallet-core/src/stellar/spp/sppAccountSequenceTracker.js';
 import { SPP_HOST_BRIDGE_CHANNEL } from '../../src/shared/sppHostBridge.js';
 import {
   clearSppHostWritePool,
+  confirmOrAbortSequence,
   executeSppHostWritePool,
   getSppHostSequenceTracker,
   getSppHostWritePoolStatus,
@@ -220,20 +224,20 @@ describe('sppHostWritePool', () => {
     expect(after?.confirmedTxHashes).toEqual([]);
   });
 
-  it('clears in-flight without advancing when nextFreshSequence is missing on success', async () => {
-    registerOkPool();
-    const tracker = getSppHostSequenceTracker();
-    tracker.seed(SENDER, '100');
+  it('clears in-flight without advancing when nextFreshSequence is missing on success', () => {
+    const tracker = new SppMultiAccountSequenceTracker();
+    const seeded = tracker.seed(SENDER, '100');
+    const begun = beginSppAccountOperation(seeded, 'fp-no-next');
+    expect(begun.ok).toBe(true);
+    if (!begun.ok) return;
+    tracker.replace(begun.state);
+    setSppHostSequenceTracker(tracker);
 
-    await expect(
-      executeSppHostWritePool(
-        request({
-          signingAccount: SENDER,
-          freshSequence: '100',
-          operationFingerprint: 'fp-no-next',
-        }),
-      ),
-    ).resolves.toMatchObject({ ok: false, code: 'INVALID_REQUEST' });
+    confirmOrAbortSequence(
+      { address: SENDER, fingerprint: 'fp-no-next' },
+      TX_DEP,
+      undefined,
+    );
 
     const after = tracker.get(SENDER);
     expect(after?.expectedFreshSequence).toBe('100');

@@ -18,7 +18,7 @@ const DIRECTORY_PREFIX = `${DIRECTORY}-`;
 const validDirectory = (value: unknown): value is string =>
   value === DIRECTORY || (typeof value === 'string' && /^\.opfs-sahpool-encrypted-[0-9a-f-]{36}$/.test(value));
 const WRAP_INFO = 'spp.browser.storage-key-wrap.v1';
-const SPP_STORAGE_UNLOCK_DIALOG_ALARM = 'spp-storage-unlock-dialog';
+export const SPP_STORAGE_UNLOCK_DIALOG_ALARM = 'spp-storage-unlock-dialog';
 const encoder = new TextEncoder();
 
 /** WebCrypto BufferSource requires an ArrayBuffer-backed view under strict TS. */
@@ -106,7 +106,7 @@ async function obtainApproval(input: {
   return token;
 }
 
-async function confirmStorageUnlock(details: {
+export async function confirmStorageUnlock(details: {
   account: string;
   origin: string;
   message: string;

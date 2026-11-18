@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Keypair } from '@stellar/stellar-sdk';
 import { hashSep53Message } from '@solanym/wallet-core/src/stellar/spp/sep53.js';
 import { SPP_STORAGE_DATABASE_ID, SPP_STORAGE_UNLOCK_RECORD_KEY } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
-import { openSppEncryptedStorage } from '../../src/spp-host/sppStorageKeyProvider.js';
+import {
+  SPP_STORAGE_UNLOCK_DIALOG_ALARM,
+  confirmStorageUnlock,
+  openSppEncryptedStorage,
+} from '../../src/spp-host/sppStorageKeyProvider.js';
 
 const SEED = new Uint8Array(32).fill(23);
 const KEYPAIR = Keypair.fromRawEd25519Seed(Buffer.from(SEED));
@@ -225,5 +229,140 @@ describe('openSppEncryptedStorage', () => {
     })).rejects.toThrow(/Switch to the Stellar account/);
     expect(f.storageOpen).not.toHaveBeenCalled();
     expect(f.signer.signStorageUnlockMessage).not.toHaveBeenCalled();
+  });
+});
+
+type DialogListener = (event: { preventDefault(): void }) => void;
+
+class FakeNode {
+  textContent = '';
+  style: { cssText: string; whiteSpace: string } = { cssText: '', whiteSpace: '' };
+  id = '';
+  type = '';
+  hidden = false;
+  open = false;
+  isConnected = false;
+  children: FakeNode[] = [];
+  private readonly listeners = new Map<string, DialogListener[]>();
+
+  setAttribute(): void {}
+
+  append(...nodes: FakeNode[]): void {
+    this.children.push(...nodes);
+  }
+
+  addEventListener(type: string, listener: DialogListener): void {
+    const list = this.listeners.get(type) ?? [];
+    list.push(listener);
+    this.listeners.set(type, list);
+  }
+
+  showModal(): void {
+    this.open = true;
+    this.isConnected = true;
+  }
+
+  close(): void {
+    this.open = false;
+  }
+
+  remove(): void {
+    this.isConnected = false;
+  }
+
+  click(): void {
+    for (const listener of this.listeners.get('click') ?? []) {
+      listener({ preventDefault() {} });
+    }
+  }
+
+  findByText(text: string): FakeNode | undefined {
+    if (this.textContent === text) return this;
+    for (const child of this.children) {
+      const found = child.findByText(text);
+      if (found) return found;
+    }
+    return undefined;
+  }
+}
+
+function installDialogDom(): FakeNode {
+  const body = new FakeNode();
+  vi.stubGlobal('document', {
+    body,
+    createElement: () => new FakeNode(),
+  });
+  vi.stubGlobal('window', { focus: vi.fn() });
+  return body;
+}
+
+function installAlarms(create: () => unknown): {
+  listeners: Array<(alarm: { name: string }) => void>;
+  clear: ReturnType<typeof vi.fn>;
+} {
+  const listeners: Array<(alarm: { name: string }) => void> = [];
+  const clear = vi.fn(async () => true);
+  vi.stubGlobal('chrome', {
+    alarms: {
+      create,
+      clear,
+      onAlarm: {
+        addListener(listener: (alarm: { name: string }) => void) {
+          listeners.push(listener);
+        },
+        removeListener(listener: (alarm: { name: string }) => void) {
+          const index = listeners.indexOf(listener);
+          if (index >= 0) listeners.splice(index, 1);
+        },
+      },
+    },
+  });
+  return { listeners, clear };
+}
+
+const UNLOCK_DIALOG = {
+  account: ACCOUNT,
+  origin: ORIGIN,
+  message: 'unlock',
+  fresh: true,
+};
+
+describe('confirmStorageUnlock alarm path', () => {
+  it('returns false when the alarms API is missing', async () => {
+    installDialogDom();
+    vi.stubGlobal('chrome', {});
+    await expect(confirmStorageUnlock(UNLOCK_DIALOG)).resolves.toBe(false);
+  });
+
+  it('returns false when alarm create throws or rejects', async () => {
+    installDialogDom();
+    installAlarms(() => {
+      throw new Error('create failed');
+    });
+    await expect(confirmStorageUnlock(UNLOCK_DIALOG)).resolves.toBe(false);
+
+    installDialogDom();
+    installAlarms(() => Promise.reject(new Error('create rejected')));
+    await expect(confirmStorageUnlock(UNLOCK_DIALOG)).resolves.toBe(false);
+  });
+
+  it('returns false when the unlock alarm fires', async () => {
+    installDialogDom();
+    const { listeners, clear } = installAlarms(() => Promise.resolve());
+    const pending = confirmStorageUnlock(UNLOCK_DIALOG);
+    expect(listeners).toHaveLength(1);
+    listeners[0]?.({ name: SPP_STORAGE_UNLOCK_DIALOG_ALARM });
+    await expect(pending).resolves.toBe(false);
+    expect(clear).toHaveBeenCalledWith(SPP_STORAGE_UNLOCK_DIALOG_ALARM);
+    expect(listeners).toHaveLength(0);
+  });
+
+  it('returns false when the dialog is cancelled', async () => {
+    const body = installDialogDom();
+    const { clear } = installAlarms(() => Promise.resolve());
+    const pending = confirmStorageUnlock(UNLOCK_DIALOG);
+    body.findByText('Cancelar')?.click();
+    await expect(pending).resolves.toBe(false);
+    expect(clear).toHaveBeenCalledWith(SPP_STORAGE_UNLOCK_DIALOG_ALARM);
   });
 });
