@@ -396,6 +396,11 @@ args = sys.argv[1:]
 if not any(arg.endswith(".wasm") for arg in args):
     raise SystemExit(subprocess.run([real, *args]).returncode)
 
+# wasm-bindgen runs after rustc and can retain DWARF from prebuilt Rust sysroot
+# crates; strip those sections from shipped modules before the strict path scan.
+if "--strip-dwarf" not in args:
+    args.insert(0, "--strip-dwarf")
+
 def inspect(raw):
     path = Path(raw)
     if not path.is_file():
