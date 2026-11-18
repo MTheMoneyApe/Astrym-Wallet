@@ -95,10 +95,15 @@ export function compareFingerprints(baseline, candidate) {
   for (const [key, entry] of baseTests) if (entry.status === 'failed') bump(baseFailed, key);
   for (const [key, entry] of candTests) if (entry.status === 'failed') bump(candFailed, key);
   const addedFailures = [];
+  const preExistingFailures = [];
   for (const [key, count] of candFailed) {
-    const extra = count - (baseFailed.get(key) ?? 0);
+    const previous = baseFailed.get(key) ?? 0;
+    const [pkg, file, fullName] = key.split('\0');
+    if (previous > 0) {
+      preExistingFailures.push({ package: pkg, file, fullName, count: Math.min(previous, count), classification: 'pre-existing' });
+    }
+    const extra = count - previous;
     if (extra > 0) {
-      const [pkg, file, fullName] = key.split('\0');
       addedFailures.push({ package: pkg, file, fullName, count: extra });
     }
   }
@@ -157,6 +162,7 @@ export function compareFingerprints(baseline, candidate) {
     candidateFailingFiles: candFiles.size,
     addedErrors,
     addedFailures,
+    preExistingFailures,
     addedFailingFiles,
     addedFileLoads,
     deletedTests,

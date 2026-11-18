@@ -34,11 +34,11 @@ fi
 if [ -f "$BASE_DIR/.github/ci/t9-delta.mjs" ] && [ -f "$BASE_DIR/.github/ci/t9-check.sh" ] && [ -f "$BASE_DIR/.github/ci/t9-fingerprint.mjs" ]; then
   SCRIPT_DIR="$BASE_DIR/.github/ci"
   SCRIPT_SOURCE="base:${BASE}"
-elif [ "${T9_SCRIPT_FALLBACK:-}" = "workflow" ] && [ -f "$ROOT/.github/ci/t9-delta.mjs" ] && [ -f "$ROOT/.github/ci/t9-check.sh" ] && [ -f "$ROOT/.github/ci/t9-fingerprint.mjs" ]; then
-  # The base commit does not contain this CI yet. Record that and use the
-  # workflow checkout so the two trees are still installed and compared.
+elif [ -f "$ROOT/.github/ci/t9-delta.mjs" ] && [ -f "$ROOT/.github/ci/t9-check.sh" ] && [ -f "$ROOT/.github/ci/t9-fingerprint.mjs" ]; then
+  # Base has no .github/ci yet. Use the workflow checkout (this PR head).
+  echo "bootstrap: base lacks comparator"
   SCRIPT_DIR="$ROOT/.github/ci"
-  SCRIPT_SOURCE="workflow:$(git -C "$ROOT" rev-parse HEAD);base-scripts-missing"
+  SCRIPT_SOURCE="bootstrap: base lacks comparator"
 else
   echo "no comparator scripts in the base checkout or the workflow checkout" >&2
   printf '%s\n' '{"ok":false,"reason":"scripts-missing"}' >"$LOG/delta.json"

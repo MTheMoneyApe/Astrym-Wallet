@@ -32,7 +32,14 @@ function check(name, result, ok) {
   }
 }
 
-check('same', compareFingerprints(base, tree(baseErr, baseFail)), true);
+const sameResult = compareFingerprints(base, tree(baseErr, baseFail));
+check('same', sameResult, true);
+if (!sameResult.preExistingFailures?.some((entry) => entry.fullName === 'mainnet' && entry.classification === 'pre-existing')) {
+  process.stderr.write('pre-existing mainnet not classified\n');
+  process.exitCode = 1;
+} else {
+  process.stdout.write('pre-existing=PASS\n');
+}
 check('added-error', compareFingerprints(base, tree([...baseErr, { package: 'extension', file: 'src/b.ts', code: 'TS2304', message: 'missing' }], baseFail)), false);
 check('added-failure', compareFingerprints(base, tree(baseErr, [...baseFail, { package: 'extension', file: 'tests/b.test.ts', fullName: 'new', status: 'failed', reason: 'no' }])), false);
 check('resolved-failure', compareFingerprints(base, tree(baseErr, [{ ...baseFail[0], status: 'passed', reason: '' }, baseFail[1]], { exits: { ...exits, 'test-full-extension': 0 } })), true);
