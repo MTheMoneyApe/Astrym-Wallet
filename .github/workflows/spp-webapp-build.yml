@@ -470,7 +470,8 @@ jobs:
         run: |
           set -euo pipefail
           bundle="$RUNNER_TEMP/astrym-vercel-products.tar.gz"
-          tar -czf "$bundle" -C packages/extension/dist-webapp .
+          cp packages/extension/dist-webapp/downloads/astrym-wallet-mv3.zip "$RUNNER_TEMP/astrym-wallet-mv3.zip"
+          tar -czf "$bundle" --exclude='./downloads/astrym-wallet-mv3.zip' -C packages/extension/dist-webapp .
           python3 - "$bundle" "$RUNNER_TEMP/astrym-vercel-products.json" "$SOURCE_COMMIT" <<'PY'
           import hashlib, json, sys
           from pathlib import Path
@@ -494,6 +495,7 @@ jobs:
           path: |
             ${{ runner.temp }}/astrym-vercel-products.tar.gz
             ${{ runner.temp }}/astrym-vercel-products.json
+            ${{ runner.temp }}/astrym-wallet-mv3.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -563,4 +565,14 @@ jobs:
               --notes "Commit-pinned static WebApp, installable PWA and MV3 extension bundle for the canonical Vercel deployment. Generated only after the SPP runtime manifest and MV3 package validators pass." \\
               --prerelease --latest=false --repo "$GITHUB_REPOSITORY"
           fi
+          stable_tag="astrym-extension-downloads"
+          if gh release view "$stable_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$stable_tag" astrym-wallet-mv3.zip --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$stable_tag" astrym-wallet-mv3.zip \\
+              --title "Astrym Wallet MV3 downloads" \\
+              --notes "Rolling download asset for the latest validated Astrym Chrome/Chromium MV3 extension. The canonical URL is proxied through https://astrym-wallet.vercel.app/downloads/astrym-wallet-mv3.zip. Integrity information is published in /downloads/astrym-wallet-mv3.json." \\
+              --prerelease --latest=false --repo "$GITHUB_REPOSITORY"
+          fi
+          gh release view "$stable_tag" --repo "$GITHUB_REPOSITORY" --json tagName,isPrerelease,assets
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName,isPrerelease,assets
