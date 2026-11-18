@@ -84,5 +84,11 @@
         }
       ]
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/downloads/astrym-wallet-mv3.zip",
+      "destination": "https://github.com/MTheMoneyApe/Astrym-Wallet/releases/download/astrym-extension-downloads/astrym-wallet-mv3.zip"
+    }
   ]
 }
