@@ -29,6 +29,10 @@ command -v git >/dev/null 2>&1 || die "git is required"
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
 
+# Retain caller-provided homes (or the image /rust fallback) as explicit
+# remap inputs before assigning the isolated build homes used by this script.
+CARGO_HOME_REMAP="${CARGO_HOME:-/rust}"
+RUSTUP_HOME_REMAP="${RUSTUP_HOME:-/rust}"
 export CARGO_HOME="${CARGO_HOME:-/tmp/spp-path-a/cargo}"
 export RUSTUP_HOME="${RUSTUP_HOME:-/tmp/spp-path-a/rustup}"
 # The pinned rustup 1.97.1 proxy must win over any image toolchain.
@@ -246,6 +250,7 @@ export CARGO_TARGET_DIR
 FLAG_FILE="$BUILD_ROOT/rust-flags.txt"
 python3 - "$SRC/.cargo/config.toml" "$FLAG_FILE" \
   "src=$SRC" "cargo=$CARGO_HOME" "rustup=$RUSTUP_HOME" \
+  "cargo-remap=$CARGO_HOME_REMAP" "rustup-remap=$RUSTUP_HOME_REMAP" \
   "build=$BUILD_ROOT" "target=$CARGO_TARGET_DIR" "home=$HOME" \
   "circuits=$SRC/circuits" <<'PY'
 import os, sys
@@ -270,12 +275,17 @@ tokens = {
     "src": "/spp-src",
     "cargo": "/cargo",
     "rustup": "/rustup",
+    "cargo-remap": "/cargo",
+    "rustup-remap": "/rustup",
     "build": "/spp-build",
     "target": "/spp-target",
     "home": "/spp-home",
     "circuits": "/spp-circuits",
 }
-pairs = []
+# Always rewrite the known Vercel image prefix explicitly. This is also the
+# deterministic destination when CARGO_HOME and RUSTUP_HOME both resolve to
+# /rust; longer concrete subpaths below still take precedence.
+pairs = [("/rust", "/cargo")]
 for item in sys.argv[3:]:
     key, path = item.split("=", 1)
     path = os.path.abspath(path)
