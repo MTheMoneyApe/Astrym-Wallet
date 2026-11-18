@@ -65,6 +65,7 @@ export function rewriteSdfHorizonUrlForMixFetch(url: string): string {
 }
 
 const STELLAR_NYM_HEADER_ALLOWLIST = new Set(['accept', 'content-type']);
+const STELLAR_NYM_METHOD_ALLOWLIST = new Set(['GET', 'HEAD', 'POST']);
 
 /**
  * Same origin as `STELLAR_SOROBAN_TESTNET_RPC`. Not an additional host.
@@ -149,12 +150,15 @@ function isSorobanJsonRpcBody(body: BodyInit | null | undefined): boolean {
 }
 
 /**
- * Horizon lookups keep the caller method (default GET).
+ * Horizon lookups keep GET/HEAD (default GET).
  * POST is selected for Soroban JSON-RPC, including when the caller omitted a method.
- * Any other explicit method is preserved.
+ * Any other method is refused.
  */
 function resolveStellarNymMethod(effectiveUrl: string, init: RequestInit | undefined): string {
   const caller = init?.method?.trim().toUpperCase() ?? '';
+  if (caller !== '' && !STELLAR_NYM_METHOD_ALLOWLIST.has(caller)) {
+    throw new Error(`Stellar Nym fetch refused method: ${caller}`);
+  }
   if (caller === 'GET' || caller === 'HEAD') return caller;
   if (
     (caller === '' || caller === 'POST') &&
