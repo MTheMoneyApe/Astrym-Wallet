@@ -305,7 +305,7 @@ for item in sys.argv[3:]:
 pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
 remaps = [f"--remap-path-prefix={src}={dst}" for src, dst in pairs]
 prefix_maps = [f"-ffile-prefix-map={src}={dst}" for src, dst in pairs]
-flags = upstream + ["-C", "strip=debuginfo"] + remaps
+flags = upstream + remaps
 open(flag_file, "w", encoding="utf-8").write(
     "RUST\n" + "\n".join(flags) + "\nCFLAGS\n" + "\n".join(prefix_maps) + "\n"
 )
@@ -401,11 +401,9 @@ args = sys.argv[1:]
 if not any(arg.endswith(".wasm") for arg in args):
     raise SystemExit(subprocess.run([real, *args]).returncode)
 
-# wasm-bindgen runs after rustc and can retain DWARF from prebuilt Rust sysroot
-# crates; strip those sections from shipped modules before the strict path scan.
-# --strip-debug also removes the custom name section used for source paths.
-if "--strip-debug" not in args:
-    args.insert(0, "--strip-debug")
+# Preserve the upstream wasm-opt transformation exactly. The subsequent
+# equal-length sysroot path normalization keeps the byte layout intact, and
+# the strict host-path scanner rejects every unrecognized embedded path.
 
 def inspect(raw):
     path = Path(raw)
