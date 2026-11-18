@@ -295,15 +295,32 @@ pairs = [
     ("/rustc", "/spp-rustc"),
     ("/rust", "/cargo"),
 ]
+home_remap_paths = {}
 for item in sys.argv[3:]:
     key, path = item.split("=", 1)
     path = os.path.abspath(path)
     real = os.path.realpath(path)
+    if key in ("cargo-remap", "rustup-remap"):
+        home_remap_paths[key] = (path, real)
     for candidate in (path, real):
         if candidate and all(candidate != old for old, _ in pairs):
             pairs.append((candidate, tokens[key]))
 pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
 remaps = [f"--remap-path-prefix={src}={dst}" for src, dst in pairs]
+
+# Keep the explicit image-home fallback remap and both caller-provided toolchain
+# homes in the Rust compiler flags. One shared /rust prefix intentionally maps
+# to /cargo when CARGO_HOME and RUSTUP_HOME both use the image default.
+required_remap = "--remap-path-prefix=/rust=/cargo"
+if required_remap not in remaps:
+    raise SystemExit(f"required Rust path remap is missing: {required_remap}")
+for key in ("cargo-remap", "rustup-remap"):
+    candidates = set(home_remap_paths.get(key, ()))
+    if not candidates or not any(
+        any(flag.startswith(f"--remap-path-prefix={candidate}=") for candidate in candidates)
+        for flag in remaps
+    ):
+        raise SystemExit(f"{key} path is missing from RUSTFLAGS remaps")
 prefix_maps = [f"-ffile-prefix-map={src}={dst}" for src, dst in pairs]
 flags = upstream + remaps
 open(flag_file, "w", encoding="utf-8").write(
