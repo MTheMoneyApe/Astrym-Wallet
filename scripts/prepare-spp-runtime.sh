@@ -721,6 +721,42 @@ else
   SPP_BUILD_STATUS=$?
 fi
 capture_spp_build_evidence "$SPP_BUILD_STATUS"
+
+# Emit bounded reproducibility evidence into the CI log. The files are created
+# inside Vercel's isolated build workspace, so without this summary their byte
+# hashes and cc-rs flags would disappear when the failed deployment is cleaned.
+for evidence in toolchain.json raw-wasm.json wasm-bindgen.jsonl wasm-opt.jsonl; do
+  if [ -f "$DIAGNOSTIC_DIR/$evidence" ]; then
+    log "DIAGNOSTIC $evidence"
+    sed -n '1,160p' "$DIAGNOSTIC_DIR/$evidence"
+  fi
+done
+if [ -f "$DIAGNOSTIC_DIR/sqlite-build-report.json" ]; then
+  python3 - "$DIAGNOSTIC_DIR/sqlite-build-report.json" <<'PY'
+import json, re, sys
+from pathlib import Path
+report = json.loads(Path(sys.argv[1]).read_text())
+for directory in report.get("directories", []):
+    print("DIAGNOSTIC sqlite-build-dir", directory.get("directory"))
+    for archive in report.get("archives", []):
+        if str(archive.get("path", "")).startswith(str(directory.get("directory", ""))):
+            print("DIAGNOSTIC sqlite-archive", json.dumps(archive, sort_keys=True))
+    for key in ("output", "stderr", "root-output"):
+        raw = directory.get(key, "")
+        if not raw:
+            continue
+        lines = raw.splitlines()
+        selected = [
+            line for line in lines
+            if re.search(r"clang|cc-rs|CFLAGS|CXXFLAGS|wasm32|sqlite|compiler|target|warning:|error:|command| -o | -c ", line, re.I)
+        ]
+        for line in selected[:120]:
+            print(f"DIAGNOSTIC sqlite-{key}: {line[:1000]}")
+        if not selected:
+            print(f"DIAGNOSTIC sqlite-{key}: <no compiler/flag lines; {len(lines)} total lines>")
+print("DIAGNOSTIC sqlite-build-status", report.get("buildStatus"))
+PY
+fi
 if [ "$SPP_BUILD_STATUS" -ne 0 ]; then
   die "upstream SDK build failed with status $SPP_BUILD_STATUS; diagnostics preserved at $DIAGNOSTIC_DIR"
 fi
