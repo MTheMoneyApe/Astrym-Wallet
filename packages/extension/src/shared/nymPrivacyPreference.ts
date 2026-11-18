@@ -7,8 +7,10 @@
  * page reload restores it. IndexedDB remains the session CryptoKey store and is
  * not a second copy of this choice.
  *
- * Only the strings `'direct'` and `'nym'` are valid. Anything else is corrupt
- * and must fail closed (no silent clearnet). The SPP broadcast gate is
+ * Only the strings `'direct'` and `'nym'` are valid. When no preference has been
+ * saved yet (`kind: 'unset'`), the initial default transport mode is
+ * {@link DEFAULT_NYM_PRIVACY_MODE} (`'direct'`). Any stored non-valid value is
+ * corrupt and must fail closed (no silent clearnet). The SPP broadcast gate is
  * process-local and is intentionally not stored here.
  *
  * A failed `setMode('nym')` does not update this record. The running controller
@@ -21,6 +23,9 @@
 export const NYM_PRIVACY_PREFERENCE_STORAGE_KEY = 'astrym.nym.privacyMode.v1';
 
 export type NymPrivacyChoice = 'direct' | 'nym';
+
+/** Default initial transport mode when no prior preference exists in storage. */
+export const DEFAULT_NYM_PRIVACY_MODE: NymPrivacyChoice = 'direct';
 
 export type NymPrivacyPreferenceStore = {
   get: (keys?: string | string[] | null) => Promise<Record<string, unknown>>;

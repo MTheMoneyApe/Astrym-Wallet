@@ -133,7 +133,7 @@ describe('Nym privacy persistence', () => {
     expect(dashboardSrc).not.toMatch(/mode:\s*res\.transport/);
   });
 
-  it('blocks wallet egress while the choice is loading and when nothing was stored', async () => {
+  it('blocks wallet egress while the choice is loading and defaults to direct when nothing was stored', async () => {
     const gated = gatedStore();
     const ctrl = controllerFor(gated.store);
     expect(ctrl.mode).toBe('nym');
@@ -148,21 +148,21 @@ describe('Nym privacy persistence', () => {
     expect(clearnet).not.toHaveBeenCalled();
 
     gated.release();
-    await expect(pending).rejects.toMatchObject({ code: 'NOT_CONNECTED' });
-    expect(clearnet).not.toHaveBeenCalled();
-    expect(ctrl.mode).not.toBe('direct');
+    expect((await pending).status).toBe(200);
+    expect(clearnet).toHaveBeenCalledTimes(1);
+    expect(ctrl.mode).toBe('direct');
     expect(ctrl.getSnapshot().privacyPreference).toBeNull();
-    expect(ctrl.getSnapshot().diagnosticCode).toBe('PRIVACY_CHOICE_REQUIRED');
-    expect(ctrl.getSnapshot().egressBlocked).toBe(true);
+    expect(ctrl.getSnapshot().preferenceHydrated).toBe(true);
+    expect(ctrl.getSnapshot().diagnosticCode).toBe('OK');
+    expect(ctrl.getSnapshot().egressBlocked).toBe(false);
 
     const reloaded = controllerFor(gated.store);
     await reloaded.whenPrivacyReady();
-    expect(reloaded.getSnapshot().egressBlocked).toBe(true);
+    expect(reloaded.mode).toBe('direct');
+    expect(reloaded.getSnapshot().egressBlocked).toBe(false);
     expect(reloaded.getSnapshot().privacyPreference).toBeNull();
-    await expect(reloaded.getStellarFetch()(HORIZON)).rejects.toMatchObject({
-      code: 'NOT_CONNECTED',
-    });
-    expect(clearnet).not.toHaveBeenCalled();
+    expect((await reloaded.getStellarFetch()(HORIZON)).status).toBe(200);
+    expect(clearnet).toHaveBeenCalledTimes(2);
     expect(isSppTestnetBroadcastAuthorized()).toBe(false);
   });
 
@@ -316,7 +316,7 @@ describe('Nym privacy persistence', () => {
     expect(isSppTestnetBroadcastAuthorized()).toBe(false);
   });
 
-  it('does not send Direct diagnostics while Nym, unset, pending, or corrupt', async () => {
+  it('does not send Direct diagnostics while Nym, pending, corrupt, or unreadable (and defaults to Direct when unset)', async () => {
     const clearnet = vi.fn(async () => new Response('nope', { status: 200 }));
     vi.stubGlobal('fetch', clearnet);
 
@@ -334,12 +334,7 @@ describe('Nym privacy persistence', () => {
     expect(nymHorizon.transportFetchInvoked).toBe(false);
     expect(nym.mode).toBe('nym');
     expect(nym.getSnapshot().privacyPreference).toBe('nym');
-
-    const unset = controllerFor(memoryStore());
-    await unset.whenPrivacyReady();
-    const unsetProbe = await unset.fetchPublicData({ transport: 'direct' });
-    expect(unsetProbe.transportFetchInvoked).toBe(false);
-    expect(unset.getSnapshot().privacyPreference).toBeNull();
+    expect(clearnet).not.toHaveBeenCalled();
 
     const corrupt = controllerFor(
       memoryStore({ [NYM_PRIVACY_PREFERENCE_STORAGE_KEY]: 'clearnet' }),
@@ -372,6 +367,13 @@ describe('Nym privacy persistence', () => {
     expect(pendingResult.transportFetchInvoked).toBe(false);
     expect(clearnet).not.toHaveBeenCalled();
     expect(pending.mode).toBe('nym');
+
+    const unset = controllerFor(memoryStore());
+    await unset.whenPrivacyReady();
+    expect(unset.mode).toBe('direct');
+    expect(unset.getSnapshot().privacyPreference).toBeNull();
+    const unsetProbe = await unset.fetchPublicData({ transport: 'direct' });
+    expect(unsetProbe.transportFetchInvoked).toBe(true);
     expect(isSppTestnetBroadcastAuthorized()).toBe(false);
   });
 

@@ -3,11 +3,12 @@
  * FailClosedTransportRouter.
  *
  * The privacy choice lives in chrome.storage.local (webapp shim: localStorage).
- * Until that read finishes, wallet HTTP does not use clearnet. A missing,
- * corrupt, or unreadable choice stays blocked. Direct is armed only when the
- * stored value is the explicit choice `'direct'`. Nym without MixFetch stays
- * blocked. Disconnect does not select Direct. The SPP broadcast gate is not
- * persisted.
+ * Until that read finishes, wallet HTTP does not use clearnet. When no prior
+ * preference exists in storage, the initial default transport mode is
+ * {@link DEFAULT_NYM_PRIVACY_MODE} (`'direct'`). A corrupt or unreadable choice
+ * stays blocked (fail-closed). Explicit `'nym'` without MixFetch stays blocked
+ * and never falls back to clearnet. Disconnect does not select Direct. The SPP
+ * broadcast gate is not persisted.
  */
 
 import type { NymMixFetchBridge } from '@solanym/wallet-core/src/nym/NymMixFetchBridge.js';
@@ -55,6 +56,7 @@ import type { StellarReadFetch } from '@solanym/wallet-core/src/stellar/read/Ste
 import type { NymOffscreenStatusPayload } from '../../nym-offscreen/protocol.js';
 import { NYM_VERIFIED_GATEWAY } from '../../nym-offscreen/verifiedGateway.js';
 import {
+  DEFAULT_NYM_PRIVACY_MODE,
   NYM_PRIVACY_PREFERENCE_STORAGE_KEY,
   readNymPrivacyPreference,
   writeNymPrivacyPreference,
@@ -417,15 +419,12 @@ export class NymRuntimeController {
 
   private isEgressBlocked(): boolean {
     if (this._directSuspended || !this._preferenceHydrated) return true;
-    // Clearnet requires a stored explicit Direct choice. Null is not Direct.
-    if (this._privacyPreference !== 'direct' && this._privacyPreference !== 'nym') {
-      return true;
-    }
     switch (this._mode) {
       case 'nym':
+        if (this._privacyPreference !== 'nym') return true;
         return this._transport.getSnapshot().connected !== true;
       case 'direct':
-        return this._privacyPreference !== 'direct';
+        return !this.clearnetExplicitlyAuthorized();
       default: {
         const _never: never = this._mode;
         return _never;
@@ -647,8 +646,11 @@ export class NymRuntimeController {
         this._echoSuppress = null;
       }
       if (this._policyGeneration !== generation) return;
-      this.applyResolved('nym', null, false);
-      this._diagnosticCode = 'PRIVACY_CHOICE_REQUIRED';
+      if (this._unpersistedNymRevocation) {
+        this.keepUnpersistedNymRevocation();
+        return;
+      }
+      this.applyResolved(DEFAULT_NYM_PRIVACY_MODE, null, false);
       this.publishRuntimeStatus();
       return;
     }
@@ -748,8 +750,11 @@ export class NymRuntimeController {
   private applyPrivacyRecord(record: NymPrivacyPreferenceRecord): void {
     switch (record.kind) {
       case 'unset':
-        this.applyResolved('nym', null, false);
-        this._diagnosticCode = 'PRIVACY_CHOICE_REQUIRED';
+        if (this._unpersistedNymRevocation) {
+          this.keepUnpersistedNymRevocation();
+          return;
+        }
+        this.applyResolved(DEFAULT_NYM_PRIVACY_MODE, null, false);
         return;
       case 'chosen':
         if (record.choice === 'direct' && this._unpersistedNymRevocation) {
@@ -772,7 +777,15 @@ export class NymRuntimeController {
 
   private clearnetExplicitlyAuthorized(): boolean {
     if (this._directSuspended || !this._preferenceHydrated) return false;
-    return this._privacyPreference === 'direct' && this._mode === 'direct';
+    if (this._unpersistedNymRevocation) return false;
+    if (
+      this._diagnosticCode === 'PRIVACY_PREFERENCE_CORRUPT' ||
+      this._diagnosticCode === 'PRIVACY_PREFERENCE_UNREADABLE' ||
+      this._diagnosticCode === 'PRIVACY_PREFERENCE_PERSIST_FAILED'
+    ) {
+      return false;
+    }
+    return this._mode === 'direct' && this._privacyPreference !== 'nym';
   }
 
   /** Last-moment Direct egress. Rechecks policy at the native fetch call. */

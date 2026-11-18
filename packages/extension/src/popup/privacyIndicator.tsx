@@ -70,6 +70,13 @@ export function describeWalletPrivacy(snapshot: PrivacyIndicatorSnapshot): Priva
     };
   }
   if (snapshot.preferenceHydrated === true && snapshot.privacyPreference === null) {
+    if (snapshot.mode === 'direct' && snapshot.egressBlocked !== true) {
+      return {
+        tone: 'direct',
+        label: 'Privacy: Direct',
+        egress: 'open',
+      };
+    }
     return {
       tone: 'blocked',
       label: 'Privacy: no saved choice — wallet network blocked',

@@ -62,14 +62,15 @@ describe('privacy indicator', () => {
     expect(unset.label).toBe('Privacy: no saved choice — wallet network blocked');
     expect(unset.label).not.toMatch(/Direct/);
 
-    const implicitDirect = describeWalletPrivacy({
+    const defaultDirect = describeWalletPrivacy({
       mode: 'direct',
       preferenceHydrated: true,
       egressBlocked: false,
       privacyPreference: null,
     });
-    expect(implicitDirect.tone).toBe('blocked');
-    expect(implicitDirect.label).not.toMatch(/^Privacy: Direct$/);
+    expect(defaultDirect.tone).toBe('direct');
+    expect(defaultDirect.egress).toBe('open');
+    expect(defaultDirect.label).toBe('Privacy: Direct');
 
     expect(
       describeWalletPrivacy({

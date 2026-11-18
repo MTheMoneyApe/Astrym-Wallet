@@ -142,7 +142,7 @@ describe('webapp privacy sync across instances', () => {
     expect(writer.getSnapshot().privacyPreference).toBe('nym');
   });
 
-  it('revokes Direct on the peer when storage is cleared (key null)', async () => {
+  it('suspends Direct during reload and resets to default Direct when storage is cleared (key null)', async () => {
     const eventsA = new EventTarget();
     const eventsB = new EventTarget();
     const backing = sharedLocalStorage([eventsA, eventsB]);
@@ -159,14 +159,13 @@ describe('webapp privacy sync across instances', () => {
     const clearnet = vi.fn(async () => new Response('horizon', { status: 200 }));
     vi.stubGlobal('fetch', clearnet);
     await expect(peer.getStellarFetch()(HORIZON)).rejects.toMatchObject({ code: 'NOT_CONNECTED' });
-    await expect(peer.getRouter().fetch(HORIZON)).rejects.toMatchObject({ code: 'NOT_CONNECTED' });
-    await expect(
-      peer.fetchPublicData({ transport: 'direct', url: 'https://postman-echo.com/get' }),
-    ).resolves.toMatchObject({ transportFetchInvoked: false });
     expect(clearnet).not.toHaveBeenCalled();
+
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(peer.mode).toBe('direct');
     expect(peer.getSnapshot().privacyPreference).toBeNull();
-    expect(peer.getSnapshot().egressBlocked).toBe(true);
-    expect(clearnet).not.toHaveBeenCalled();
+    expect(peer.getSnapshot().egressBlocked).toBe(false);
+    expect((await peer.getStellarFetch()(HORIZON)).status).toBe(200);
+    expect(clearnet).toHaveBeenCalledTimes(1);
   });
 });
