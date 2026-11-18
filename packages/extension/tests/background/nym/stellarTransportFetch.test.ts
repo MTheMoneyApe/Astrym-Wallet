@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { STELLAR_SOROBAN_TESTNET_RPC } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import {
   STELLAR_MIXFETCH_TESTNET_HORIZON_URL,
   createStellarTransportFetch,
@@ -8,6 +9,20 @@ import {
   STELLAR_LOGICAL_TESTNET_HORIZON_URL,
   STELLAR_NYM_EFFECTIVE_TESTNET_HORIZON_DEFAULT,
 } from '../../../src/background/nym/stellarHorizonNymConfig.js';
+
+const JSON_RPC_BODY = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getHealth' });
+
+function nymHarness() {
+  const fetchViaRouter = vi.fn(async (_url: string, _init?: RequestInit) => {
+    return new Response('{"ok":true}', { status: 200 });
+  });
+  const fetchImpl = createStellarTransportFetch({
+    getMode: () => 'nym',
+    fetchViaRouter,
+    nymTimeoutMs: 5_000,
+  });
+  return { fetchViaRouter, fetchImpl };
+}
 
 describe('createStellarTransportFetch', () => {
   it('nym mode remaps SDF logical URL, sets unsafe-ignore-cors, strips AbortSignal', async () => {
@@ -69,6 +84,65 @@ describe('createStellarTransportFetch', () => {
     await expect(
       fetchImpl(`${STELLAR_LOGICAL_TESTNET_HORIZON_URL}/fee_stats`),
     ).rejects.toThrow(/logical=.*effective=.*no clearnet fallback/);
+  });
+
+  it('preserves Horizon GET for account, ledger, and transaction lookups', async () => {
+    const { fetchViaRouter, fetchImpl } = nymHarness();
+    const paths = ['/accounts/GABC', '/ledgers/2', '/transactions/abc'];
+    for (const path of paths) {
+      fetchViaRouter.mockClear();
+      await fetchImpl(`${STELLAR_LOGICAL_TESTNET_HORIZON_URL}${path}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      const call = fetchViaRouter.mock.calls[0];
+      expect(call?.[0]).toBe(`${STELLAR_NYM_EFFECTIVE_TESTNET_HORIZON_DEFAULT}${path}`);
+      expect(call?.[1]?.method).toBe('GET');
+      expect(call?.[1]?.body).toBeUndefined();
+      expect(call?.[1]?.signal).toBeUndefined();
+    }
+  });
+
+  it('preserves Soroban RPC JSON-RPC POST and its body', async () => {
+    const { fetchViaRouter, fetchImpl } = nymHarness();
+    await fetchImpl(STELLAR_SOROBAN_TESTNET_RPC, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: 'session=secret' },
+      body: JSON_RPC_BODY,
+    });
+    const call = fetchViaRouter.mock.calls[0];
+    expect(call?.[0]).toBe(STELLAR_SOROBAN_TESTNET_RPC);
+    expect(call?.[1]?.method).toBe('POST');
+    expect(call?.[1]?.body).toBe(JSON_RPC_BODY);
+    const headers = new Headers(call?.[1]?.headers);
+    expect(headers.get('content-type')).toBe('application/json');
+    expect(headers.get('cookie')).toBeNull();
+
+    fetchViaRouter.mockClear();
+    await fetchImpl(STELLAR_SOROBAN_TESTNET_RPC, { body: JSON_RPC_BODY });
+    const omitted = fetchViaRouter.mock.calls[0];
+    expect(omitted?.[1]?.method).toBe('POST');
+    expect(omitted?.[1]?.body).toBe(JSON_RPC_BODY);
+  });
+
+  it('rejects a non-allowlisted host and does not call the router', async () => {
+    const { fetchViaRouter, fetchImpl } = nymHarness();
+    await expect(
+      fetchImpl('https://evil.example/accounts/GABC', { method: 'GET' }),
+    ).rejects.toThrow(/non-allowlisted host: evil\.example.*no clearnet fallback/);
+    expect(fetchViaRouter).not.toHaveBeenCalled();
+  });
+
+  it('strips a body on Horizon GET', async () => {
+    const { fetchViaRouter, fetchImpl } = nymHarness();
+    await fetchImpl(`${STELLAR_LOGICAL_TESTNET_HORIZON_URL}/accounts/GABC`, {
+      method: 'GET',
+      body: JSON_RPC_BODY,
+    });
+    const init = fetchViaRouter.mock.calls[0]?.[1];
+    expect(init?.method).toBe('GET');
+    expect(init?.body).toBeUndefined();
+    expect(fetchViaRouter).toHaveBeenCalledOnce();
   });
 });
 
