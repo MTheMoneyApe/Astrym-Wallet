@@ -9,6 +9,8 @@ import {
   bindSppRegistrationBeforeMint,
   mintSppSignApproval,
   revokeSppSignApprovals,
+  sppKeyDerivationMessage,
+  sppRegistrationDigest,
 } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 import { isSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
 import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
@@ -48,6 +50,93 @@ function requiredKeyManager(keyManager: KeyManager | undefined): KeyManager {
 
 function mapHostFailure(result: { ok: false; code: string; message: string }): never {
   throw Object.assign(new Error(result.message), { name: result.code });
+}
+
+function digestHex(message: string): string {
+  const digest = sppRegistrationDigest(message);
+  let hex = '';
+  for (let i = 0; i < digest.length; i += 1) {
+    hex += digest[i]!.toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+/**
+ * Transport fields for a register request built from the Derivation v3 message.
+ * They are the digest of that public message, not note keys, proofs, or signatures.
+ */
+export function sppDerivationV3RegisterFields(kdfDomain: string): {
+  noteKeyHex: string;
+  encryptionKeyHex: string;
+  noteKeyProofHex: string;
+  encryptionKeySignatureHex: string;
+  ownerSignatureHex: string;
+} {
+  const commitment = digestHex(sppKeyDerivationMessage(kdfDomain));
+  const signatureSlot = commitment + commitment;
+  return {
+    noteKeyHex: commitment,
+    encryptionKeyHex: commitment,
+    noteKeyProofHex: commitment,
+    encryptionKeySignatureHex: signatureSlot,
+    ownerSignatureHex: signatureSlot,
+  };
+}
+
+function isSppDerivationV3Register(
+  payload: {
+    noteKeyHex: string;
+    encryptionKeyHex: string;
+    noteKeyProofHex: string;
+    encryptionKeySignatureHex: string;
+    ownerSignatureHex: string;
+  },
+  kdfDomain: string,
+): boolean {
+  const fields = sppDerivationV3RegisterFields(kdfDomain);
+  return payload.noteKeyHex.toLowerCase() === fields.noteKeyHex
+    && payload.encryptionKeyHex.toLowerCase() === fields.encryptionKeyHex
+    && payload.noteKeyProofHex.toLowerCase() === fields.noteKeyProofHex
+    && payload.encryptionKeySignatureHex.toLowerCase() === fields.encryptionKeySignatureHex
+    && payload.ownerSignatureHex.toLowerCase() === fields.ownerSignatureHex;
+}
+
+const HELD_REGISTRATION_NOTE = 'Registro retenido: aún no hay firma Registration v1';
+
+function heldAtSign(): never {
+  throw Object.assign(new Error(HELD_REGISTRATION_NOTE), {
+    name: 'UNAUTHORIZED',
+    code: 'BROADCAST_AWAITING_APPROVAL',
+  });
+}
+
+/**
+ * Bind the Derivation v3 registration before mint. Broadcast OFF makes bind
+ * throw before an intent exists. This never mints and never signs.
+ */
+function refuseSppDerivationV3RegisterAtSign(
+  address: string,
+  registryContractId: string,
+  kdfDomain: string,
+): never {
+  const fields = sppDerivationV3RegisterFields(kdfDomain);
+  if (!isSppTestnetBroadcastAuthorized()) {
+    revokeSppSignApprovals(address);
+    try {
+      bindSppRegistrationBeforeMint({
+        account: address,
+        registryContractId,
+        ...fields,
+        maxFeeStroops: maxFeeStroopsForOperation('register_public_keys'),
+      });
+      revokeSppSignApprovals(address);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : '';
+      if (!message.includes('SPP_BROADCAST_AWAITING_APPROVAL')) throw cause;
+    }
+    heldAtSign();
+  }
+  heldAtSign();
 }
 
 export function createSppAccountSnapshotHandler() {
@@ -115,6 +204,10 @@ export function createSppRegisterPublicKeysHandler(deps: {
     const address = deps.resolveAccount
       ? await deps.resolveAccount()
       : (await resolveActiveStellarAddress(requiredKeyManager(deps.keyManager))).address;
+    const config = getNethermindPublicTestnetContractConfig();
+    if (isSppDerivationV3Register(payload, config.kdf_domain)) {
+      refuseSppDerivationV3RegisterAtSign(address, config.public_key_registry, config.kdf_domain);
+    }
     if (!isSppTestnetBroadcastAuthorized()) {
       revokeSppSignApprovals(address);
       throw Object.assign(
@@ -122,7 +215,6 @@ export function createSppRegisterPublicKeysHandler(deps: {
         { name: 'UNAUTHORIZED', code: 'BROADCAST_AWAITING_APPROVAL' },
       );
     }
-    const config = getNethermindPublicTestnetContractConfig();
     let minted = false;
     try {
       const intent = bindSppRegistrationBeforeMint({

@@ -22,6 +22,9 @@ export async function sendIpcMessage<T extends MessageTypes>(
   if (response.error) {
     const error = new Error(response.error.message);
     error.name = response.error.name;
+    if (response.error.code !== undefined) {
+      Object.assign(error, { code: response.error.code });
+    }
     throw error;
   }
 

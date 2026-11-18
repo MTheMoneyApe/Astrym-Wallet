@@ -112,6 +112,8 @@ jobs:
             tests/background/spp/sppHostBridgeHandlers.test.ts \
             tests/background/spp/sppSignGate.test.ts \
             tests/background/spp/sppAutoPrepare.test.ts \
+            tests/background/spp/sppAccountHandlers.test.ts \
+            tests/popup/SppAccountPanel.test.tsx \
             tests/background/handlers/sppStorageUnlockApprovalHandler.test.ts \
             tests/spp-host/sppHostRemoteSigner.test.ts \
             tests/spp-host/sessionConstruct.test.ts \
