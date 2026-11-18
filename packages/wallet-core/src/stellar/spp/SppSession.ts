@@ -109,6 +109,11 @@ export type SppSdkRuntimeDeps = {
   Storage: {
     open: (options?: StorageOpenOptions | null) => Promise<Storage>;
   };
+  /** Wallet-authorized encrypted OPFS open; no unapproved direct Storage.open path. */
+  openEncryptedStorage: (input: {
+    storageOpen: (options: StorageOpenOptions) => Promise<Storage>;
+    workerUrl: string;
+  }) => Promise<Storage>;
   Client: {
     new: (options: ClientNewOptions) => Promise<Client>;
   };
@@ -134,47 +139,80 @@ export type SppSdkRuntimeDeps = {
  * Intended for a browser extension page after dynamic-importing the packaged
  * `js/index.js` + wasm glue — not for Node unit tests.
  */
+async function closeStorageSafely(storage: Storage): Promise<void> {
+  try {
+    // The pinned SDK runtime exposes close() on its JS Storage handle even
+    // where the published consumer declaration omits it.
+    const close = (storage as Storage & { close(): Promise<void> }).close;
+    await close.call(storage);
+  } catch {
+    // Best effort only; an already-closed worker must not mask the real failure.
+  }
+}
+
 export function createSppSdkRuntime(deps: SppSdkRuntimeDeps): SppSessionRuntime {
   return {
     async createReadOnlyClient(args: SppCreateClientArgs): Promise<SppReadOnlyClient> {
       await deps.initWasm(args.assets.wasmUrl);
-      const storage = await deps.Storage.open({
+      if (typeof deps.openEncryptedStorage !== 'function') {
+        throw new SppSessionError(
+          'INVALID_CONFIG',
+          'Encrypted SPP storage requires the explicit wallet unlock provider',
+        );
+      }
+      const storage = await deps.openEncryptedStorage({
+        storageOpen: deps.Storage.open.bind(deps.Storage),
         workerUrl: args.assets.storageWorkerUrl,
       });
-      let bootnodeUrl = args.bootnodeUrl;
-      if (deps.bootnodeRequired) {
-        const required = await deps.bootnodeRequired(args.rpcUrl, storage, {
-          contractConfig: args.contractConfig,
-        });
-        if (required && (bootnodeUrl === undefined || !bootnodeUrl.trim())) {
-          throw new SppSessionError(
-            'INVALID_CONFIG',
-            'bootnodeRequired=true but bootnodeUrl is missing. Nethermind publishes no public bootnode; configure a self-hosted URL or fail closed.',
-          );
-        }
-      }
-      const options: ClientNewOptions = {
-        rpcUrl: args.rpcUrl,
-        contractConfig: args.contractConfig,
-        circuitLock: args.circuitLock,
-        circuitsBaseUrl: args.assets.circuitsBaseUrl,
-        storage,
-        proverWorkerUrl: args.assets.proverWorkerUrl,
-      };
-      if (bootnodeUrl !== undefined && bootnodeUrl.trim()) {
-        options.bootnodeUrl = bootnodeUrl.trim();
-      }
-      const client = await deps.Client.new(options);
       try {
-        deps.onClientCreated?.(client);
-      } catch {
-        // Hook failures must not leave a half-ready RO session.
+        let bootnodeUrl = args.bootnodeUrl;
+        if (deps.bootnodeRequired) {
+          const required = await deps.bootnodeRequired(args.rpcUrl, storage, {
+            contractConfig: args.contractConfig,
+          });
+          if (required && (bootnodeUrl === undefined || !bootnodeUrl.trim())) {
+            throw new SppSessionError(
+              'INVALID_CONFIG',
+              'bootnodeRequired=true but bootnodeUrl is missing. Nethermind publishes no public bootnode; configure a self-hosted URL or fail closed.',
+            );
+          }
+        }
+        const options: ClientNewOptions = {
+          rpcUrl: args.rpcUrl,
+          contractConfig: args.contractConfig,
+          circuitLock: args.circuitLock,
+          circuitsBaseUrl: args.assets.circuitsBaseUrl,
+          storage,
+          proverWorkerUrl: args.assets.proverWorkerUrl,
+        };
+        if (bootnodeUrl !== undefined && bootnodeUrl.trim()) {
+          options.bootnodeUrl = bootnodeUrl.trim();
+        }
+        const client = await deps.Client.new(options);
+        try {
+          deps.onClientCreated?.(client);
+        } catch {
+          // Hook failures must not leave a half-ready RO session.
+        }
+        return {
+          aspState: () => client.aspState(),
+          allContractsData: () => client.allContractsData(),
+          dispose: () => {
+            try {
+              client.dispose();
+            } finally {
+              // The base Storage handle owns the OPFS worker; Client only holds
+              // forks, so release the base handle after disposing the SDK client.
+              void closeStorageSafely(storage);
+            }
+          },
+        };
+      } catch (cause) {
+        // Failed bootnode checks / Client.new must not strand the encrypted
+        // OPFS worker and prevent a later explicit unlock retry.
+        await closeStorageSafely(storage);
+        throw cause;
       }
-      return {
-        aspState: () => client.aspState(),
-        allContractsData: () => client.allContractsData(),
-        dispose: () => client.dispose(),
-      };
     },
   };
 }

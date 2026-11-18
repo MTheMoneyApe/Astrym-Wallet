@@ -1,15 +1,18 @@
 /**
- * Solanym SPP isolated host page entry (Fase 4B–5D).
+ * Solanym SPP isolated host page entry.
  * Extension page only — not the service worker, popup React tree, or dapp provider.
  *
- * Actions (button only, never on load):
- * 1) Comprobar SDK — import packaged facade + inspect exports
- * 2) Inicializar WASM — default({ module_or_path: local .wasm URL })
- * 3) Storage lab prep — evaluate gates
- * 4) Storage open — only when phase-authorized + ready-for-lab + explicit click
- * 5) Storage free — explicit only when a private handle exists
+ * A current service-worker auto-prepare intent may run the packaged facade probe,
+ * WASM initialization, and an SPP read-only session on host load. Opening the
+ * encrypted OPFS database requires the separate, visible wallet-unlock consent
+ * dialog and a one-shot vault signature bound to the active account/generation.
  *
- * Default build: STORAGE_LAB_EXECUTION_AUTHORIZED=false → run button stays disabled.
+ * Manual lab controls remain separate:
+ * - Storage lab prep only evaluates operator gates.
+ * - Lab Storage.open remains phase-authorized + explicit-click only.
+ * - Storage.free remains explicit only when a private handle exists.
+ *
+ * Default build: STORAGE_LAB_EXECUTION_AUTHORIZED=false → lab run stays disabled.
  */
 
 import {
@@ -25,6 +28,11 @@ import { installSppHostBridgeListener } from './sppHostBridgeListener.js';
 import { runSppHostAutoPrepareIfRequested } from './sppHostAutoPrepare.js';
 import { readHostLabSppIntegrationSnapshot } from './sppIntegrationProbe.js';
 import { STORAGE_LAB_EXECUTION_AUTHORIZED } from './storageLabPrep.js';
+import {
+  SPP_AUTO_PREPARE_INTENT_KEY,
+  SPP_PREPARE_STATUS_KEY,
+  type SppPrepareStatus,
+} from '../shared/sppPrepareStatus.js';
 
 // SW ↔ host private-payment bridge (no secrets on the channel).
 installSppHostBridgeListener();
@@ -260,7 +268,7 @@ function main(): void {
   }
 
   statusBoot.textContent =
-    'Idle — Nothing runs on load. Open limit = one per page instance (reload resets). Auth gate false by default.';
+    'Host listo — el auto-prepare puede ejecutar una intención Nym activa. El desbloqueo cifrado requiere consentimiento explícito. Storage Lab sigue bloqueado.';
   render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
 
   (window as unknown as { __SOLANYM_SPP_HOST__?: unknown }).__SOLANYM_SPP_HOST__ = {
@@ -285,11 +293,12 @@ function main(): void {
         },
         { getSession: () => controller.readBoundSessionStatus() },
       ),
-    initializeSessionDisabled: true,
-    storageOpenDisabled: !STORAGE_LAB_EXECUTION_AUTHORIZED,
-    probeOnlyOnButton: true,
-    wasmInitOnlyOnButton: true,
-    storageLabPrepOnly: true,
+    initializeSessionDisabled: false,
+    sessionStorageUnlockRequiresExplicitConsent: true,
+    storageLabOpenDisabled: !STORAGE_LAB_EXECUTION_AUTHORIZED,
+    probeMayRunFromAutoPrepareIntent: true,
+    wasmInitMayRunFromAutoPrepareIntent: true,
+    storageLabPrepIsSeparate: true,
   };
 
   probeBtn.addEventListener('click', () => {
@@ -429,12 +438,22 @@ function main(): void {
         statusBoot.textContent = 'Introduce un poolContract C… válido (56 chars).';
         return;
       }
+      const storedPrepare = await chrome.storage.local.get(SPP_PREPARE_STATUS_KEY);
+      const prepareStatus = storedPrepare[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+      if (
+        prepareStatus?.phase !== 'initializing_write_pool' ||
+        !Number.isSafeInteger(prepareStatus.generation) ||
+        prepareStatus.generation <= 0
+      ) {
+        throw new Error('Write pool solo puede iniciarse dentro de una preparación SPP vigente.');
+      }
       statusBoot.textContent = 'Inicializando write PrivatePool (Nym + vault signer)…';
       const snapshot = await controller.initializeWritePoolForNym({
         nymActive: true,
         poolContract,
         userAddress: account.publicKey,
         networkPassphrase: 'Test SDF Network ; September 2015',
+        prepareGeneration: prepareStatus.generation,
       });
       render(snapshot, { resolvedFacadeHint: facadeHint });
       statusBoot.textContent = 'Write pool listo (o ver error). Deposit/transfer/withdraw usan este pool.';
@@ -493,18 +512,32 @@ function main(): void {
     })();
   });
 
-  // Wallet-driven auto-prepare (no user navigation). Manual lab buttons remain available.
-  void runSppHostAutoPrepareIfRequested(controller)
-    .then(() => {
-      render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
-      statusBoot.textContent =
-        'Host listo (auto-prepare consumido o ausente). Lab manual sigue disponible.';
-    })
-    .catch((err: unknown) => {
-      statusBoot.textContent =
-        err instanceof Error ? err.message : 'Auto-prepare SPP falló';
-      render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
+  // Wallet-driven auto-prepare (no user navigation). The tab may be reused,
+  // so listen for newer service-worker-owned intents instead of requiring reload.
+  const processAutoPrepareIntent = (): void => {
+    void runSppHostAutoPrepareIfRequested(controller)
+      .then(() => {
+        render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
+        statusBoot.textContent =
+          'Auto-prepare finalizó; revisa el estado de sesión y cualquier error. Storage Lab sigue bloqueado por separado.';
+      })
+      .catch((err: unknown) => {
+        statusBoot.textContent =
+          err instanceof Error ? err.message : 'Auto-prepare SPP falló';
+        render(controller.snapshot(), { resolvedFacadeHint: facadeHint });
+      });
+  };
+  if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'local') return;
+      const newIntent = changes[SPP_AUTO_PREPARE_INTENT_KEY]?.newValue;
+      const newStatus = changes[SPP_PREPARE_STATUS_KEY]?.newValue as SppPrepareStatus | undefined;
+      if (newIntent || newStatus?.phase === 'opening_host') {
+        processAutoPrepareIntent();
+      }
     });
+  }
+  processAutoPrepareIntent();
 }
 
 try {

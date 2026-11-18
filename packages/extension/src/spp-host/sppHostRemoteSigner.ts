@@ -30,6 +30,7 @@ export type SppHostRemoteSignerOptions = {
   /** Bound G… address expected for this session. */
   stellarAddress: string;
   networkPassphrase: string;
+  prepareGeneration: number;
   send?: (message: SppHostSignRequest) => Promise<unknown>;
 };
 
@@ -43,12 +44,15 @@ async function defaultSend(message: SppHostSignRequest): Promise<unknown> {
 export class SppHostRemoteSigner implements WalletSigner {
   private readonly _stellarAddress: string;
   private readonly _networkPassphrase: string;
+  private readonly _prepareGeneration: number;
   private readonly _send: (message: SppHostSignRequest) => Promise<unknown>;
 
   constructor(options: SppHostRemoteSignerOptions) {
     assertStellarTestnetPassphrase(options.networkPassphrase);
     this._stellarAddress = options.stellarAddress;
+    if (!Number.isSafeInteger(options.prepareGeneration) || options.prepareGeneration <= 0) throw new Error('SPP remote signer requires a valid prepare generation');
     this._networkPassphrase = options.networkPassphrase;
+    this._prepareGeneration = options.prepareGeneration;
     this._send = options.send ?? defaultSend;
   }
 
@@ -58,6 +62,15 @@ export class SppHostRemoteSigner implements WalletSigner {
 
   async signMessage(message: string, opts?: SignOptions): Promise<SignMessageResult> {
     const signed = await this._sign('message', message, opts);
+    return { signedMessage: signed.signatureBase64, signerAddress: signed.signerAddress };
+  }
+
+  async signStorageUnlockMessage(
+    message: string,
+    approvalToken: string,
+    opts?: SignOptions,
+  ): Promise<SignMessageResult> {
+    const signed = await this._sign('message', message, opts, 'storage_unlock', approvalToken);
     return { signedMessage: signed.signatureBase64, signerAddress: signed.signerAddress };
   }
 
@@ -91,6 +104,8 @@ export class SppHostRemoteSigner implements WalletSigner {
     kind: 'message' | 'transaction' | 'auth_entry',
     input: string,
     opts?: SignOptions,
+    authorization: 'standard' | 'storage_unlock' = 'standard',
+    storageUnlockApprovalToken?: string,
   ): Promise<{ signatureBase64: string; signerAddress: string }> {
     if (opts?.address && opts.address !== this._stellarAddress) {
       throw new Error('Remote signer address mismatch');
@@ -109,6 +124,10 @@ export class SppHostRemoteSigner implements WalletSigner {
         input,
         address: this._stellarAddress,
         networkPassphrase: this._networkPassphrase,
+        prepareGeneration: this._prepareGeneration,
+        ...(authorization === 'storage_unlock'
+          ? { authorization, storageUnlockApprovalToken }
+          : {}),
       },
     };
 

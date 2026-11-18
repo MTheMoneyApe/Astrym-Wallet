@@ -312,7 +312,7 @@ export async function executeSppPrivatePayment(input: {
     amountStroops: request.amount.toString(),
     recipient: request.recipient,
   });
-  let release: (opts?: { completed?: boolean }) => void;
+  let release: (opts?: { completed?: boolean; reconcile?: boolean }) => void;
   try {
     ({ release } = beginPrivatePaymentExecution(fingerprint));
   } catch (cause) {

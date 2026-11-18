@@ -101,6 +101,13 @@ if [ "$(git -C "$SRC" rev-parse HEAD 2>/dev/null || true)" != "$SOURCE_COMMIT" ]
   git -C "$SRC" checkout --detach FETCH_HEAD
 fi
 [ "$(git -C "$SRC" rev-parse HEAD)" = "$SOURCE_COMMIT" ] || die "upstream HEAD is not $SOURCE_COMMIT"
+# The build writes this provenance file inside the temporary upstream checkout.
+# Remove only our untracked generated copy before a second clean rebuild; never
+# remove or overwrite a file that belongs to the pinned upstream source.
+PROVENANCE_REL="sdk/web/SPP_SOURCE_PROVENANCE.json"
+if [ -f "$SRC/$PROVENANCE_REL" ] && ! git -C "$SRC" ls-files --error-unmatch "$PROVENANCE_REL" >/dev/null 2>&1; then
+  rm -f "$SRC/$PROVENANCE_REL"
+fi
 dirty="$(git -C "$SRC" status --porcelain --untracked-files=all)"
 if [ -n "$dirty" ]; then
   printf '%s\n' "$dirty" >&2
@@ -348,8 +355,265 @@ pin_binaryen() {
 }
 pin_binaryen
 
-log "COMMAND: bash sdk/web/scripts/build.sh"
-( cd "$SRC" && PATH="$BUILD_ROOT/date-bin:$PATH" bash sdk/web/scripts/build.sh )
+# Preserve each transformation boundary so a manifest mismatch can be attributed.
+DIAGNOSTIC_LABEL="${SPP_DIAGNOSTIC_LABEL:-primary}"
+case "$DIAGNOSTIC_LABEL" in
+  ""|*[!A-Za-z0-9._-]*) die "invalid SPP_DIAGNOSTIC_LABEL: $DIAGNOSTIC_LABEL" ;;
+esac
+DIAGNOSTIC_DIR="$BUILD_ROOT/diagnostics/$DIAGNOSTIC_LABEL"
+WRAPPER_DIR="$BUILD_ROOT/wrappers"
+SPP_WASM_TARGET="wasm32-unknown-unknown"
+SPP_BUILD_PROFILE="${WASM_PROFILE:-release}"
+mkdir -p "$DIAGNOSTIC_DIR" "$WRAPPER_DIR"
+
+REAL_WASM_OPT="$SRC/target/tmp/binaryen/binaryen-version_131/bin/wasm-opt"
+REAL_WASM_BINDGEN="$(command -v wasm-bindgen)"
+[ -x "$REAL_WASM_OPT" ] || die "pinned wasm-opt binary missing"
+[ -x "$REAL_WASM_BINDGEN" ] || die "pinned wasm-bindgen binary missing"
+
+cat > "$WRAPPER_DIR/wasm-opt" <<'PY'
+#!/usr/bin/env python3
+import hashlib, json, os, subprocess, sys
+from pathlib import Path
+
+real = os.environ["SPP_REAL_WASM_OPT"]
+trace = Path(os.environ["SPP_WASM_OPT_TRACE"])
+args = sys.argv[1:]
+if not any(arg.endswith(".wasm") for arg in args):
+    raise SystemExit(subprocess.run([real, *args]).returncode)
+
+def inspect(raw):
+    path = Path(raw)
+    if not path.is_file():
+        return {"path": raw, "missing": True}
+    data = path.read_bytes()
+    return {"path": str(path), "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+
+inputs = [arg for arg in args if arg.endswith(".wasm") and Path(arg).is_file()]
+outputs = []
+for index, arg in enumerate(args[:-1]):
+    if arg == "-o" and args[index + 1].endswith(".wasm"):
+        outputs.append(args[index + 1])
+before = [inspect(path) for path in inputs]
+result = subprocess.run([real, *args])
+after = [inspect(path) for path in (outputs or inputs)]
+event = {
+    "tool": "wasm-opt",
+    "executable": real,
+    "cwd": os.getcwd(),
+    "args": args,
+    "input_before": before,
+    "output_after": after,
+    "returncode": result.returncode,
+}
+trace.parent.mkdir(parents=True, exist_ok=True)
+with trace.open("a", encoding="utf-8") as stream:
+    stream.write(json.dumps(event, sort_keys=True) + "\n")
+raise SystemExit(result.returncode)
+PY
+
+cat > "$WRAPPER_DIR/wasm-bindgen" <<'PY'
+#!/usr/bin/env python3
+import hashlib, json, os, subprocess, sys
+from pathlib import Path
+
+real = os.environ["SPP_REAL_WASM_BINDGEN"]
+trace = Path(os.environ["SPP_WASM_BINDGEN_TRACE"])
+args = sys.argv[1:]
+if not any(arg.endswith(".wasm") for arg in args):
+    raise SystemExit(subprocess.run([real, *args]).returncode)
+
+def inspect(raw):
+    path = Path(raw)
+    if not path.is_file():
+        return {"path": raw, "missing": True}
+    data = path.read_bytes()
+    return {"path": str(path), "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+
+inputs = [arg for arg in args if arg.endswith(".wasm") and Path(arg).is_file()]
+out_dir = Path(args[args.index("--out-dir") + 1]) if "--out-dir" in args else None
+out_name = args[args.index("--out-name") + 1] if "--out-name" in args else None
+outputs = [out_dir / f"{out_name}_bg.wasm"] if out_dir and out_name else []
+before = [inspect(path) for path in inputs]
+result = subprocess.run([real, *args])
+after = [inspect(path) for path in outputs]
+event = {
+    "tool": "wasm-bindgen",
+    "executable": real,
+    "cwd": os.getcwd(),
+    "args": args,
+    "input_before": before,
+    "output_after": after,
+    "returncode": result.returncode,
+}
+trace.parent.mkdir(parents=True, exist_ok=True)
+with trace.open("a", encoding="utf-8") as stream:
+    stream.write(json.dumps(event, sort_keys=True) + "\n")
+raise SystemExit(result.returncode)
+PY
+chmod 755 "$WRAPPER_DIR/wasm-opt" "$WRAPPER_DIR/wasm-bindgen"
+
+export SPP_REAL_WASM_OPT="$REAL_WASM_OPT"
+export SPP_REAL_WASM_BINDGEN="$REAL_WASM_BINDGEN"
+export SPP_WASM_OPT_TRACE="$DIAGNOSTIC_DIR/wasm-opt.jsonl"
+export SPP_WASM_BINDGEN_TRACE="$DIAGNOSTIC_DIR/wasm-bindgen.jsonl"
+export WASM_OPT="$WRAPPER_DIR/wasm-opt"
+export PATH="$WRAPPER_DIR:$PATH"
+
+python3 - "$DIAGNOSTIC_DIR/toolchain.json" "$REAL_WASM_OPT" "$REAL_WASM_BINDGEN" "$RUST_CHANNEL" <<'PY'
+import hashlib, json, shutil, subprocess, sys
+from pathlib import Path
+
+output = Path(sys.argv[1])
+rust_channel = sys.argv[4]
+rustc_proxy = shutil.which("rustc")
+tools = {
+    "wasm-opt": sys.argv[2],
+    "wasm-bindgen": sys.argv[3],
+    "rustc-rustup-proxy": rustc_proxy,
+    "cargo-rustup-proxy": shutil.which("cargo"),
+    "host-cc": shutil.which("cc"),
+    # cc-rs selects this compiler for its actual wasm32 C invocations.
+    "clang-wasm-target": shutil.which("clang"),
+    "clang-18": shutil.which("clang-18"),
+    "ar": shutil.which("ar"),
+    "llvm-ar": shutil.which("llvm-ar"),
+    "wasm-ld": shutil.which("wasm-ld"),
+    "wasm-ld-18": shutil.which("wasm-ld-18"),
+}
+if rustc_proxy:
+    try:
+        sysroot_run = subprocess.run(
+            [rustc_proxy, f"+{rust_channel}", "--print", "sysroot"],
+            capture_output=True, text=True, check=True, timeout=30,
+        )
+        version_run = subprocess.run(
+            [rustc_proxy, f"+{rust_channel}", "-vV"],
+            capture_output=True, text=True, check=True, timeout=30,
+        )
+        sysroot = Path(sysroot_run.stdout.strip())
+        host = next(
+            (line.split(":", 1)[1].strip() for line in version_run.stdout.splitlines()
+             if line.startswith("host:")),
+            None,
+        )
+        tools["rustc"] = str(sysroot / "bin" / "rustc")
+        tools["cargo"] = str(sysroot / "bin" / "cargo")
+        if host:
+            tools["rust-lld"] = str(sysroot / "lib" / "rustlib" / host / "bin" / "rust-lld")
+        tools["rustc-sysroot"] = str(sysroot)
+        tools["rustc-host"] = host
+    except Exception as exc:
+        tools["rustc-resolution-error"] = str(exc)
+
+result = {}
+for name, raw in tools.items():
+    if not raw:
+        result[name] = None
+        continue
+    if name in ("rustc-sysroot", "rustc-host", "rustc-resolution-error"):
+        result[name] = raw
+        continue
+    path = Path(raw)
+    item = {"path": str(path.resolve())}
+    if path.is_file():
+        data = path.read_bytes()
+        item["sha256"] = hashlib.sha256(data).hexdigest()
+        item["size"] = len(data)
+    try:
+        proc = subprocess.run([raw, "--version"], capture_output=True, text=True, timeout=15)
+        item["version"] = (proc.stdout or proc.stderr).strip().splitlines()[:4]
+        item["versionExit"] = proc.returncode
+    except Exception as exc:
+        item["versionError"] = str(exc)
+    result[name] = item
+output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+print("recorded resolved compiler/linker and toolchain identities:", output)
+PY
+
+capture_spp_build_evidence() {
+  local build_status="$1"
+  python3 - "$CARGO_TARGET_DIR" "$SPP_WASM_TARGET" "$SPP_BUILD_PROFILE" "$DIAGNOSTIC_DIR" "$build_status" <<'PY'
+import hashlib, json, shutil, sys, tarfile
+from pathlib import Path
+
+target_root, target_name, profile, diag, build_status = Path(sys.argv[1]), sys.argv[2], sys.argv[3], Path(sys.argv[4]), int(sys.argv[5])
+target_root = target_root.resolve()
+diag.mkdir(parents=True, exist_ok=True)
+
+raw_dir = target_root / target_name / profile
+raw_names = [
+    "stellar_private_payments_web.wasm",
+    "storage-worker.wasm",
+    "prover-worker.wasm",
+]
+raw_report = {}
+raw_out = diag / "raw-wasm"
+raw_out.mkdir(exist_ok=True)
+for name in raw_names:
+    source = raw_dir / name
+    if source.is_file():
+        data = source.read_bytes()
+        shutil.copy2(source, raw_out / name)
+        raw_report[name] = {
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size": len(data),
+            "source": str(source),
+        }
+    else:
+        raw_report[name] = {"missing": True, "source": str(source)}
+(diag / "raw-wasm.json").write_text(json.dumps(raw_report, indent=2, sort_keys=True) + "\n")
+
+build_dirs = []
+for root in (target_root / target_name / profile / "build", target_root / profile / "build"):
+    if root.is_dir():
+        build_dirs.extend(sorted(p for p in root.glob("sqlite-wasm-rs-*") if p.is_dir()))
+
+report = {"targetRoot": str(target_root), "buildStatus": build_status, "directories": [], "archives": []}
+archive_path = diag / "sqlite-wasm-rs-build-evidence.tar.gz"
+if build_dirs:
+    with tarfile.open(archive_path, "w:gz") as archive:
+        for directory in build_dirs:
+            archive.add(directory, arcname=directory.name)
+            files = []
+            for path in sorted(p for p in directory.rglob("*") if p.is_file()):
+                data = path.read_bytes()
+                files.append({
+                    "path": str(path.relative_to(directory)),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "size": len(data),
+                })
+                if path.name.endswith(".a"):
+                    report["archives"].append({
+                        "path": str(path),
+                        "name": path.name,
+                        "sha256": hashlib.sha256(data).hexdigest(),
+                        "size": len(data),
+                    })
+            item = {"directory": str(directory), "files": files}
+            for log_name in ("output", "stderr", "root-output"):
+                log_path = directory / log_name
+                if log_path.is_file():
+                    item[log_name] = log_path.read_text(errors="replace")[:500000]
+            report["directories"].append(item)
+else:
+    report["note"] = "No sqlite-wasm-rs build-script directory found under this Cargo target."
+
+(diag / "sqlite-build-report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+print(f"captured {len(build_dirs)} sqlite-wasm-rs build directory(ies) at {diag}")
+PY
+}
+
+log "COMMAND: bash sdk/web/scripts/build.sh (with stage tracing)"
+if ( cd "$SRC" && PATH="$BUILD_ROOT/date-bin:$PATH" bash sdk/web/scripts/build.sh ); then
+  SPP_BUILD_STATUS=0
+else
+  SPP_BUILD_STATUS=$?
+fi
+capture_spp_build_evidence "$SPP_BUILD_STATUS"
+if [ "$SPP_BUILD_STATUS" -ne 0 ]; then
+  die "upstream SDK build failed with status $SPP_BUILD_STATUS; diagnostics preserved at $DIAGNOSTIC_DIR"
+fi
 
 log "COMMAND: scan shipped files for host paths and wasm memory limits"
 python3 - "$SRC/sdk/web" "$SRC" "$CARGO_HOME" "$RUSTUP_HOME" "$BUILD_ROOT" \

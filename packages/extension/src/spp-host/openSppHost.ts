@@ -42,42 +42,104 @@ function isAndroidWebappRuntime(): boolean {
   );
 }
 
-/** Reuse an existing spp-host tab when possible (keeps OPFS / write-pool alive). */
-async function openOrFocusExtensionSppHost(active: boolean): Promise<void> {
-  const url = sppHostUrl();
-  try {
-    const existing = await chrome.tabs.query({ url: ['*://*/spp-host.html', url] });
-    const live = existing.find((tab) => typeof tab.id === 'number');
-    if (live?.id != null) {
+/**
+ * Coalesce concurrent opens inside the MV3 worker. The tabs lookup and create
+ * must be one serialized operation: otherwise two callers can both observe
+ * "no host" and create duplicate spp-host tabs.
+ */
+let extensionSppHostOpenInFlight: Promise<void> | null = null;
+
+/** Test helper: clear the in-flight lease after each isolated test. */
+export function resetSppHostOpenLockForTests(): void {
+  extensionSppHostOpenInFlight = null;
+}
+
+/**
+ * Reuse an existing spp-host tab when possible (keeps OPFS / write-pool alive).
+ *
+ * Use runtime.getContexts instead of tabs.query({ url }): filtering tabs by URL
+ * requires the broad "tabs" permission or matching host permission. Astrym does
+ * not request either, so Chrome may ignore that filter and return unrelated tabs.
+ */
+function openOrFocusExtensionSppHost(active: boolean): Promise<void> {
+  if (extensionSppHostOpenInFlight) return extensionSppHostOpenInFlight;
+
+  const opening = (async () => {
+    const url = sppHostUrl();
+    const runtime = chrome.runtime as unknown as {
+      getContexts?: (filter: {
+        contextTypes: string[];
+        documentUrls: string[];
+      }) => Promise<Array<{ tabId?: number }>>;
+    };
+
+    let existingTabId: number | undefined;
+    if (typeof runtime.getContexts === 'function') {
+      const contexts = await runtime.getContexts({
+        contextTypes: ['TAB'],
+        documentUrls: [url],
+      });
+      existingTabId = contexts.find(
+        (context) => Number.isInteger(context.tabId),
+      )?.tabId;
+    } else if (typeof chrome.tabs.query === 'function') {
+      // Older Chrome fallback: only reuse when the URL is actually readable.
+      // Never trust a URL query filter by itself; it can be ignored without tabs
+      // or matching host permission. Fail closed rather than opening duplicates.
+      const existing = await chrome.tabs.query({});
+      existingTabId = existing.find(
+        (tab) => tab.url === url && typeof tab.id === 'number',
+      )?.id;
+      if (existingTabId == null) {
+        throw new Error(
+          'Safe SPP host reuse requires Chrome 116+ runtime.getContexts or readable tab URLs',
+        );
+      }
+    }
+
+    if (existingTabId != null) {
       if (active) {
-        await chrome.tabs.update(live.id, { active: true });
-        if (typeof live.windowId === 'number') {
-          await chrome.windows.update(live.windowId, { focused: true });
+        const existing = await chrome.tabs.get(existingTabId);
+        await chrome.tabs.update(existingTabId, { active: true });
+        if (typeof existing.windowId === 'number') {
+          await chrome.windows.update(existing.windowId, { focused: true });
         }
       }
-      // Soft reload intent: host listens for storage auto-prepare; avoid full reload
-      // which would drop in-memory write pool unless prepare re-runs.
+      // Soft reuse: the host listens for storage auto-prepare; never reload it.
       return;
     }
-  } catch {
-    // Fall through to create.
-  }
-  await chrome.tabs.create({ url, active });
+
+    await chrome.tabs.create({ url, active });
+  })();
+
+  extensionSppHostOpenInFlight = opening;
+  void opening.then(
+    () => {
+      if (extensionSppHostOpenInFlight === opening) {
+        extensionSppHostOpenInFlight = null;
+      }
+    },
+    () => {
+      if (extensionSppHostOpenInFlight === opening) {
+        extensionSppHostOpenInFlight = null;
+      }
+    },
+  );
+  return opening;
 }
 
 /** Internal worker open — not a user-facing navigation target. */
-export function openSppHostInternal(options?: OpenSppHostOptions): void {
+export function openSppHostInternal(options?: OpenSppHostOptions): Promise<void> {
   const active = options?.active === true;
   if (isExtensionHost()) {
-    void openOrFocusExtensionSppHost(active);
-    return;
+    return openOrFocusExtensionSppHost(active);
   }
 
   // Webapp / PWA: never rely on window.open after async Nym connect (popup blockers).
   // Run the host in-page so IPC shares the standalone wallet process.
   // Static import — dynamic import chunks were easy to miss under Vite webapp splitting.
   if (isAndroidWebappRuntime() || typeof window !== 'undefined') {
-    void ensureWebappSppHostAndPrepare().catch((cause: unknown) => {
+    return ensureWebappSppHostAndPrepare().catch((cause: unknown) => {
       const message =
         cause instanceof Error ? cause.message : 'Webapp SPP host embed failed';
       if (typeof chrome !== 'undefined' && chrome.storage?.local) {
@@ -91,7 +153,6 @@ export function openSppHostInternal(options?: OpenSppHostOptions): void {
         void chrome.storage.local.set({ [SPP_PREPARE_STATUS_KEY]: failed });
       }
     });
-    return;
   }
 
   // Last-resort (non-DOM contexts): named window.
@@ -100,9 +161,12 @@ export function openSppHostInternal(options?: OpenSppHostOptions): void {
     'astrym-spp-host',
     active ? 'noopener' : 'noopener,width=420,height=640',
   );
+  return Promise.resolve();
 }
 
 /** @deprecated Prefer {@link openSppHostInternal}; kept for lab tooling. */
 export function openSppHost(): void {
-  openSppHostInternal({ active: true });
+  void openSppHostInternal({ active: true }).catch(() => {
+    // Lab callers do not own the auto-prepare status lifecycle.
+  });
 }

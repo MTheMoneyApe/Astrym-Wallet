@@ -3,6 +3,7 @@
  * Signatures and HTTP bodies only — never seeds or private keys on the wire.
  */
 
+import browser from 'webextension-polyfill';
 import type { SoftwareSigner } from '@solanym/wallet-core/src/signer/SoftwareSigner.js';
 import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import { SppWalletSignerAdapter } from '@solanym/wallet-core/src/stellar/spp/SppWalletSignerAdapter.js';
@@ -11,6 +12,8 @@ import {
   SppSignerError,
   assertStellarTestnetPassphrase,
   revokeSppSignApprovals,
+  sppKeyDerivationDomainFromMessage,
+  waitForSppKeyDerivationApproval,
 } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 import { isSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
 import { STELLAR_SOROBAN_TESTNET_RPC } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
@@ -23,7 +26,14 @@ import {
 } from '../../shared/sppHostBridge.js';
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
 import { isSppHostDocumentSender } from '../trustedWalletOrigin.js';
+import { parseSppStorageUnlockMessage, sppStorageUnlockOriginFromUrl } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 import { resolveActiveStellarAddress } from './sppBoundAccount.js';
+import {
+  SPP_AUTO_PREPARE_INTENT_KEY,
+  SPP_PREPARE_STATUS_KEY,
+  type SppAutoPrepareIntent,
+  type SppPrepareStatus,
+} from '../../shared/sppPrepareStatus.js';
 
 /** Testnet passphrase (keep in sync with Networks.TESTNET). */
 const STELLAR_TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
@@ -170,18 +180,6 @@ export async function handleSppHostSignRequest(
       };
     }
 
-    if (!isSppTestnetBroadcastAuthorized()) {
-      const revoked = revokeSppSignApprovals();
-      return {
-        channel: SPP_HOST_BRIDGE_CHANNEL,
-        type: 'SPP_HOST_SIGN_RESULT',
-        id: request.id,
-        ok: false,
-        code: 'UNAUTHORIZED',
-        message: `SPP_BROADCAST_AWAITING_APPROVAL: ${request.payload.kind} signing is disabled (${revoked} approval(s) revoked).`,
-      };
-    }
-
     const { index, address } = await resolveActiveStellarAddress(deps.keyManager);
     if (request.payload.address && request.payload.address !== address) {
       return {
@@ -194,6 +192,76 @@ export async function handleSppHostSignRequest(
       };
     }
 
+    const { kind, input } = request.payload;
+    const storageUnlockToken = request.payload.authorization === 'storage_unlock'
+      ? request.payload.storageUnlockApprovalToken
+      : undefined;
+    if (request.payload.authorization === 'storage_unlock') {
+      const challenge = kind === 'message' ? parseSppStorageUnlockMessage(input) : null;
+      let senderOrigin: string | null = null;
+      try {
+        senderOrigin = sender?.url ? sppStorageUnlockOriginFromUrl(sender.url) : null;
+      } catch {
+        senderOrigin = null;
+      }
+      const [stored, storedIntent] = await Promise.all([
+        browser.storage.local.get(SPP_PREPARE_STATUS_KEY),
+        browser.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY),
+      ]);
+      const current = stored[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+      const activeIntent = storedIntent[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+      if (
+        !storageUnlockToken ||
+        !challenge ||
+        challenge.account !== address ||
+        challenge.origin !== senderOrigin ||
+        current?.phase !== 'initializing_session' ||
+        current.generation !== request.payload.prepareGeneration ||
+        activeIntent?.autoRun !== true ||
+        activeIntent.generation !== request.payload.prepareGeneration
+      ) {
+        throw new Error('SPP storage unlock requires the exact active account, origin and initialization generation');
+      }
+    } else if (request.payload.storageUnlockApprovalToken !== undefined) {
+      throw new Error('Storage unlock approval token requires storage_unlock authorization mode');
+    }
+    // Only the exact upstream v3 key-derivation message can use the separate
+    // user-consent path. Every other message/transaction/auth entry still
+    // requires the Testnet broadcast gate and the normal single-use intent.
+    const kdfDomain = kind === 'message' ? sppKeyDerivationDomainFromMessage(input) : null;
+    const kdfApprovalToken = kdfDomain
+      ? await (async () => {
+          const [stored, storedIntent] = await Promise.all([
+            browser.storage.local.get(SPP_PREPARE_STATUS_KEY),
+            browser.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY),
+          ]);
+          const current = stored[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+          const activeIntent = storedIntent[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+          if (
+            current?.phase !== 'initializing_write_pool' ||
+            !Number.isSafeInteger(current.generation) ||
+            current.generation <= 0 ||
+            current.generation !== request.payload.prepareGeneration ||
+            activeIntent?.autoRun !== true ||
+            activeIntent.generation !== request.payload.prepareGeneration
+          ) {
+            throw new Error('SPP KDF signing requires the exact current write-pool preparation');
+          }
+          return waitForSppKeyDerivationApproval(address, kdfDomain, request.payload.prepareGeneration);
+        })()
+      : null;
+    if (!kdfApprovalToken && !storageUnlockToken && !isSppTestnetBroadcastAuthorized()) {
+      const revoked = revokeSppSignApprovals();
+      return {
+        channel: SPP_HOST_BRIDGE_CHANNEL,
+        type: 'SPP_HOST_SIGN_RESULT',
+        id: request.id,
+        ok: false,
+        code: 'UNAUTHORIZED',
+        message: `SPP_BROADCAST_AWAITING_APPROVAL: ${kind} signing is disabled (${revoked} approval(s) revoked).`,
+      };
+    }
+
     const gate = createContextualSignatureGate('require-prior-approval');
     const adapter = new SppWalletSignerAdapter({
       signer: deps.signer,
@@ -203,11 +271,65 @@ export async function handleSppHostSignRequest(
       authorizationGate: gate,
     });
 
-    const { kind, input } = request.payload;
     let signatureBase64: string;
     switch (kind) {
       case 'message': {
-        const result = await adapter.signMessage(input, { address, networkPassphrase });
+        let result: Awaited<ReturnType<SppWalletSignerAdapter['signMessage']>>;
+        if (storageUnlockToken) {
+          result = await adapter.signStorageUnlockMessage(
+            input,
+            storageUnlockToken,
+            request.payload.prepareGeneration,
+            { address, networkPassphrase },
+          );
+          const [latestStatusRaw, latestIntentRaw, latestNym, latestAccount] = await Promise.all([
+            browser.storage.local.get(SPP_PREPARE_STATUS_KEY),
+            browser.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY),
+            Promise.resolve(getNymRuntimeController().getSnapshot()),
+            resolveActiveStellarAddress(deps.keyManager),
+          ]);
+          const latestStatus = latestStatusRaw[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+          const latestIntent = latestIntentRaw[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+          if (
+            latestStatus?.phase !== 'initializing_session' ||
+            latestStatus.generation !== request.payload.prepareGeneration ||
+            latestIntent?.autoRun !== true ||
+            latestIntent.generation !== request.payload.prepareGeneration ||
+            latestNym.mode !== 'nym' ||
+            !latestNym.connected ||
+            latestAccount.address !== address
+          ) {
+            throw new Error('SPP storage unlock was invalidated before its signature could be returned.');
+          }
+        } else {
+          result = kdfApprovalToken
+          ? await adapter.signKeyDerivationMessage(
+              input, kdfApprovalToken, request.payload.prepareGeneration,
+              { address, networkPassphrase },
+              async () => {
+                const [stored, storedIntent, nym, active] = await Promise.all([
+                  browser.storage.local.get(SPP_PREPARE_STATUS_KEY),
+                  browser.storage.local.get(SPP_AUTO_PREPARE_INTENT_KEY),
+                  Promise.resolve(getNymRuntimeController().getSnapshot()),
+                  resolveActiveStellarAddress(deps.keyManager),
+                ]);
+                const current = stored[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+                const activeIntent = storedIntent[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+                if (
+                  current?.phase !== 'initializing_write_pool' ||
+                  current.generation !== request.payload.prepareGeneration ||
+                  activeIntent?.autoRun !== true ||
+                  activeIntent.generation !== request.payload.prepareGeneration ||
+                  nym.mode !== 'nym' ||
+                  !nym.connected ||
+                  active.address !== address
+                ) {
+                  throw new Error('SPP KDF preparation changed or was cancelled before signing');
+                }
+              },
+            )
+          : await adapter.signMessage(input, { address, networkPassphrase });
+        }
         signatureBase64 =
           typeof result === 'string' ? result : result.signedMessage;
         break;

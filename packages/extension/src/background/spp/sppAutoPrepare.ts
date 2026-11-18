@@ -14,6 +14,8 @@ import {
   type SppPrepareStatus,
 } from '../../shared/sppPrepareStatus.js';
 import { openSppHostInternal } from '../../spp-host/openSppHost.js';
+import { revokeSppSignApprovals } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { revokeSppStorageUnlockApprovals } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 
 /** Phases that mean prepare is already running — do not start a duplicate. */
 const IN_FLIGHT_PHASES: ReadonlySet<SppPreparePhase> = new Set([
@@ -29,6 +31,68 @@ const IN_FLIGHT_PHASES: ReadonlySet<SppPreparePhase> = new Set([
 const OPENING_HOST_STALL_MS = 45_000;
 
 let ensureInFlight: Promise<SppPrepareStatus | null> | null = null;
+let prepareGenerationGuardInstalled = false;
+
+/**
+ * Service-worker-owned lease guard. Host status writes are asynchronous and
+ * chrome.storage has no compare-and-swap; any late write from an older host is
+ * repaired to the current intent generation. Every subsequent stale write
+ * emits another change event and is repaired again.
+ */
+export function installSppPrepareGenerationGuard(): void {
+  if (prepareGenerationGuardInstalled || typeof chrome === 'undefined' ||
+      !chrome.storage?.local || !chrome.storage.onChanged) return;
+  prepareGenerationGuardInstalled = true;
+
+  chrome.storage.onChanged.addListener(async (changes, areaName) => {
+    if (areaName !== 'local' ||
+        (!changes[SPP_PREPARE_STATUS_KEY] && !changes[SPP_AUTO_PREPARE_INTENT_KEY])) return;
+    try {
+      const area = storageLocal();
+      if (!area) return;
+      const current = await area.get([SPP_PREPARE_STATUS_KEY, SPP_AUTO_PREPARE_INTENT_KEY]);
+      const intent = current[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+      const status = current[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+      if (
+        intent?.autoRun !== true ||
+        !Number.isSafeInteger(intent.generation) ||
+        intent.generation <= 0 ||
+        !status ||
+        !Number.isSafeInteger(status.generation) ||
+        status.generation >= intent.generation
+      ) return;
+
+      const recovered: SppPrepareStatus = {
+        ...createIdleSppPrepareStatus(),
+        phase: 'opening_host',
+        message: 'Recuperando estado de la generación SPP vigente…',
+        poolContract: intent.poolContract ?? status.poolContract ?? null,
+        generation: intent.generation,
+        updatedAt: Date.now(),
+      };
+
+      // Re-read before writing. This is not atomic, so the next storage event
+      // also passes through this guard and repairs any later stale write.
+      const latest = await area.get([SPP_PREPARE_STATUS_KEY, SPP_AUTO_PREPARE_INTENT_KEY]);
+      const latestIntent = latest[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+      const latestStatus = latest[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+      if (
+        latestIntent?.autoRun === true &&
+        latestIntent.generation === intent.generation &&
+        latestStatus?.generation !== intent.generation
+      ) {
+        await area.set({ [SPP_PREPARE_STATUS_KEY]: recovered });
+      }
+    } catch {
+      // The KDF and signing paths still fail closed on status/intent mismatch.
+    }
+  });
+}
+
+/** Test helper */
+export function resetSppPrepareGenerationGuardForTests(): void {
+  prepareGenerationGuardInstalled = false;
+}
 
 function storageLocal(): chrome.storage.LocalStorageArea | null {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return null;
@@ -88,15 +152,19 @@ function shouldStartPrepare(status: SppPrepareStatus | null): boolean {
  * After successful Nym connect: open host in background and request auto-prepare.
  */
 export async function startSppAutoPrepareAfterNymConnect(): Promise<void> {
+  // A new prepare owns a new generation. Revoke any leftover one-shot SPP/KDF
+  // approvals synchronously before publishing or opening the next host intent.
+  revokeSppSignApprovals();
+  revokeSppStorageUnlockApprovals();
   const poolContract = await readStoredPoolContract();
-  await publishSppPrepareStatus({
+  const openingStatus = await publishSppPrepareStatus({
     phase: 'opening_host',
     message: 'Abriendo host SPP interno…',
     poolContract,
   });
 
   const intent: SppAutoPrepareIntent = {
-    generation: Date.now(),
+    generation: openingStatus.generation,
     requestedAt: Date.now(),
     poolContract,
     autoRun: true,
@@ -107,7 +175,9 @@ export async function startSppAutoPrepareAfterNymConnect(): Promise<void> {
   }
 
   try {
-    openSppHostInternal({ active: false });
+    // The host must be visible so its mandatory encrypted-storage consent dialog
+    // can be reviewed. Existing tabs are reused/focused by openSppHostInternal.
+    await openSppHostInternal({ active: true });
   } catch (cause) {
     await publishSppPrepareStatus({
       phase: 'failed',

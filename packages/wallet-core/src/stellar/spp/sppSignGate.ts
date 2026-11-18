@@ -132,6 +132,10 @@ export type SppSignAuthorization = {
   readonly unsignedTransactionXdr: string | null;
   readonly approvalId: string;
   readonly permissionEpoch: number;
+  /** Only the exact, user-approved v3 KDF message may sign with broadcasts disabled. */
+  readonly broadcastIndependent?: boolean;
+  /** Independent KDF-only epoch; prepare invalidation does not alter normal SPP intent epochs. */
+  readonly keyDerivationEpoch?: number;
 };
 
 const APPROVAL_TTL_MS = 120_000;
@@ -141,15 +145,22 @@ export function sppSignPermissionEpoch(): number {
   return permissionEpoch;
 }
 
-/** Broadcast and revoke state at the moment of signing, not at an earlier await. */
-export function assertSppSignatureStillPermitted(epoch: number): void {
-  if (!isSppTestnetBroadcastAuthorized()) {
+/**
+ * Broadcast permission remains mandatory for every transaction/auth-entry and every
+ * ordinary SEP-53 message. The one exception is the separately consented, exact
+ * v3 privacy-key derivation message; it never authorizes a Soroban broadcast.
+ */
+export function assertSppSignatureStillPermitted(
+  epoch: number,
+  allowApprovedKeyDerivation = false,
+): void {
+  if (epoch !== permissionEpoch) {
+    throw new SppSignerError('SPP approval was revoked before signing');
+  }
+  if (!allowApprovedKeyDerivation && !isSppTestnetBroadcastAuthorized()) {
     permissionEpoch += 1;
     pending.length = 0;
     throw new SppSignerError('SPP_BROADCAST_AWAITING_APPROVAL: execution permission is off');
-  }
-  if (epoch !== permissionEpoch) {
-    throw new SppSignerError('SPP approval was revoked before signing');
   }
 }
 
@@ -171,6 +182,44 @@ type StoredApproval = {
 };
 
 const pending: StoredApproval[] = [];
+
+const KDF_APPROVAL_TTL_MS = 120_000;
+type PendingKdfApproval = { token: string; expiresAtMs: number; generation: number };
+type IssuedKdfPermit = {
+  account: string;
+  domain: string;
+  generation: number;
+  expiresAtMs: number;
+};
+type KdfApprovalWaiter = {
+  resolve: (token: string) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+const pendingKdfApprovals = new Map<string, PendingKdfApproval>();
+const issuedKdfPermits = new Map<string, IssuedKdfPermit>();
+const kdfApprovalWaiters = new Map<string, KdfApprovalWaiter>();
+/** One explicit consent per account/domain/preparation, even after token consumption. */
+const reservedKdfApprovals = new Set<string>();
+let kdfPermissionEpoch = 0;
+
+function kdfApprovalKey(account: string, domain: string, generation: number): string {
+  return JSON.stringify([account, domain, generation]);
+}
+
+function assertKdfPrepareGeneration(generation: number): number {
+  if (!Number.isSafeInteger(generation) || generation <= 0) {
+    throw new SppSignerError('KDF approval requires a valid SPP prepare generation', 'INVALID_REQUEST');
+  }
+  return generation;
+}
+
+/** Invalidation epoch is separate from the normal transaction-signature permission epoch. */
+export function assertSppKeyDerivationSignatureStillPermitted(epoch: number | undefined): void {
+  if (epoch === undefined || epoch !== kdfPermissionEpoch) {
+    throw new SppSignerError('SPP KDF preparation was invalidated before signing', 'UNAUTHORIZED');
+  }
+}
 
 type InvokeContractView = {
   contractAddress: xdr.ScAddress;
@@ -207,6 +256,172 @@ export const SPP_KEY_DERIVATION_V3_WARNING =
 export function sppKeyDerivationMessage(kdfDomain: string): string {
   const domain = assertKdfDomain(kdfDomain);
   return `Privacy Pool Key Derivation [v3] (${domain})\n${SPP_KEY_DERIVATION_V3_WARNING}`;
+}
+
+/** Return the domain only when the input is byte-exactly the upstream v3 KDF message. */
+export function sppKeyDerivationDomainFromMessage(message: string): string | null {
+  const prefix = 'Privacy Pool Key Derivation [v3] (';
+  const suffix = `)\n${SPP_KEY_DERIVATION_V3_WARNING}`;
+  if (!message.startsWith(prefix) || !message.endsWith(suffix)) return null;
+  const domain = message.slice(prefix.length, -suffix.length);
+  try {
+    if (!domain || domain !== domain.trim()) return null;
+    return sppKeyDerivationMessage(domain) === message ? domain : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Approval is minted only by the trusted wallet UI while the host is preparing
+ * the write pool. It is scoped to the active account + exact KDF domain and expires.
+ */
+export function approveSppKeyDerivationRequest(
+  account: string,
+  kdfDomain: string,
+  prepareGeneration: number,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!StrKey.isValidEd25519PublicKey(account)) return false;
+  let domain: string;
+  let generation: number;
+  try {
+    domain = assertKdfDomain(kdfDomain);
+    generation = assertKdfPrepareGeneration(prepareGeneration);
+  } catch {
+    return false;
+  }
+  const key = kdfApprovalKey(account, domain, generation);
+  // A preparation receives at most one approval, including after token use.
+  if (reservedKdfApprovals.has(key)) return false;
+  const token = crypto.randomUUID();
+  const expiresAtMs = nowMs + KDF_APPROVAL_TTL_MS;
+  const waiter = kdfApprovalWaiters.get(key);
+  reservedKdfApprovals.add(key);
+  if (waiter) {
+    clearTimeout(waiter.timer);
+    kdfApprovalWaiters.delete(key);
+    issuedKdfPermits.set(token, { account, domain, generation, expiresAtMs });
+    waiter.resolve(token);
+  } else {
+    pendingKdfApprovals.set(key, { token, generation, expiresAtMs });
+  }
+  return true;
+}
+
+/** Host-side wait is bound to the generation captured by the host's auto-prepare intent. */
+export function waitForSppKeyDerivationApproval(
+  account: string,
+  kdfDomain: string,
+  prepareGeneration: number,
+  timeoutMs: number = KDF_APPROVAL_TTL_MS,
+  nowMs: number = Date.now(),
+): Promise<string> {
+  if (!StrKey.isValidEd25519PublicKey(account)) {
+    return Promise.reject(new SppSignerError('KDF approval requires a valid active G… account', 'INVALID_REQUEST'));
+  }
+  let domain: string;
+  let generation: number;
+  try {
+    domain = assertKdfDomain(kdfDomain);
+    generation = assertKdfPrepareGeneration(prepareGeneration);
+  } catch (cause) {
+    return Promise.reject(cause instanceof Error ? cause : new SppSignerError('Invalid KDF domain or generation', 'INVALID_REQUEST'));
+  }
+  const key = kdfApprovalKey(account, domain, generation);
+  const pendingApproval = pendingKdfApprovals.get(key);
+  if (pendingApproval && pendingApproval.expiresAtMs > nowMs) {
+    pendingKdfApprovals.delete(key);
+    issuedKdfPermits.set(pendingApproval.token, {
+      account, domain, generation, expiresAtMs: pendingApproval.expiresAtMs,
+    });
+    return Promise.resolve(pendingApproval.token);
+  }
+  if (reservedKdfApprovals.has(key)) {
+    return Promise.reject(new SppSignerError('KDF approval for this preparation was already granted or consumed', 'UNAUTHORIZED'));
+  }
+  if (kdfApprovalWaiters.has(key)) {
+    return Promise.reject(new SppSignerError('A KDF approval request is already waiting for this preparation', 'UNAUTHORIZED'));
+  }
+  return new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      kdfApprovalWaiters.delete(key);
+      reject(new SppSignerError('KDF key derivation approval timed out; no signature was produced', 'UNAUTHORIZED'));
+    }, Math.max(1, Math.min(timeoutMs, KDF_APPROVAL_TTL_MS)));
+    kdfApprovalWaiters.set(key, { resolve, reject, timer });
+  });
+}
+
+/** Consume the one-shot permit; account, domain, and preparation must all match. */
+export function authorizeSppKeyDerivationSignature(args: {
+  input: string;
+  boundAccount: string;
+  networkPassphrase: string;
+  approvalToken: string;
+  prepareGeneration: number;
+  nowMs?: number;
+}): SppSignAuthorization {
+  assertStellarTestnetPassphrase(args.networkPassphrase);
+  if (!StrKey.isValidEd25519PublicKey(args.boundAccount)) {
+    throw new SppSignerError('Bound account must be a valid Stellar G… address', 'INVALID_REQUEST');
+  }
+  const generation = assertKdfPrepareGeneration(args.prepareGeneration);
+  const domain = sppKeyDerivationDomainFromMessage(args.input);
+  if (!domain) {
+    throw new SppSignerError('Only the exact upstream v3 KDF message may use this approval', 'INVALID_REQUEST');
+  }
+  const nowMs = args.nowMs ?? Date.now();
+  const permit = issuedKdfPermits.get(args.approvalToken);
+  if (
+    !permit ||
+    permit.expiresAtMs <= nowMs ||
+    permit.account !== args.boundAccount ||
+    permit.domain !== domain ||
+    permit.generation !== generation
+  ) {
+    issuedKdfPermits.delete(args.approvalToken);
+    throw new SppSignerError('KDF approval is missing, expired, or bound to another account/domain/preparation', 'UNAUTHORIZED');
+  }
+  issuedKdfPermits.delete(args.approvalToken);
+  const digest = hashSep53Message(args.input);
+  return {
+    kind: 'message',
+    digest,
+    context: {
+      kind: 'message',
+      account: args.boundAccount,
+      networkPassphrase: Networks.TESTNET,
+      payloadDigestHex: digestToHex(digest),
+    },
+    unsignedTransactionXdr: null,
+    approvalId: args.approvalToken,
+    permissionEpoch,
+    broadcastIndependent: true,
+    keyDerivationEpoch: kdfPermissionEpoch,
+  };
+}
+
+function clearSppKeyDerivationApprovals(): void {
+  for (const waiter of kdfApprovalWaiters.values()) {
+    clearTimeout(waiter.timer);
+    waiter.reject(new SppSignerError('SPP KDF preparation was invalidated', 'UNAUTHORIZED'));
+  }
+  kdfApprovalWaiters.clear();
+  pendingKdfApprovals.clear();
+  issuedKdfPermits.clear();
+  reservedKdfApprovals.clear();
+}
+
+/** Revoke all waiting, pending, and consumed KDF permits when preparation leaves its generation. */
+export function revokeSppKeyDerivationApprovals(): void {
+  kdfPermissionEpoch += 1;
+  clearSppKeyDerivationApprovals();
+}
+
+/** Test helper: discard all transient key-derivation approvals and reject waiters. */
+export function resetSppKeyDerivationApprovalsForTests(): void {
+  clearSppKeyDerivationApprovals();
+  kdfPermissionEpoch = 0;
 }
 
 /** Previous derivation message. Detects stale keys. Do not sign it for a new registration. */
@@ -440,11 +655,13 @@ export function mintSppSignApproval(intent: SppSignIntent, nowMs: number = Date.
 export function resetSppSignApprovalsForTests(): void {
   pending.length = 0;
   permissionEpoch = 0;
+  resetSppKeyDerivationApprovalsForTests();
 }
 
 /** Drop pending approvals so a disabled broadcast cannot be signed later. */
 export function revokeSppSignApprovals(account?: string): number {
   permissionEpoch += 1;
+  revokeSppKeyDerivationApprovals();
   if (account === undefined) {
     const removed = pending.length;
     pending.length = 0;

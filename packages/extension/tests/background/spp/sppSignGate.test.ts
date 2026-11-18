@@ -3,7 +3,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Networks } from '@stellar/stellar-sdk';
+import { Networks, StrKey } from '@stellar/stellar-sdk';
 import {
   isSppTestnetBroadcastAuthorized,
   resetSppBroadcastGateForTests,
@@ -63,6 +63,7 @@ function signRequest(networkPassphrase?: string) {
       input: 'AAAA',
       address: 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6',
       ...(networkPassphrase !== undefined ? { networkPassphrase } : {}),
+      prepareGeneration: 1,
     },
   };
 }
@@ -164,7 +165,14 @@ describe('SPP host sign sender gate', () => {
       },
       {
         signer: { chain: 'stellar', signTransaction, signMessage } as never,
-        keyManager: { getAccounts: async () => [] } as never,
+        keyManager: {
+          getAccounts: async () => [{
+            index: 0,
+            publicKey: StrKey.decodeEd25519PublicKey(
+              'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6',
+            ),
+          }],
+        } as never,
       },
       HOST,
     );

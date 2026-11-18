@@ -44,6 +44,9 @@ import {
 import { initializeSppHostWritePool } from './sppHostWritePoolFactory.js';
 import { NETHERMIND_PUBLIC_TESTNET_SOURCE_COMMIT } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import type { Client } from 'stellar-private-payments';
+import { Networks } from '@stellar/stellar-sdk';
+import { SppHostRemoteSigner } from './sppHostRemoteSigner.js';
+import { openSppEncryptedStorage } from './sppStorageKeyProvider.js';
 import {
   SppStorageLabPrep,
   type StorageLabEvidence,
@@ -198,6 +201,8 @@ export class SppHostController {
   private _writeClient: Client | null = null;
   /** rpcUrl from last successful session construct (needed for Nym-proxied write init). */
   private _sessionRpcUrl: string | null = null;
+  /** Stellar account whose explicit signature unlocked the encrypted OPFS database. */
+  private _storageUnlockAddress: string | null = null;
   private readonly _deps: SppHostControllerDeps;
   private readonly _storageLab: SppStorageLabPrep;
 
@@ -266,6 +271,7 @@ export class SppHostController {
     this._sessionInitializeEnabled = false;
     this._writeClient = null;
     this._sessionRpcUrl = null;
+    this._storageUnlockAddress = null;
     clearSppHostWritePool('session cleared');
     this._emitBoundSessionChange();
   }
@@ -307,8 +313,29 @@ export class SppHostController {
       const validated = validateSppSessionPrepInput(prep);
       const deps = extractSppSdkRuntimeDepsFromLoadedFacade(this._facadeModule);
       this._writeClient = null;
+      const storageUnlock = validated.storageUnlock;
+      this._storageUnlockAddress = storageUnlock?.userAddress ?? null;
+      const storageSigner = storageUnlock
+        ? new SppHostRemoteSigner({
+            stellarAddress: storageUnlock.userAddress,
+            networkPassphrase: Networks.TESTNET,
+            prepareGeneration: storageUnlock.prepareGeneration,
+          })
+        : null;
       const runtime = buildSppSdkRuntimeFromDeps({
         ...deps,
+        openEncryptedStorage: async ({ storageOpen, workerUrl }) => {
+          if (!storageSigner || !storageUnlock) {
+            throw new Error('SPP encrypted storage requires an active account and explicit unlock context');
+          }
+          return openSppEncryptedStorage({
+            storageOpen,
+            workerUrl,
+            signer: storageSigner,
+            activeStellarAddress: storageUnlock.userAddress,
+            prepareGeneration: storageUnlock.prepareGeneration,
+          });
+        },
         onClientCreated: (client) => {
           this._writeClient = client;
         },
@@ -359,7 +386,16 @@ export class SppHostController {
     if (!bound) {
       throw new Error('Construye la sesión SPP antes de inicializarla');
     }
-    await bound.initialize();
+    try {
+      await bound.initialize();
+    } catch (cause) {
+      // Publish the actual SppSession error state and lastErrorMessage even
+      // when initialize rejects; otherwise popup storage remains stale.
+      this._sessionInitializeEnabled = false;
+      this._sessionConstructError = bound.lastErrorMessage ?? sanitizeError(cause);
+      this._emitBoundSessionChange();
+      throw cause;
+    }
     this._sessionInitializeEnabled = bound.state === 'ready';
     this._emitBoundSessionChange();
     // RO session is ready in this page. Write PrivatePool still requires
@@ -380,12 +416,18 @@ export class SppHostController {
     poolContract: string;
     userAddress: string;
     networkPassphrase: string;
+    prepareGeneration: number;
   }): Promise<SppHostSnapshot> {
     if (!input.nymActive) {
       throw new Error('Stellar Private Payments write pool requires Nym connected');
     }
     if (!this._constructedSession || this._constructedSession.state !== 'ready') {
       throw new Error('Initialize the SPP RO session before creating a write pool');
+    }
+    if (!this._storageUnlockAddress || input.userAddress !== this._storageUnlockAddress) {
+      throw new Error(
+        'The active Stellar account does not match the account that unlocked SPP storage. Switch back to the storage owner before preparing the PrivatePool.',
+      );
     }
     if (!this._writeClient) {
       throw new Error(
@@ -401,6 +443,7 @@ export class SppHostController {
       poolContract: input.poolContract,
       userAddress: input.userAddress,
       networkPassphrase: input.networkPassphrase,
+      prepareGeneration: input.prepareGeneration,
     });
     return this.snapshot();
   }

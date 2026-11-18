@@ -36,8 +36,30 @@ import {
   type SppCircuitLock,
 } from '@solanym/wallet-core/src/stellar/spp/sppProvingKeys.js';
 
+class SppPrepareSupersededError extends Error {
+  constructor() {
+    super('SPP prepare generation was superseded');
+    this.name = 'SppPrepareSupersededError';
+  }
+}
+
 async function publish(status: SppPrepareStatus): Promise<void> {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+  // The service-worker-owned intent is the generation lease. An old host must
+  // never overwrite a newer prepare status, even if its async work completes late.
+  const current = await chrome.storage.local.get([
+    SPP_AUTO_PREPARE_INTENT_KEY,
+    SPP_PREPARE_STATUS_KEY,
+  ]);
+  const intent = current[SPP_AUTO_PREPARE_INTENT_KEY] as SppAutoPrepareIntent | undefined;
+  const currentStatus = current[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+  if (
+    intent?.autoRun !== true ||
+    intent.generation !== status.generation ||
+    currentStatus?.generation !== status.generation
+  ) {
+    throw new SppPrepareSupersededError();
+  }
   await chrome.storage.local.set({ [SPP_PREPARE_STATUS_KEY]: status });
 }
 
@@ -106,11 +128,37 @@ function ownershipFields(config: SppContractConfigInput, poolContract: string | 
 /**
  * Consume auto-prepare intent once per host load. Safe to call after controller is constructed.
  */
-export async function runSppHostAutoPrepareIfRequested(
+async function runSppHostAutoPrepareForIntent(
   controller: SppHostController,
+  intent: SppAutoPrepareIntent,
 ): Promise<void> {
-  const intent = await readIntent();
-  if (!intent) return;
+  const storedStatusRaw = await chrome.storage.local.get(SPP_PREPARE_STATUS_KEY);
+  let storedStatus = storedStatusRaw[SPP_PREPARE_STATUS_KEY] as SppPrepareStatus | undefined;
+  if (!storedStatus || storedStatus.generation > intent.generation) {
+    // The service worker owns the intent key; a stale host never deletes it.
+    return;
+  }
+  // A newer service-worker intent is authoritative. Repair a status overwritten
+  // by a late older host before beginning the new generation.
+  if (storedStatus.generation < intent.generation) {
+    storedStatus = {
+      ...createIdleSppPrepareStatus(),
+      phase: 'opening_host',
+      message: 'Recuperando preparación SPP vigente…',
+      poolContract: intent.poolContract ?? null,
+      generation: intent.generation,
+      updatedAt: Date.now(),
+    };
+    await chrome.storage.local.set({ [SPP_PREPARE_STATUS_KEY]: storedStatus });
+  } else if (
+    storedStatus.phase === 'idle' ||
+    storedStatus.phase === 'failed' ||
+    storedStatus.phase === 'ready'
+  ) {
+    // Terminal/current state remains as a generation record until the worker
+    // replaces or removes it. The host never mutates the SW-owned intent key.
+    return;
+  }
 
   const storedPool =
     intent.poolContract ??
@@ -288,6 +336,16 @@ export async function runSppHostAutoPrepareIfRequested(
         contractConfig.networkPassphrase.trim()) ||
       'Test SDF Network ; September 2015';
     const bootnodeUrl = await readStoredBootnodeUrl();
+    const userAddress = await resolveActiveStellarAddress();
+    if (!userAddress) {
+      await publish({
+        ...base(poolContract, ownership),
+        phase: 'failed',
+        message: 'Desbloquea una cuenta Stellar activa en Astrym antes de inicializar el almacenamiento SPP.',
+        updatedAt: Date.now(),
+      });
+      return;
+    }
 
     await publish({
       ...base(poolContract, ownership),
@@ -296,12 +354,27 @@ export async function runSppHostAutoPrepareIfRequested(
       updatedAt: Date.now(),
     });
 
+    const previousSession = controller.snapshot();
+    // A failed or merely constructed session owns a signer bound to the old
+    // preparation generation. Rebuild it before retrying so the storage
+    // unlock permit can only be minted for the current generation.
+    if (
+      previousSession.sessionBound &&
+      (previousSession.sessionState === 'error' || previousSession.sessionState === 'uninitialized')
+    ) {
+      controller.clearBoundSession();
+    }
+
     if (!controller.snapshot().sessionBound) {
       controller.constructAndAttachUninitializedSession({
         rpcUrl,
         contractConfig,
         circuitLock,
         ...(bootnodeUrl ? { bootnodeUrl } : {}),
+        storageUnlock: {
+          userAddress,
+          prepareGeneration: intent.generation,
+        },
       });
     }
     snap = await controller.initializeBoundSessionForNym(true);
@@ -322,18 +395,6 @@ export async function runSppHostAutoPrepareIfRequested(
       updatedAt: Date.now(),
     });
 
-    const userAddress = await resolveActiveStellarAddress();
-    if (!userAddress) {
-      await publish({
-        ...base(poolContract, ownership),
-        phase: 'read_only',
-        message:
-          'Sesión RO lista. Desbloquea una cuenta Stellar activa (Testnet) para el write pool.',
-        updatedAt: Date.now(),
-      });
-      return;
-    }
-
     await publish({
       ...base(poolContract, ownership),
       phase: 'initializing_write_pool',
@@ -345,6 +406,7 @@ export async function runSppHostAutoPrepareIfRequested(
       poolContract,
       userAddress,
       networkPassphrase,
+      prepareGeneration: intent.generation,
     });
 
     const writeStatus = getSppHostWritePoolStatus();
@@ -366,15 +428,57 @@ export async function runSppHostAutoPrepareIfRequested(
       updatedAt: Date.now(),
     });
   } catch (cause) {
-    await publish({
-      ...base(),
-      phase: 'failed',
-      message: cause instanceof Error ? cause.message : 'Auto-prepare SPP falló',
-      updatedAt: Date.now(),
-    });
+    if (!(cause instanceof SppPrepareSupersededError)) {
+      await publish({
+        ...base(),
+        phase: 'failed',
+        message: cause instanceof Error ? cause.message : 'Auto-prepare SPP falló',
+        updatedAt: Date.now(),
+      }).catch((publishCause: unknown) => {
+        if (!(publishCause instanceof SppPrepareSupersededError)) throw publishCause;
+      });
+    }
+  }
+}
+
+let activePrepareGeneration: number | null = null;
+let activePreparePromise: Promise<void> | null = null;
+
+/**
+ * Process one host intent at a time. If a newer generation arrives while the
+ * previous async run is unwinding, re-read storage and run the latest intent.
+ */
+export async function runSppHostAutoPrepareIfRequested(
+  controller: SppHostController,
+): Promise<void> {
+  const intent = await readIntent();
+  if (!intent) return;
+  if (activePrepareGeneration === intent.generation) return;
+
+  if (activePreparePromise) {
+    await activePreparePromise.catch(() => undefined);
+    const latest = await readIntent();
+    if (latest && latest.generation !== intent.generation) {
+      return runSppHostAutoPrepareIfRequested(controller);
+    }
+    return;
+  }
+
+  activePrepareGeneration = intent.generation;
+  const running = runSppHostAutoPrepareForIntent(controller, intent);
+  activePreparePromise = running;
+  try {
+    await running;
   } finally {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      void chrome.storage.local.remove(SPP_AUTO_PREPARE_INTENT_KEY);
+    if (activePreparePromise === running) {
+      activePreparePromise = null;
+      activePrepareGeneration = null;
+    }
+    const latest = await readIntent();
+    if (latest && latest.generation !== intent.generation) {
+      void runSppHostAutoPrepareIfRequested(controller).catch(() => {
+        /* host status publisher records non-superseded failures */
+      });
     }
   }
 }

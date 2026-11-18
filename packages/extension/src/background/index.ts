@@ -42,6 +42,8 @@ import {
   parseSppHostSignRequest,
 } from '../shared/sppHostBridge.js';
 import { createSppPrivatePaymentHandler } from './handlers/sppPrivatePaymentHandler.js';
+import { createSppKeyDerivationApprovalHandler } from './handlers/sppKeyDerivationApprovalHandler.js';
+import { createSppStorageUnlockApprovalHandler } from './handlers/sppStorageUnlockApprovalHandler.js';
 import {
   createSppAccountSnapshotHandler,
   createSppAccountSyncHandler,
@@ -49,6 +51,7 @@ import {
   createSppRegisterPublicKeysHandler,
 } from './handlers/sppAccountHandlers.js';
 import { noteSppHostLifecycle } from './spp/sppPrivatePoolRegistry.js';
+import { installSppPrepareGenerationGuard } from './spp/sppAutoPrepare.js';
 import { isSppHostDocumentSender } from './trustedWalletOrigin.js';
 import {
   handleSppHostNymFetchRequest,
@@ -90,6 +93,7 @@ import {
 } from './handlers/transactionHandlers.js';
 
 function initBackgroundSynchronous() {
+  installSppPrepareGenerationGuard();
   // 1. Initialize Chrome Adapters synchronously
   const alarmService = new ChromeAlarmService((lock) => stateCoordinator.runLockOperation(lock));
   const persistentStorage = new ChromePersistentStorage(browser.storage.local);
@@ -188,6 +192,8 @@ function initBackgroundSynchronous() {
   router.registerHandler('CONFIRM_STELLAR_TRANSFER', createConfirmStellarTransferHandler(stellarTransferConfirmationTracker) as any);
 
   router.registerHandler('SPP_PRIVATE_PAYMENT', createSppPrivatePaymentHandler({ keyManager }));
+  router.registerHandler('SPP_AUTHORIZE_KEY_DERIVATION', createSppKeyDerivationApprovalHandler({ keyManager }));
+  router.registerHandler('SPP_AUTHORIZE_STORAGE_UNLOCK', createSppStorageUnlockApprovalHandler({ keyManager }));
   router.registerHandler('SPP_ACCOUNT_SNAPSHOT', createSppAccountSnapshotHandler());
   router.registerHandler('SPP_RECIPIENT_LOOKUP', createSppRecipientLookupHandler());
   router.registerHandler('SPP_REGISTER_PUBLIC_KEYS', createSppRegisterPublicKeysHandler({ keyManager }));

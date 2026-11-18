@@ -21,6 +21,8 @@ import {
   assertSppAssembledFees,
   assertStellarTestnetPassphrase,
   assertSppPoolPaymentEconomicsBound,
+  approveSppKeyDerivationRequest,
+  authorizeSppKeyDerivationSignature,
   authorizeSppSignature,
   bindSppRegistrationBeforeMint,
   mintSppSignApproval,
@@ -28,8 +30,12 @@ import {
   setSppPaymentIdentityChecksForTests,
   signDigestWithSppGate,
   sppSignApprovalCount,
-  sppEncryptionKeyChallenge,
   sppKeyDerivationMessage,
+  waitForSppKeyDerivationApproval,
+  assertSppSignatureStillPermitted,
+  assertSppKeyDerivationSignatureStillPermitted,
+  revokeSppSignApprovals,
+  sppEncryptionKeyChallenge,
   sppRegistrationDigest,
   sppRegistrationMessage,
   sppStaleKeyDerivationMessageV2,
@@ -654,6 +660,105 @@ describe('SPP sign gate attack cases', () => {
     expect(sppSignApprovalCount()).toBe(0);
   });
 
+  it('allows only a separately approved exact v3 KDF signature while broadcasts stay off', async () => {
+    setSppTestnetBroadcastAuthorized(false);
+    const message = sppKeyDerivationMessage('Nethermind');
+    const generation = 2026111101;
+    const waiting = waitForSppKeyDerivationApproval(ACCOUNT, 'Nethermind', generation);
+    expect(approveSppKeyDerivationRequest(ACCOUNT, 'Nethermind', generation)).toBe(true);
+    expect(approveSppKeyDerivationRequest(ACCOUNT, 'Nethermind', generation)).toBe(false);
+    const token = await waiting;
+
+    const authorization = authorizeSppKeyDerivationSignature({
+      input: message,
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+      approvalToken: token,
+      prepareGeneration: generation,
+    });
+    expect(authorization.broadcastIndependent).toBe(true);
+    expect(authorization.kind).toBe('message');
+    expect(() => assertSppSignatureStillPermitted(authorization.permissionEpoch, true)).not.toThrow();
+    expect(() => authorizeSppKeyDerivationSignature({
+      input: message,
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+      approvalToken: token,
+      prepareGeneration: generation,
+    })).toThrow(/missing, expired, or bound/);
+    expect(approveSppKeyDerivationRequest(ACCOUNT, 'Nethermind', generation)).toBe(false);
+    expect(() => authorizeSppKeyDerivationSignature({
+      input: message,
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+      approvalToken: token,
+      prepareGeneration: generation + 1,
+    })).toThrow(/missing, expired, or bound/);
+
+    // The normal signer remains blocked, even for the same message.
+    expect(() => authorizeSppSignature({
+      kind: 'message',
+      input: message,
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+    })).toThrow(/SPP_BROADCAST_AWAITING_APPROVAL/);
+    expect(() => authorizeSppKeyDerivationSignature({
+      input: message,
+      boundAccount: OTHER,
+      networkPassphrase: Networks.TESTNET,
+      approvalToken: token,
+      prepareGeneration: generation,
+    })).toThrow(/missing, expired, or bound/);
+    expect(() => authorizeSppKeyDerivationSignature({
+      input: message + ' altered',
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+      approvalToken: token,
+      prepareGeneration: generation,
+    })).toThrow(/exact upstream v3 KDF message/);
+  });
+
+
+  it('revokes a pending KDF waiter and any consumed permit when its preparation is invalidated', async () => {
+    const message = sppKeyDerivationMessage('Nethermind');
+    const generation = 2026111102;
+    const waiting = waitForSppKeyDerivationApproval(ACCOUNT, 'Nethermind', generation);
+    revokeSppSignApprovals();
+    await expect(waiting).rejects.toThrow(/preparation was invalidated/);
+
+    const nextGeneration = generation + 1;
+    const nextWaiting = waitForSppKeyDerivationApproval(ACCOUNT, 'Nethermind', nextGeneration);
+    expect(approveSppKeyDerivationRequest(ACCOUNT, 'Nethermind', nextGeneration)).toBe(true);
+    const token = await nextWaiting;
+    const authorization = authorizeSppKeyDerivationSignature({
+      input: message,
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+      approvalToken: token,
+      prepareGeneration: nextGeneration,
+    });
+    revokeSppSignApprovals();
+    expect(() => assertSppKeyDerivationSignatureStillPermitted(authorization.keyDerivationEpoch))
+      .toThrow(/preparation was invalidated/);
+  });
+
+  it('does not allow a consumed consent to be replayed within the same generation', async () => {
+    const message = sppKeyDerivationMessage('Nethermind');
+    const generation = 2026111103;
+    const waiting = waitForSppKeyDerivationApproval(ACCOUNT, 'Nethermind', generation);
+    expect(approveSppKeyDerivationRequest(ACCOUNT, 'Nethermind', generation)).toBe(true);
+    const token = await waiting;
+    authorizeSppKeyDerivationSignature({
+      input: message,
+      boundAccount: ACCOUNT,
+      networkPassphrase: Networks.TESTNET,
+      approvalToken: token,
+      prepareGeneration: generation,
+    });
+    expect(approveSppKeyDerivationRequest(ACCOUNT, 'Nethermind', generation)).toBe(false);
+    await expect(waitForSppKeyDerivationApproval(ACCOUNT, 'Nethermind', generation))
+      .rejects.toThrow(/already granted or consumed/);
+  });
   it('allowlists Testnet and rejects Public and Futurenet', () => {
     expect(() => assertStellarTestnetPassphrase(Networks.TESTNET)).not.toThrow();
     expect(() => assertStellarTestnetPassphrase(Networks.PUBLIC)).toThrow(/Testnet/);

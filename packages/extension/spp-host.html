@@ -205,14 +205,15 @@
       </div>
       <h1>Astrym — SPP Host</h1>
       <p class="meta">
-        Laboratorio de sesión Stellar Private Payments · facade + WASM + Storage lab gated ·
-        broadcast de pagos bloqueado hasta aprobación explícita ·
-        <code>STORAGE_LAB_EXECUTION_AUTHORIZED=false</code> por defecto
+        Host de sesión Stellar Private Payments · auto-prepare con Nym · desbloqueo cifrado con consentimiento explícito ·
+        Storage lab separado y gated · broadcasts bloqueados por defecto
       </p>
       <p class="banner">
         Facade <code>spp/js/index.js</code> · WASM
         <code>spp/dist/stellar_private_payments_web_bg.wasm</code>.
         Pool Nethermind Testnet <code>CAMWBUWH…WG24U</code>.
+        Al conectar Nym, el host ejecuta el auto-prepare y enfoca una sola pestaña.
+        El desbloqueo de la base cifrada muestra una confirmación separada; firmar ese reto no deriva claves privadas SPP ni autoriza pagos.
         No inventa readiness: <code>write_pool_ready</code> solo tras PrivatePool real vía Nym.
       </p>
 
@@ -238,7 +239,8 @@
         <div class="panel" style="margin: 0.75rem 0 0; padding: 0.65rem 0.75rem">
           <p class="panel-title">Sesión SPP</p>
           <div class="meta" style="margin-bottom: 0.4rem">
-            Construir sin <code>initialize()</code> (no Client / Storage / RPC hasta el paso Nym)
+            Flujo normal: el auto-prepare construye e inicializa la sesión tras conectar Nym.
+            Los controles siguientes son manuales/de diagnóstico; el desbloqueo cifrado requiere el diálogo de consentimiento del host.
           </div>
           <label class="meta" style="display: block; margin: 0.35rem 0">
             rpcUrl (obligatorio, sin default)
@@ -262,7 +264,7 @@
               Construir sesión (sin initialize)
             </button>
             <button id="spp-session-init-btn" class="spp-btn secondary" type="button" disabled>
-              Inicializar sesión (requiere Nym)
+              Inicializar sesión (manual; auto-prepare preferido)
             </button>
             <button id="spp-session-clear-btn" class="spp-btn secondary" type="button" disabled>
               Soltar sesión (sin dispose)
