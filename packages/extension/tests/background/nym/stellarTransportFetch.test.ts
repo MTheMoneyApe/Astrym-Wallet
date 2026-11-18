@@ -6,7 +6,9 @@ import {
   rewriteSdfHorizonUrlForMixFetch,
 } from '../../../src/background/nym/stellarTransportFetch.js';
 import {
+  STELLAR_LOGICAL_MAINNET_HORIZON_URL,
   STELLAR_LOGICAL_TESTNET_HORIZON_URL,
+  STELLAR_NYM_EFFECTIVE_MAINNET_HORIZON_DEFAULT,
   STELLAR_NYM_EFFECTIVE_TESTNET_HORIZON_DEFAULT,
 } from '../../../src/background/nym/stellarHorizonNymConfig.js';
 
@@ -141,7 +143,43 @@ describe('createStellarTransportFetch', () => {
         body: JSON_RPC_BODY,
       }),
     ).rejects.toThrow(/refused body on GET/);
+    await expect(
+      fetchImpl(`${STELLAR_LOGICAL_TESTNET_HORIZON_URL}/accounts/GABC`, {
+        method: 'HEAD',
+        body: 'x',
+      }),
+    ).rejects.toThrow(/refused body on HEAD/);
     expect(fetchViaRouter).not.toHaveBeenCalled();
+  });
+
+  it('refuses methods other than GET, HEAD, and POST', async () => {
+    const { fetchViaRouter, fetchImpl } = nymHarness();
+    for (const method of ['PUT', 'DELETE', 'PATCH']) {
+      fetchViaRouter.mockClear();
+      await expect(
+        fetchImpl(`${STELLAR_LOGICAL_TESTNET_HORIZON_URL}/accounts/GABC`, { method }),
+      ).rejects.toThrow(new RegExp(`refused method: ${method}`));
+      expect(fetchViaRouter).not.toHaveBeenCalled();
+    }
+  });
+
+  it('refuses mainnet Horizon and Ankr mainnet hosts', async () => {
+    const { fetchViaRouter } = nymHarness();
+    const onResolved = vi.fn();
+    const guarded = createStellarTransportFetch({
+      getMode: () => 'nym',
+      fetchViaRouter,
+      nymTimeoutMs: 5_000,
+      onResolved,
+    });
+    await expect(
+      guarded(`${STELLAR_LOGICAL_MAINNET_HORIZON_URL}/accounts/GABC`, { method: 'GET' }),
+    ).rejects.toThrow(/non-allowlisted host: horizon\.stellar\.org/);
+    await expect(
+      guarded(`${STELLAR_NYM_EFFECTIVE_MAINNET_HORIZON_DEFAULT}/accounts/GABC`, { method: 'GET' }),
+    ).rejects.toThrow(/non-allowlisted host: rpc\.ankr\.com/);
+    expect(fetchViaRouter).not.toHaveBeenCalled();
+    expect(onResolved).not.toHaveBeenCalled();
   });
 });
 
