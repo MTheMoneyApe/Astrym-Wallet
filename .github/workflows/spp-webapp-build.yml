@@ -457,6 +457,10 @@ jobs:
           }, null, 2));
           NODE
 
+      - name: Assemble canonical-domain release output
+        if: success()
+        run: node scripts/assemble-vercel-release.mjs
+
       - name: Upload installable MV3 extension
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -465,4 +469,4 @@ jobs:
           path: packages/extension/dist/
           if-no-files-found: error
           compression-level: 1
-          retention-days: 7
+          retention-days: 30
