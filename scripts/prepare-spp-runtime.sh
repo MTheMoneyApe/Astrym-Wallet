@@ -300,7 +300,7 @@ for item in sys.argv[3:]:
 pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
 remaps = [f"--remap-path-prefix={src}={dst}" for src, dst in pairs]
 prefix_maps = [f"-ffile-prefix-map={src}={dst}" for src, dst in pairs]
-flags = upstream + remaps
+flags = upstream + ["-C", "strip=debuginfo"] + remaps
 open(flag_file, "w", encoding="utf-8").write(
     "RUST\n" + "\n".join(flags) + "\nCFLAGS\n" + "\n".join(prefix_maps) + "\n"
 )
