@@ -286,10 +286,15 @@ tokens = {
     "home": "/spp-home",
     "circuits": "/spp-circuits",
 }
-# Always rewrite the known Vercel image prefix explicitly. This is also the
-# deterministic destination when CARGO_HOME and RUSTUP_HOME both resolve to
-# /rust; longer concrete subpaths below still take precedence.
-pairs = [("/rust", "/cargo")]
+# Rust's prebuilt sysroot contributes virtual source paths under /rustc
+# and /rust/deps. Remap those longer prefixes too, so the unchanged strict
+# /rust scan does not mistake compiler source roots for leaked host paths.
+# The general /rust mapping remains the deterministic fallback for image homes.
+pairs = [
+    ("/rust/deps", "/spp-rust-deps"),
+    ("/rustc", "/spp-rustc"),
+    ("/rust", "/cargo"),
+]
 for item in sys.argv[3:]:
     key, path = item.split("=", 1)
     path = os.path.abspath(path)
