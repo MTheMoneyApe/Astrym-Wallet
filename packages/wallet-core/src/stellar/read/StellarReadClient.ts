@@ -5,6 +5,7 @@ import {
   type FriendbotResponse,
   type StellarAccountBalance,
   type StellarBalanceEntry,
+  type StellarPaymentRecord,
 } from './types.js';
 
 export const STELLAR_TESTNET_HORIZON_URL = 'https://horizon-testnet.stellar.org';
@@ -162,5 +163,98 @@ export class StellarReadClient {
       success: false,
       message: `Friendbot returned: ${detail}`,
     };
+  }
+
+  public async getRecentPayments(
+    address: string,
+    limit: number = 5,
+  ): Promise<StellarPaymentRecord[]> {
+    if (!this.validateAddress(address)) {
+      throw new InvalidStellarAddressError(address);
+    }
+
+    const safeLimit = Math.max(1, Math.min(20, Math.floor(limit)));
+    const url = `${this._horizonUrl.replace(/\/+$/, '')}/accounts/${encodeURIComponent(address)}/payments?order=desc&limit=${safeLimit}`;
+
+    let response: Response;
+    try {
+      response = await this._fetch(url, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(this._timeoutMs),
+      });
+    } catch (err: unknown) {
+      throw new StellarNetworkError(
+        `Failed to query Stellar Horizon payments at ${this._horizonUrl}: ${err instanceof Error ? err.message : String(err)}`,
+        err,
+      );
+    }
+
+    if (response.status === 404) {
+      return [];
+    }
+
+    if (!response.ok) {
+      throw new StellarNetworkError(`Stellar Horizon payments error: HTTP ${response.status}`);
+    }
+
+    try {
+      const data = (await response.json()) as {
+        _embedded?: {
+          records?: Array<{
+            id?: string;
+            type?: string;
+            transaction_hash?: string;
+            created_at?: string;
+            asset_type?: string;
+            amount?: string;
+            from?: string;
+            to?: string;
+            funder?: string;
+            account?: string;
+            into?: string;
+            starting_balance?: string;
+          }>;
+        };
+      };
+      const records = Array.isArray(data._embedded?.records) ? data._embedded.records : [];
+      const out: StellarPaymentRecord[] = [];
+      for (const rec of records) {
+        if (!rec.transaction_hash || !rec.created_at) continue;
+        if (rec.type === 'payment' && rec.asset_type === 'native' && typeof rec.amount === 'string') {
+          const sent = rec.from === address;
+          out.push({
+            id: rec.id ?? rec.transaction_hash,
+            txHash: rec.transaction_hash,
+            direction: sent ? 'sent' : 'received',
+            amountXlm: rec.amount,
+            createdAt: rec.created_at,
+            counterparty: sent ? rec.to : rec.from,
+          });
+        } else if (rec.type === 'create_account' && typeof rec.starting_balance === 'string') {
+          const sent = rec.funder === address;
+          out.push({
+            id: rec.id ?? rec.transaction_hash,
+            txHash: rec.transaction_hash,
+            direction: sent ? 'sent' : 'received',
+            amountXlm: rec.starting_balance,
+            createdAt: rec.created_at,
+            counterparty: sent ? rec.account : rec.funder,
+          });
+        } else if (rec.type === 'account_merge') {
+          const sent = rec.account === address;
+          out.push({
+            id: rec.id ?? rec.transaction_hash,
+            txHash: rec.transaction_hash,
+            direction: sent ? 'sent' : 'received',
+            amountXlm: typeof rec.amount === 'string' ? rec.amount : '0',
+            createdAt: rec.created_at,
+            counterparty: sent ? rec.into : rec.account,
+          });
+        }
+      }
+      return out.slice(0, safeLimit);
+    } catch (err: unknown) {
+      throw new StellarNetworkError('Failed to parse Horizon payments response', err);
+    }
   }
 }

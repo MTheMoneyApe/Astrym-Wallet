@@ -20,6 +20,15 @@ export interface FriendbotResponse {
   txHash?: string | undefined;
 }
 
+export interface StellarPaymentRecord {
+  id: string;
+  txHash: string;
+  direction: 'sent' | 'received';
+  amountXlm: string;
+  createdAt: string;
+  counterparty?: string | undefined;
+}
+
 export class InvalidStellarAddressError extends Error {
   constructor(address: string) {
     super(`Invalid Stellar address format: ${address}`);

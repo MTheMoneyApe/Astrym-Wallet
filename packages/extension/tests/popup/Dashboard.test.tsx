@@ -8,6 +8,7 @@ import {
   FRIENDBOT_NYM_NOTICE,
   FriendbotFundButton,
   PrivacyModeSelector,
+  RecentActivityCard,
   applyFriendbotModeStatus,
   createAccountOperationGate,
   copyPublicAddress,
@@ -16,9 +17,15 @@ import {
   formatPublicAddress,
   includeCreatedAccount,
   isCurrentBalanceResponse,
+  mergeRecentTransactions,
   resolveRestoredAccountSelection,
   selectMenuAccount,
 } from '../../src/popup/Dashboard.js';
+import {
+  TX_TRANSPORT_HISTORY_STORAGE_KEY,
+  parseTxTransportHistory,
+  stellarExpertTxUrl,
+} from '../../src/shared/txTransportHistory.js';
 
 vi.mock('../../src/popup/ipc.js', () => ({ sendIpcMessage: vi.fn() }));
 
@@ -371,5 +378,96 @@ describe('executeOneClickPrivacyMode', () => {
       disconnect,
     });
     expect(order).toEqual(['setMode:direct']);
+  });
+});
+
+describe('RecentActivityCard and txTransportHistory', () => {
+  it('parses stored astrym.txTransportHistory safely and builds stellar.expert links', () => {
+    expect(TX_TRANSPORT_HISTORY_STORAGE_KEY).toBe('astrym.txTransportHistory');
+    expect(
+      parseTxTransportHistory({
+        abc123: 'nym',
+        def456: 'direct',
+        bad: 'clearnet',
+        num: 42,
+      }),
+    ).toEqual({
+      abc123: 'nym',
+      def456: 'direct',
+    });
+    expect(parseTxTransportHistory(null)).toEqual({});
+    expect(stellarExpertTxUrl('abcdef0123456789')).toBe(
+      'https://stellar.expert/explorer/testnet/tx/abcdef0123456789',
+    );
+  });
+
+  it('merges Horizon payments with session sends, attaches Nym/Directo tags, and caps at 5', () => {
+    const merged = mergeRecentTransactions(
+      [
+        {
+          id: '1',
+          txHash: 'hash_nym_1111111111',
+          direction: 'sent',
+          amountXlm: '25.5',
+          createdAt: '2026-11-18T10:00:00Z',
+        },
+        {
+          id: '2',
+          txHash: 'hash_direct_2222222',
+          direction: 'received',
+          amountXlm: '10000',
+          createdAt: '2026-11-18T09:00:00Z',
+        },
+      ],
+      [
+        {
+          id: 'hash_nym_1111111111',
+          txHash: 'hash_nym_1111111111',
+          direction: 'sent',
+          amountXlm: '25.5',
+          createdAt: '2026-11-18T10:00:00Z',
+          transport: 'nym',
+        },
+        {
+          id: 'hash_session_333333',
+          txHash: 'hash_session_333333',
+          direction: 'sent',
+          amountXlm: '5',
+          createdAt: '2026-11-18T11:00:00Z',
+          transport: 'direct',
+        },
+      ],
+      {
+        hash_nym_1111111111: 'nym',
+        hash_direct_2222222: 'direct',
+      },
+      5,
+    );
+
+    expect(merged).toHaveLength(3);
+    expect(merged[0]).toMatchObject({ txHash: 'hash_session_333333', transport: 'direct' });
+    expect(merged[1]).toMatchObject({ txHash: 'hash_nym_1111111111', transport: 'nym' });
+    expect(merged[2]).toMatchObject({ txHash: 'hash_direct_2222222', transport: 'direct' });
+
+    const markup = renderToStaticMarkup(
+      React.createElement(RecentActivityCard, { items: merged }),
+    );
+    expect(markup).toContain('Historial reciente');
+    expect(markup).toContain('Enviado');
+    expect(markup).toContain('Recibido');
+    expect(markup).toContain('-25.50 XLM');
+    expect(markup).toContain('+10,000.00 XLM');
+    expect(markup).toContain('tx-badge--nym');
+    expect(markup).toContain('>Nym<');
+    expect(markup).toContain('tx-badge--direct');
+    expect(markup).toContain('>Directo<');
+    expect(markup).toContain('https://stellar.expert/explorer/testnet/tx/hash_nym_1111111111');
+  });
+
+  it('shows fail-closed notice when Nym is disconnected and no items are loaded', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(RecentActivityCard, { items: [], blockedByNym: true }),
+    );
+    expect(markup).toContain('Conecta Nym para cargar el historial desde Horizon.');
   });
 });

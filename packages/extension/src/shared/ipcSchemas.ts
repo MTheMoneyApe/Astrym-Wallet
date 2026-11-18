@@ -75,6 +75,25 @@ export const GetStellarBalanceResponseSchema = z.object({
   balances: z.array(StellarBalanceItemSchema),
 });
 
+export const StellarPaymentRecordSchema = z.object({
+  id: z.string(),
+  txHash: z.string(),
+  direction: z.enum(['sent', 'received']),
+  amountXlm: z.string(),
+  createdAt: z.string(),
+  counterparty: z.string().optional(),
+});
+
+export const GetStellarRecentPaymentsRequestSchema = z.object({
+  address: z.string(),
+  limit: z.number().int().min(1).max(20).optional(),
+});
+
+export const GetStellarRecentPaymentsResponseSchema = z.object({
+  address: z.string(),
+  payments: z.array(StellarPaymentRecordSchema),
+});
+
 export const FundStellarTestnetRequestSchema = z.object({
   address: z.string(),
 });
@@ -525,6 +544,10 @@ export const MessageSchemas = {
   GET_STELLAR_BALANCE: {
     request: GetStellarBalanceRequestSchema,
     response: GetStellarBalanceResponseSchema,
+  },
+  GET_STELLAR_RECENT_PAYMENTS: {
+    request: GetStellarRecentPaymentsRequestSchema,
+    response: GetStellarRecentPaymentsResponseSchema,
   },
   FUND_STELLAR_TESTNET_ACCOUNT: {
     request: FundStellarTestnetRequestSchema,

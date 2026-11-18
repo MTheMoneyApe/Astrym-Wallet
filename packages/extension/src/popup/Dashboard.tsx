@@ -37,6 +37,15 @@ import type {
 } from './NymTransportPanel.js';
 import { PrivacyModeIndicator } from './privacyIndicator.js';
 import { NYM_PRIVACY_PREFERENCE_STORAGE_KEY } from '../shared/nymPrivacyPreference.js';
+import {
+  TX_TRANSPORT_HISTORY_STORAGE_KEY,
+  parseTxTransportHistory,
+  readTxTransportHistory,
+  recordTxTransport,
+  stellarExpertTxUrl,
+  type TxTransportHistoryMap,
+  type TxTransportKind,
+} from '../shared/txTransportHistory.js';
 import { bindNymRuntimeStatus } from '../shared/nymRuntimeStatus.js';
 import { beginGatewayPermissionRequestFromUserGesture } from './nymPermissionGesture.js';
 import { NYM_LIVE_SMOKE_EXECUTION_AUTHORIZED } from '../nym-offscreen/liveSmokeAuth.js';
@@ -675,6 +684,161 @@ export async function executeOneClickPrivacyMode(
   }
 }
 
+export type DashboardRecentTx = {
+  id: string;
+  txHash: string;
+  direction: 'sent' | 'received';
+  amountXlm: string;
+  createdAt: string;
+  transport?: TxTransportKind | undefined;
+};
+
+export function formatShortTxHash(txHash: string): string {
+  if (txHash.length <= 12) return txHash;
+  return `${txHash.slice(0, 6)}…${txHash.slice(-4)}`;
+}
+
+export function formatShortTxDate(iso: string): string {
+  const parsed = Date.parse(iso);
+  if (Number.isNaN(parsed)) return iso;
+  try {
+    return new Date(parsed).toLocaleString('es-ES', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return new Date(parsed).toISOString().slice(0, 16).replace('T', ' ');
+  }
+}
+
+export function formatXlmAmount(raw: string): string {
+  const num = Number(raw);
+  if (Number.isNaN(num)) return raw;
+  return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+}
+
+export function mergeRecentTransactions(
+  horizonPayments: readonly DashboardRecentTx[],
+  sessionTxs: readonly DashboardRecentTx[],
+  transportMap: TxTransportHistoryMap,
+  limit = 5,
+): DashboardRecentTx[] {
+  const byHash = new Map<string, DashboardRecentTx>();
+  for (const tx of sessionTxs) {
+    if (!tx.txHash) continue;
+    const mappedTransport = transportMap[tx.txHash] ?? tx.transport;
+    byHash.set(tx.txHash, {
+      ...tx,
+      ...(mappedTransport ? { transport: mappedTransport } : {}),
+    });
+  }
+  for (const tx of horizonPayments) {
+    if (!tx.txHash) continue;
+    const existing = byHash.get(tx.txHash);
+    const mappedTransport = transportMap[tx.txHash] ?? existing?.transport ?? tx.transport;
+    byHash.set(tx.txHash, {
+      ...tx,
+      ...(mappedTransport ? { transport: mappedTransport } : {}),
+    });
+  }
+  return [...byHash.values()]
+    .sort((a, b) => {
+      const timeA = Date.parse(a.createdAt);
+      const timeB = Date.parse(b.createdAt);
+      const validA = Number.isNaN(timeA) ? 0 : timeA;
+      const validB = Number.isNaN(timeB) ? 0 : timeB;
+      return validB - validA;
+    })
+    .slice(0, Math.max(1, limit));
+}
+
+export function RecentActivityCard({
+  items,
+  loading = false,
+  blockedByNym = false,
+  error = '',
+}: {
+  items: readonly DashboardRecentTx[];
+  loading?: boolean;
+  blockedByNym?: boolean;
+  error?: string;
+}) {
+  return (
+    <section className="card activity-card" data-testid="dashboard-recent-activity">
+      <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600 }}>Historial reciente</h3>
+      {loading && items.length === 0 ? (
+        <p className="text-secondary" style={{ margin: 0, fontSize: '0.8rem', lineHeight: 1.4 }}>
+          Cargando historial…
+        </p>
+      ) : items.length > 0 ? (
+        <ul className="activity-list">
+          {items.map((item) => {
+            const isSent = item.direction === 'sent';
+            return (
+              <li key={item.id || item.txHash} className="activity-item" data-testid="recent-tx-row">
+                <div className="activity-item__main">
+                  <div className="activity-item__top">
+                    <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>
+                      {isSent ? 'Enviado' : 'Recibido'}
+                    </span>
+                    {item.transport === 'nym' ? (
+                      <span className="tx-badge tx-badge--nym" data-testid="tx-transport-badge">
+                        Nym
+                      </span>
+                    ) : item.transport === 'direct' ? (
+                      <span className="tx-badge tx-badge--direct" data-testid="tx-transport-badge">
+                        Directo
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="activity-item__meta">
+                    <span>{formatShortTxDate(item.createdAt)}</span>
+                    <a
+                      href={stellarExpertTxUrl(item.txHash)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="tx-explorer-link"
+                      data-testid="tx-explorer-link"
+                      title={item.txHash}
+                    >
+                      {formatShortTxHash(item.txHash)} ↗
+                    </a>
+                  </div>
+                </div>
+                <span
+                  style={{
+                    fontWeight: 700,
+                    fontVariantNumeric: 'tabular-nums',
+                    whiteSpace: 'nowrap',
+                    color: isSent ? 'var(--text-main)' : 'var(--accent-color)',
+                  }}
+                >
+                  {isSent ? '-' : '+'}
+                  {formatXlmAmount(item.amountXlm)} XLM
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : blockedByNym ? (
+        <p className="text-secondary" style={{ margin: 0, fontSize: '0.8rem', lineHeight: 1.4 }}>
+          Conecta Nym para cargar el historial desde Horizon.
+        </p>
+      ) : error ? (
+        <p className="text-secondary" style={{ margin: 0, fontSize: '0.8rem', lineHeight: 1.4 }}>
+          No se pudo cargar el historial reciente.
+        </p>
+      ) : (
+        <p className="text-secondary" style={{ margin: 0, fontSize: '0.8rem', lineHeight: 1.4 }}>
+          Aún no hay movimientos recientes en esta cuenta.
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function PrivacyModeSelector({
   snapshot,
   busy,
@@ -753,9 +917,11 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   const [isUnfunded, setIsUnfunded] = useState(false);
   const [fundingLoading, setFundingLoading] = useState(false);
   const [fundingMessage, setFundingMessage] = useState('');
-  const [recentActivity, setRecentActivity] = useState<
-    Array<{ id: string; title: string; subtitle: string; time: string }>
-  >([]);
+  const [txTransportHistory, setTxTransportHistory] = useState<TxTransportHistoryMap>({});
+  const [horizonPayments, setHorizonPayments] = useState<DashboardRecentTx[]>([]);
+  const [sessionTxs, setSessionTxs] = useState<DashboardRecentTx[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
   const [view, setView] = useState<'dashboard' | 'send' | 'receive' | 'settings'>('dashboard');
   const latestBalanceRequest = useRef(0);
   const selectedIndexRef = useRef<number | null>(null);
@@ -786,6 +952,28 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   useEffect(() => {
     selectedIndexRef.current = selectedIndex;
   }, [selectedIndex]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void readTxTransportHistory().then((map) => {
+      if (!cancelled) setTxTransportHistory(map);
+    });
+    if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return () => { cancelled = true; };
+    const onChanged = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ) => {
+      if (area !== 'local' || !changes[TX_TRANSPORT_HISTORY_STORAGE_KEY]) return;
+      setTxTransportHistory(
+        parseTxTransportHistory(changes[TX_TRANSPORT_HISTORY_STORAGE_KEY].newValue),
+      );
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => {
+      cancelled = true;
+      chrome.storage.onChanged.removeListener(onChanged);
+    };
+  }, []);
 
   useEffect(() => {
     if (view === 'dashboard') {
@@ -905,6 +1093,40 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     }
   };
 
+  const fetchRecentPayments = async (
+    address: string,
+    requestId: number,
+    accountIndex?: number,
+  ) => {
+    setHistoryLoading(true);
+    setHistoryError('');
+    try {
+      const res = await sendIpcMessage('GET_STELLAR_RECENT_PAYMENTS', { address, limit: 5 });
+      if (!isCurrentBalanceResponse(requestId, latestBalanceRequest.current, accountIndex, selectedIndexRef.current)) {
+        return;
+      }
+      setHorizonPayments(
+        res.payments.map((p) => ({
+          id: p.id,
+          txHash: p.txHash,
+          direction: p.direction,
+          amountXlm: p.amountXlm,
+          createdAt: p.createdAt,
+        })),
+      );
+    } catch (err: unknown) {
+      if (!isCurrentBalanceResponse(requestId, latestBalanceRequest.current, accountIndex, selectedIndexRef.current)) {
+        return;
+      }
+      setHorizonPayments([]);
+      setHistoryError(err instanceof Error ? err.message : 'Failed to load recent payments');
+    } finally {
+      if (latestBalanceRequest.current === requestId) {
+        setHistoryLoading(false);
+      }
+    }
+  };
+
   const fetchBalance = async (address: string, accountIndex?: number) => {
     const requestId = ++latestBalanceRequest.current;
     setBalanceLoading(true);
@@ -924,10 +1146,13 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         if (!bal.exists) {
           setIsUnfunded(true);
           setBalance('0.0000');
+          setHorizonPayments([]);
+          setHistoryLoading(false);
         } else {
           setIsUnfunded(false);
           const num = Number(bal.balance);
           setBalance(isNaN(num) ? bal.balance : num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }));
+          void fetchRecentPayments(address, requestId, accountIndex);
         }
         setRpcStatus('connected');
       } else {
@@ -968,16 +1193,21 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
       const res = await sendIpcMessage('FUND_STELLAR_TESTNET_ACCOUNT', { address: targetAddress });
       if (res.success) {
         setFundingMessage('Cuenta fondeada con 10,000 XLM de Testnet. Actualizando saldo…');
-        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        setRecentActivity((prev) => [
-          {
-            id: `fund-${Date.now()}`,
-            title: '+10,000 XLM (Testnet)',
-            subtitle: 'Fondeo con Friendbot',
-            time,
-          },
-          ...prev.slice(0, 4),
-        ]);
+        if (res.txHash) {
+          const transport: TxTransportKind = nymSnapshot.mode === 'nym' ? 'nym' : 'direct';
+          void recordTxTransport(res.txHash, transport).then((map) => setTxTransportHistory(map));
+          setSessionTxs((prev) => [
+            {
+              id: res.txHash!,
+              txHash: res.txHash!,
+              direction: 'received',
+              amountXlm: '10000',
+              createdAt: new Date().toISOString(),
+              transport,
+            },
+            ...prev.filter((item) => item.txHash !== res.txHash),
+          ].slice(0, 5));
+        }
         await fetchBalance(targetAddress, account?.index);
       } else {
         setFundingMessage(res.message);
@@ -1011,6 +1241,8 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
       setConfirmedActiveIndex(index);
       setAccount({ address: nextAccount.publicKey, label: nextAccount.label, index: nextAccount.index });
       setAccountError('');
+      setHorizonPayments([]);
+      setSessionTxs([]);
       void fetchBalance(nextAccount.publicKey, nextAccount.index);
       return true;
     } catch (err: any) {
@@ -1922,17 +2154,22 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           accountIndex={account.index}
           accountAddress={account.address}
           onComplete={() => {
-            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            setRecentActivity((prev) => [
-              {
-                id: `send-${Date.now()}`,
-                title: 'Envío completado',
-                subtitle: 'Transacción enviada en Stellar Testnet',
-                time,
-              },
-              ...prev.slice(0, 4),
-            ]);
             setView('dashboard');
+          }}
+          transportMode={nymSnapshot.mode === 'nym' ? 'nym' : 'direct'}
+          onStellarSent={(tx) => {
+            setTxTransportHistory((prev) => ({ ...prev, [tx.txHash]: tx.transport }));
+            setSessionTxs((prev) => [
+              {
+                id: tx.txHash,
+                txHash: tx.txHash,
+                direction: 'sent',
+                amountXlm: tx.amountXlm,
+                createdAt: tx.createdAt,
+                transport: tx.transport,
+              },
+              ...prev.filter((item) => item.txHash !== tx.txHash),
+            ].slice(0, 5));
           }}
           privatePaymentsEnabled={sppSelected && nymReadyForSpp}
           privatePreparePhase={sppPrepareStatus?.phase ?? 'idle'}
@@ -2174,8 +2411,13 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     );
   }
 
+  const mergedRecentTxs = useMemo(
+    () => mergeRecentTransactions(horizonPayments, sessionTxs, txTransportHistory, 5),
+    [horizonPayments, sessionTxs, txTransportHistory],
+  );
+
   return (
-    <div className="view-container">
+    <div className="view-container dashboard">
       <div className="header" style={{ position: 'relative', gap: 8, marginBottom: 14 }}>
         <h2 className="text-accent" style={{ margin: 0, fontSize: '1.15rem', letterSpacing: '0.02em' }}>Astrym</h2>
         <AccountMenu
@@ -2269,26 +2511,12 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
             <button onClick={() => setView('send')} className="btn-primary">Enviar</button>
           </div>
 
-          <section className="card activity-card" data-testid="dashboard-recent-activity">
-            <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600 }}>Historial reciente</h3>
-            {recentActivity.length > 0 ? (
-              <ul className="activity-list">
-                {recentActivity.map((item) => (
-                  <li key={item.id} className="activity-item">
-                    <div>
-                      <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{item.title}</div>
-                      <div style={{ fontSize: '0.74rem', color: 'var(--text-sec)' }}>{item.subtitle}</div>
-                    </div>
-                    <span style={{ fontSize: '0.74rem', color: 'var(--text-sec)', whiteSpace: 'nowrap' }}>{item.time}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-secondary" style={{ margin: 0, fontSize: '0.8rem', lineHeight: 1.4 }}>
-                Aún no hay movimientos recientes en esta sesión.
-              </p>
-            )}
-          </section>
+          <RecentActivityCard
+            items={mergedRecentTxs}
+            loading={historyLoading}
+            blockedByNym={nymSnapshot.mode === 'nym' && !nymSnapshot.connected}
+            error={historyError}
+          />
         </div>
       ) : (
         <div className="center-content">

@@ -158,7 +158,7 @@ export function App() {
     document.documentElement.classList.contains('astrym-webapp');
 
   return (
-    <div className="wallet-shell">
+    <div className="wallet-shell app-shell">
       {showWebappBrandBar ? <OpenAndroidWebappBar /> : null}
       {screen}
     </div>

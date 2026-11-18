@@ -77,6 +77,7 @@ import {
   createGetAccountsHandler, 
   createGetActiveAccountHandler,
   createGetStellarBalanceHandler,
+  createGetStellarRecentPaymentsHandler,
   createFundStellarTestnetHandler,
   createAddAccountHandler,
   createSetActiveAccountHandler,
@@ -158,6 +159,7 @@ function initBackgroundSynchronous() {
   router.registerHandler('GET_ACCOUNTS', createGetAccountsHandler(accountService));
   router.registerHandler('GET_ACTIVE_ACCOUNT', createGetActiveAccountHandler(accountService));
   router.registerHandler('GET_STELLAR_BALANCE', createGetStellarBalanceHandler(stellarReadClient));
+  router.registerHandler('GET_STELLAR_RECENT_PAYMENTS', createGetStellarRecentPaymentsHandler(stellarReadClient));
   router.registerHandler('FUND_STELLAR_TESTNET_ACCOUNT', createFundStellarTestnetHandler(stellarReadClient));
   router.registerHandler('ADD_ACCOUNT', createAddAccountHandler(keyManager));
   router.registerHandler('SET_ACTIVE_ACCOUNT', createSetActiveAccountHandler(accountService));

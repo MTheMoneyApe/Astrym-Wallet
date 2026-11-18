@@ -11,6 +11,7 @@ import type {
 import { parseSolToLamports } from '../shared/solToLamports.js';
 import { SppPrivateSend } from './SppPrivateSend.js';
 import { SppAccountPanel } from './SppAccountPanel.js';
+import { recordTxTransport, type TxTransportKind } from '../shared/txTransportHistory.js';
 
 type SendStatus = 'idle' | 'preparing' | 'ready' | 'sending' | 'pending' | 'confirmed' | 'failed' | 'unknown';
 
@@ -105,6 +106,8 @@ export function Send({
   privatePoolContract = '',
   paymentMode = 'clear',
   onPaymentModeChange,
+  transportMode = 'direct',
+  onStellarSent,
 }: {
   onBack: () => void;
   accountIndex: number;
@@ -117,6 +120,13 @@ export function Send({
   privatePoolContract?: string;
   paymentMode?: 'clear' | 'private';
   onPaymentModeChange?: (mode: 'clear' | 'private') => void;
+  transportMode?: TxTransportKind;
+  onStellarSent?: (tx: {
+    txHash: string;
+    amountXlm: string;
+    createdAt: string;
+    transport: TxTransportKind;
+  }) => void;
 }) {
   const isStellar = accountAddress.startsWith('G') && accountAddress.length === 56;
   const privateMode = paymentMode === 'private' && privatePaymentsEnabled && isStellar;
@@ -339,6 +349,14 @@ export function Send({
       setStatus('sending');
       try {
         const res = await sendIpcMessage('SEND_STELLAR_TRANSFER', { id: stellarReview.id });
+        const actualTransport: TxTransportKind = transportMode === 'nym' ? 'nym' : 'direct';
+        void recordTxTransport(res.txHash, actualTransport);
+        onStellarSent?.({
+          txHash: res.txHash,
+          amountXlm: stellarReview.amountXlm,
+          createdAt: new Date().toISOString(),
+          transport: actualTransport,
+        });
         setSignature(res.txHash);
         setStatus('pending');
         const confirmation = await sendIpcMessage('CONFIRM_STELLAR_TRANSFER', { txHash: res.txHash });

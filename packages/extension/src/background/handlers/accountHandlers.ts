@@ -8,6 +8,7 @@ import type {
   GetActiveAccountRequest, GetActiveAccountResponse,
   GetBalanceRequest, GetBalanceResponse,
   GetStellarBalanceRequest, GetStellarBalanceResponse,
+  GetStellarRecentPaymentsRequest, GetStellarRecentPaymentsResponse,
   FundStellarTestnetRequest, FundStellarTestnetResponse,
   AddAccountRequest, AddAccountResponse,
   SetActiveAccountRequest, SetActiveAccountResponse,
@@ -69,6 +70,16 @@ export function createGetBalanceHandler(readClient: SolanaReadClient) {
 export function createGetStellarBalanceHandler(readClient: StellarReadClient) {
   return async (payload: GetStellarBalanceRequest): Promise<GetStellarBalanceResponse> => {
     return await readClient.getBalance(payload.address);
+  };
+}
+
+export function createGetStellarRecentPaymentsHandler(readClient: StellarReadClient) {
+  return async (payload: GetStellarRecentPaymentsRequest): Promise<GetStellarRecentPaymentsResponse> => {
+    const payments = await readClient.getRecentPayments(payload.address, payload.limit ?? 5);
+    return {
+      address: payload.address,
+      payments,
+    };
   };
 }
 
