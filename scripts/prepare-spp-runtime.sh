@@ -44,6 +44,8 @@ ensure_wasm_c_compiler() {
   local clang_prefix="$BUILD_ROOT/toolchains/clang-18.1.3"
   local candidate="$clang_prefix/bin/clang"
   local cxx="$clang_prefix/bin/clang++"
+  local llvm_ar="$clang_prefix/bin/llvm-ar"
+  local llvm_ranlib="$clang_prefix/bin/llvm-ranlib"
 
   mkdir -p "$micromamba_dir" "$BUILD_ROOT/toolchains"
   if [ ! -x "$micromamba" ] || ! echo "$micromamba_sha256  $micromamba" | sha256sum -c - >/dev/null 2>&1; then
@@ -57,9 +59,13 @@ ensure_wasm_c_compiler() {
     mv "$micromamba.partial" "$micromamba"
   fi
 
-  if [ ! -x "$candidate" ] || [ ! -x "$cxx" ]; then
-    log "COMMAND: micromamba install conda-forge Clang 18.1.3 toolchain"
-    MAMBA_ROOT_PREFIX="$BUILD_ROOT/mamba-root" "$micromamba" create --yes \
+  if [ ! -x "$candidate" ] || [ ! -x "$cxx" ] || [ ! -x "$llvm_ar" ] || [ ! -x "$llvm_ranlib" ]; then
+    log "COMMAND: micromamba install conda-forge Clang and LLVM tools 18.1.3"
+    local action="create"
+    if [ -f "$clang_prefix/conda-meta/history" ]; then
+      action="install"
+    fi
+    MAMBA_ROOT_PREFIX="$BUILD_ROOT/mamba-root" "$micromamba" "$action" --yes \
       --prefix "$clang_prefix" \
       --override-channels --channel https://conda.anaconda.org/conda-forge \
       --strict-channel-priority \
@@ -67,16 +73,21 @@ ensure_wasm_c_compiler() {
       "clang-18=18.1.3" \
       "clangxx=18.1.3" \
       "libclang-cpp18.1=18.1.3" \
-      "libllvm18=18.1.3"
+      "libllvm18=18.1.3" \
+      "llvm-tools=18.1.3"
   fi
 
   [ -x "$candidate" ] || die "pinned Clang 18.1.3 binary is missing"
   [ -x "$cxx" ] || die "pinned Clang++ 18.1.3 binary is missing"
+  [ -x "$llvm_ar" ] || die "pinned LLVM 18.1.3 llvm-ar binary is missing"
+  [ -x "$llvm_ranlib" ] || die "pinned LLVM 18.1.3 llvm-ranlib binary is missing"
   export LD_LIBRARY_PATH="$clang_prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-  local version cxx_version
+  local version cxx_version ar_version ranlib_version
   version="$("$candidate" --version 2>&1 | sed -n '1p')"
   cxx_version="$("$cxx" --version 2>&1 | sed -n '1p')"
+  ar_version="$("$llvm_ar" --version 2>&1 | grep -m1 'LLVM version')"
+  ranlib_version="$("$llvm_ranlib" --version 2>&1 | grep -m1 'LLVM version')"
   case "$version" in
     *"18.1.3"*) ;;
     *) die "wasm C compiler is not Clang 18.1.3: $version" ;;
@@ -84,6 +95,14 @@ ensure_wasm_c_compiler() {
   case "$cxx_version" in
     *"18.1.3"*) ;;
     *) die "wasm C++ compiler is not Clang++ 18.1.3: $cxx_version" ;;
+  esac
+  case "$ar_version" in
+    *"18.1.3"*) ;;
+    *) die "wasm archiver is not LLVM 18.1.3 llvm-ar: $ar_version" ;;
+  esac
+  case "$ranlib_version" in
+    *"18.1.3"*) ;;
+    *) die "wasm ranlib is not LLVM 18.1.3 llvm-ranlib: $ranlib_version" ;;
   esac
   if ldd "$candidate" 2>&1 | grep -q "not found"; then
     ldd "$candidate" >&2 || true
@@ -93,8 +112,13 @@ ensure_wasm_c_compiler() {
 
   export CC_wasm32_unknown_unknown="$candidate"
   export CXX_wasm32_unknown_unknown="$cxx"
+  export AR_wasm32_unknown_unknown="$llvm_ar"
+  export RANLIB_wasm32_unknown_unknown="$llvm_ranlib"
+  export PATH="$clang_prefix/bin:$PATH"
   log "TOOL wasm-target-cc $candidate ($version)"
   log "TOOL wasm-target-cxx $cxx ($cxx_version)"
+  log "TOOL wasm-target-ar $llvm_ar ($ar_version)"
+  log "TOOL wasm-target-ranlib $llvm_ranlib ($ranlib_version)"
   log "TOOL wasm-target-clang-resource $("$candidate" -print-resource-dir)"
 }
 ensure_wasm_c_compiler
@@ -714,6 +738,8 @@ print(f"captured {len(build_dirs)} sqlite-wasm-rs build directory(ies) at {diag}
 PY
 }
 
+# cc-rs reads this flag when configuring the native sqlite-wasm-rs build.
+export CC_ENABLE_DEBUG_OUTPUT=1
 log "COMMAND: bash sdk/web/scripts/build.sh (with stage tracing)"
 if ( cd "$SRC" && PATH="$BUILD_ROOT/date-bin:$PATH" bash sdk/web/scripts/build.sh ); then
   SPP_BUILD_STATUS=0
