@@ -34,41 +34,68 @@ command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
 # Install and select the versioned AL2023 compiler explicitly so the C portion
 # of sqlite-wasm-rs is not silently built with the host's unpinned default.
 ensure_wasm_c_compiler() {
-  command -v dnf >/dev/null 2>&1 || die "dnf is required to install pinned Clang 18"
-  log "COMMAND: dnf install pinned clang18 18.1.8-6.amzn2023.0.3"
-  dnf install -y clang18-18.1.8-6.amzn2023.0.3
+  # GitHub Actions ubuntu-latest currently builds the upstream SDK with
+  # Clang 18.1.3. Vercel's Amazon Linux image ships a different Clang, so
+  # install the exact conda-forge Linux toolchain in an isolated prefix.
+  local micromamba_dir="$BUILD_ROOT/toolchain-bin"
+  local micromamba="$micromamba_dir/micromamba"
+  local micromamba_url="https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-linux-64"
+  local micromamba_sha256="366cd9cd8be14df1ab8ed50352a82111082a36686b2d389fdb79a92c3fafb3e3"
+  local clang_prefix="$BUILD_ROOT/toolchains/clang-18.1.3"
+  local candidate="$clang_prefix/bin/clang"
+  local cxx="$clang_prefix/bin/clang++"
 
-  local candidate=""
-  local name
-  for name in clang18 clang-18 /usr/lib64/llvm18/bin/clang /usr/lib/llvm18/bin/clang; do
-    if command -v "$name" >/dev/null 2>&1; then
-      candidate="$(command -v "$name")"
-      break
+  mkdir -p "$micromamba_dir" "$BUILD_ROOT/toolchains"
+  if [ ! -x "$micromamba" ] || ! echo "$micromamba_sha256  $micromamba" | sha256sum -c - >/dev/null 2>&1; then
+    log "COMMAND: download pinned micromamba 2.9.0-0"
+    curl --proto '=https' -fsSL -o "$micromamba.partial" "$micromamba_url"
+    if ! echo "$micromamba_sha256  $micromamba.partial" | sha256sum -c -; then
+      rm -f "$micromamba.partial"
+      die "micromamba 2.9.0-0 SHA-256 mismatch; refusing to install compiler packages"
     fi
-  done
-  [ -n "$candidate" ] || die "pinned Clang 18 binary was not found after installation"
+    chmod 755 "$micromamba.partial"
+    mv "$micromamba.partial" "$micromamba"
+  fi
 
-  local version
+  if [ ! -x "$candidate" ] || [ ! -x "$cxx" ]; then
+    log "COMMAND: micromamba install conda-forge Clang 18.1.3 toolchain"
+    MAMBA_ROOT_PREFIX="$BUILD_ROOT/mamba-root" "$micromamba" create --yes \
+      --prefix "$clang_prefix" \
+      --override-channels --channel https://conda.anaconda.org/conda-forge \
+      --strict-channel-priority \
+      "clang-tools=18.1.3" \
+      "clang-18=18.1.3" \
+      "clangxx=18.1.3" \
+      "libclang-cpp18.1=18.1.3" \
+      "libllvm18=18.1.3"
+  fi
+
+  [ -x "$candidate" ] || die "pinned Clang 18.1.3 binary is missing"
+  [ -x "$cxx" ] || die "pinned Clang++ 18.1.3 binary is missing"
+  export LD_LIBRARY_PATH="$clang_prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+  local version cxx_version
   version="$("$candidate" --version 2>&1 | sed -n '1p')"
+  cxx_version="$("$cxx" --version 2>&1 | sed -n '1p')"
   case "$version" in
-    *"18.1.8"*) ;;
-    *) die "wasm C compiler is not pinned Clang 18.1.8: $version" ;;
+    *"18.1.3"*) ;;
+    *) die "wasm C compiler is not Clang 18.1.3: $version" ;;
   esac
+  case "$cxx_version" in
+    *"18.1.3"*) ;;
+    *) die "wasm C++ compiler is not Clang++ 18.1.3: $cxx_version" ;;
+  esac
+  if ldd "$candidate" 2>&1 | grep -q "not found"; then
+    ldd "$candidate" >&2 || true
+    die "isolated Clang 18.1.3 has unresolved shared libraries"
+  fi
+  [ -d "$("$candidate" -print-resource-dir)/include" ] || die "Clang 18.1.3 resource headers are missing"
 
   export CC_wasm32_unknown_unknown="$candidate"
-  local cxx
-  cxx=""
-  for name in clang++18 clang++-18 /usr/lib64/llvm18/bin/clang++ /usr/lib/llvm18/bin/clang++; do
-    if command -v "$name" >/dev/null 2>&1; then
-      cxx="$(command -v "$name")"
-      break
-    fi
-  done
-  if [ -n "$cxx" ]; then
-    export CXX_wasm32_unknown_unknown="$cxx"
-    log "TOOL wasm-target-cxx $cxx ($("$cxx" --version 2>&1 | sed -n '1p'))"
-  fi
-  log "TOOL wasm-target-cc $CC_wasm32_unknown_unknown ($version)"
+  export CXX_wasm32_unknown_unknown="$cxx"
+  log "TOOL wasm-target-cc $candidate ($version)"
+  log "TOOL wasm-target-cxx $cxx ($cxx_version)"
+  log "TOOL wasm-target-clang-resource $("$candidate" -print-resource-dir)"
 }
 ensure_wasm_c_compiler
 
