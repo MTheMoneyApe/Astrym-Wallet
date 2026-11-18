@@ -706,7 +706,27 @@ for path in sorted(web.rglob("*")):
     data = path.read_bytes()
     scanned.append(path)
     for needle in needles:
-        if needle.encode() in data:
+        encoded = needle.encode()
+        offset = data.find(encoded)
+        if offset >= 0:
+            # Diagnostic only: disclose a small byte window around the leak so
+            # the source of an embedded host path can be identified. The hard
+            # failure below remains mandatory; no path is ignored or filtered.
+            hits = []
+            cursor = 0
+            while len(hits) < 8:
+                cursor = data.find(encoded, cursor)
+                if cursor < 0:
+                    break
+                start = max(0, cursor - 96)
+                end = min(len(data), cursor + len(encoded) + 160)
+                hits.append((cursor, data[start:end]))
+                cursor += len(encoded)
+            for position, sample in hits:
+                print(
+                    f"embedded host-path context {path} offset={position}: {sample!r}",
+                    file=sys.stderr,
+                )
             raise SystemExit(f"host path still embedded in {path}: {needle}")
     if path.suffix == ".wasm":
         flags, initial, maximum, raw = memory_limits(data)
