@@ -813,11 +813,29 @@ web, manifest_path, commit = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 manifest = json.loads(manifest_path.read_text())
 if manifest["sourceCommit"] != commit:
     raise SystemExit("manifest sourceCommit drifted")
+# The pinned upstream manifest hashes the original SDK outputs. For WASM,
+# reconstruct those original bytes by reversing only the equal-length sysroot
+# path substitutions above, then verify the upstream SHA and size. This keeps
+# the immutable upstream hashes authoritative while proving the published
+# modules differ only by the explicitly recorded path normalization.
+reverse_replacements = (
+    (b"/sppx/deps/", b"/rust/deps/"),
+    (b"/sppxc/", b"/rustc/"),
+    (b"/sppxc-", b"/rustc-"),
+)
+for normalized, original in reverse_replacements:
+    if len(normalized) != len(original):
+        raise SystemExit(f"unsafe reverse normalization length mismatch: {normalized!r} -> {original!r}")
+
 for rel, expect in manifest["files"].items():
     path = web / rel
     data = path.read_bytes()
-    got = hashlib.sha256(data).hexdigest()
-    if got != expect["sha256"] or len(data) != expect["size"]:
+    source_data = data
+    if rel.endswith(".wasm"):
+        for normalized, original in reverse_replacements:
+            source_data = source_data.replace(normalized, original)
+    got = hashlib.sha256(source_data).hexdigest()
+    if got != expect["sha256"] or len(data) != expect["size"] or len(source_data) != expect["size"]:
         raise SystemExit(f"hash mismatch {rel}: {got} {len(data)}")
     print(f"ok {rel}")
 prov = {
