@@ -6,6 +6,7 @@ import {
   AccountMenu,
   FRIENDBOT_MODE_CHECKING_NOTICE,
   FRIENDBOT_NYM_NOTICE,
+  FRIENDBOT_EGRESS_BLOCKED_NOTICE,
   FriendbotFundButton,
   applyFriendbotModeStatus,
   createAccountOperationGate,
@@ -170,11 +171,16 @@ describe('Dashboard account menu', () => {
   });
 });
 
-function renderFriendbot(mode: 'direct' | 'nym', modeKnown: boolean) {
+function renderFriendbot(
+  mode: 'direct' | 'nym',
+  modeKnown: boolean,
+  egressBlocked: boolean,
+) {
   return renderToStaticMarkup(
     React.createElement(FriendbotFundButton, {
       mode,
       modeKnown,
+      egressBlocked,
       fundingLoading: false,
       onFund: vi.fn(),
     }),
@@ -183,7 +189,7 @@ function renderFriendbot(mode: 'direct' | 'nym', modeKnown: boolean) {
 
 describe('Friendbot fund button', () => {
   it('stays disabled while routing mode is unknown, after an IPC error, and in Nym mode, and enables only for known Direct mode', () => {
-    const unknown = renderFriendbot('direct', false);
+    const unknown = renderFriendbot('direct', false, true);
     expect(unknown).toContain('disabled=""');
     expect(unknown).toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
     expect(unknown).toContain('role="status"');
@@ -191,13 +197,13 @@ describe('Friendbot fund button', () => {
     expect(unknown).not.toContain(FRIENDBOT_NYM_NOTICE);
 
     const ipcError = applyFriendbotModeStatus({ ok: false });
-    expect(ipcError).toEqual({ mode: 'direct', modeKnown: false });
-    const errored = renderFriendbot(ipcError.mode, ipcError.modeKnown);
+    expect(ipcError).toEqual({ mode: 'direct', modeKnown: false, egressBlocked: true });
+    const errored = renderFriendbot(ipcError.mode, ipcError.modeKnown, ipcError.egressBlocked);
     expect(errored).toContain('disabled=""');
     expect(errored).toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
 
-    const nymGate = applyFriendbotModeStatus({ ok: true, mode: 'nym' });
-    const nym = renderFriendbot(nymGate.mode, nymGate.modeKnown);
+    const nymGate = applyFriendbotModeStatus({ ok: true, mode: 'nym', egressBlocked: true });
+    const nym = renderFriendbot(nymGate.mode, nymGate.modeKnown, nymGate.egressBlocked);
     expect(nym).toContain('disabled=""');
     expect(nym).toContain(FRIENDBOT_NYM_NOTICE);
     expect(nym).toContain('disabled in Nym mode');
@@ -206,12 +212,31 @@ describe('Friendbot fund button', () => {
     expect(nym).toContain('aria-describedby="friendbot-fund-notice"');
     expect(nym).not.toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
 
-    const directGate = applyFriendbotModeStatus({ ok: true, mode: 'direct' });
-    const direct = renderFriendbot(directGate.mode, directGate.modeKnown);
+    const directGate = applyFriendbotModeStatus({
+      ok: true,
+      mode: 'direct',
+      egressBlocked: false,
+    });
+    const direct = renderFriendbot(directGate.mode, directGate.modeKnown, directGate.egressBlocked);
     expect(direct).not.toContain('disabled');
     expect(direct).not.toContain(FRIENDBOT_NYM_NOTICE);
     expect(direct).not.toContain(FRIENDBOT_MODE_CHECKING_NOTICE);
     expect(direct).not.toContain('aria-describedby');
     expect(direct).toContain('Fund with Friendbot (10,000 Testnet XLM)');
+  });
+
+  it('stays disabled when Direct is known but egress is blocked or omitted', () => {
+    const blocked = applyFriendbotModeStatus({ ok: true, mode: 'direct', egressBlocked: true });
+    expect(blocked).toEqual({ mode: 'direct', modeKnown: true, egressBlocked: true });
+    const markup = renderFriendbot(blocked.mode, blocked.modeKnown, blocked.egressBlocked);
+    expect(markup).toContain('disabled=""');
+    expect(markup).toContain(FRIENDBOT_EGRESS_BLOCKED_NOTICE);
+    expect(markup).not.toContain(FRIENDBOT_NYM_NOTICE);
+
+    const omitted = applyFriendbotModeStatus({ ok: true, mode: 'direct' });
+    expect(omitted.egressBlocked).toBe(true);
+    const omittedMarkup = renderFriendbot(omitted.mode, omitted.modeKnown, omitted.egressBlocked);
+    expect(omittedMarkup).toContain('disabled=""');
+    expect(omittedMarkup).toContain(FRIENDBOT_EGRESS_BLOCKED_NOTICE);
   });
 });
