@@ -6,8 +6,8 @@
       "master": true
     }
   },
-  "installCommand": "(dnf install -y clang || yum install -y clang) && pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm build:webapp",
+  "installCommand": "echo \"Using the verified immutable Astrym product bundle\"",
+  "buildCommand": "node scripts/fetch-vercel-release.mjs",
   "outputDirectory": "packages/extension/dist-webapp",
   "headers": [
     {
@@ -39,6 +39,45 @@
           "key": "Content-Type",
           "value": "application/manifest+json"
         },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/downloads/(.*)\\.zip",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/zip"
+        },
+        {
+          "key": "Content-Disposition",
+          "value": "attachment"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600"
+        }
+      ]
+    },
+    {
+      "source": "/downloads/(.*)\\.json",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600"
+        }
+      ]
+    },
+    {
+      "source": "/webapp-sw.js",
+      "headers": [
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
