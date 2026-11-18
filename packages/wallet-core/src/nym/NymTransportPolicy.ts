@@ -36,14 +36,21 @@ export const STELLAR_HTTP_OPERATIONS_VIA_POLICY: readonly StellarHttpOperation[]
 export type FailClosedTransportRouterOptions = {
   mode: NymTransportMode;
   nym: NymHttpTransport;
-  /** Used only when mode === 'direct'. */
+  /** Used only when mode === 'direct' and direct egress is authorized. */
   directFetch?: typeof fetch;
+  /**
+   * Checked on every fetch while mode is direct, including after a later setMode('direct').
+   * Returning false refuses clearnet. The wallet controller always supplies this so a
+   * stale router reference cannot outlive the persisted choice.
+   */
+  directAuthorized?: () => boolean;
 };
 
 export class FailClosedTransportRouter {
   private _mode: NymTransportMode;
   private readonly _nym: NymHttpTransport;
   private readonly _directFetch: typeof fetch;
+  private readonly _directAuthorized: (() => boolean) | null;
 
   constructor(options: FailClosedTransportRouterOptions) {
     if (!options?.nym) {
@@ -52,6 +59,7 @@ export class FailClosedTransportRouter {
     this._mode = options.mode;
     this._nym = options.nym;
     this._directFetch = options.directFetch ?? globalThis.fetch.bind(globalThis);
+    this._directAuthorized = options.directAuthorized ?? null;
   }
 
   get mode(): NymTransportMode {
@@ -76,6 +84,12 @@ export class FailClosedTransportRouter {
    */
   fetch = async (url: string, init?: RequestInit): Promise<Response> => {
     if (this._mode === 'direct') {
+      if (this._directAuthorized && !this._directAuthorized()) {
+        throw new NymTransportError(
+          'NOT_CONNECTED',
+          'Direct egress refused: persisted privacy choice does not allow clearnet',
+        );
+      }
       return this._directFetch(url, init);
     }
 
