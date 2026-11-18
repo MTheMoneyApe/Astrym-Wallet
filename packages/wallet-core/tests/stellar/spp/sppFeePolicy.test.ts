@@ -9,6 +9,21 @@ import {
 } from '../../../src/stellar/spp/sppFeePolicy.js';
 
 describe('sppFeePolicy', () => {
+  it('tightens ceilings vs previous packet defaults', () => {
+    expect(SPP_PROPOSED_MAX_FEE_STROOPS.register_public_keys).toBeLessThan(
+      SPP_PREVIOUS_MAX_FEE_STROOPS.register_public_keys,
+    );
+    expect(SPP_PROPOSED_MAX_FEE_STROOPS.deposit).toBe(15_000_000);
+    expect(SPP_PROPOSED_MAX_FEE_STROOPS.transfer).toBe(15_000_000);
+    expect(SPP_PROPOSED_MAX_FEE_STROOPS.withdraw).toBe(15_000_000);
+    expect(maxFeeStroopsForOperation('transfer')).toBe('15000000');
+  });
+
+  it('rejects fees above the ceiling and accepts policy defaults', () => {
+    expect(() => assertFeeWithinCeiling('deposit', '15000000')).not.toThrow();
+    expect(() => assertFeeWithinCeiling('deposit', '15000001')).toThrow(/exceeds policy ceiling/);
+  });
+
   it('keeps register below the old packet and payments at 1.5 XLM', () => {
     expect(SPP_PROPOSED_MAX_FEE_STROOPS.register_public_keys).toBe(5_000_000);
     expect(SPP_PROPOSED_MAX_FEE_STROOPS.register_public_keys).toBeLessThan(

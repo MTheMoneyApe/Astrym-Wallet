@@ -84,6 +84,29 @@ describe('handleSppHostNymFetchRequest', () => {
     setSppTestnetBroadcastAuthorized(false);
   });
 
+  it('proxies same-origin Soroban requests when Nym is connected', async () => {
+    const { handleSppHostNymFetchRequest } = await import(
+      '../../../src/background/spp/sppHostBridgeHandlers.js'
+    );
+    const result = await handleSppHostNymFetchRequest({
+      channel: SPP_HOST_BRIDGE_CHANNEL,
+      type: 'SPP_HOST_NYM_FETCH',
+      id: 'req-1',
+      payload: {
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+        url: 'https://soroban-testnet.stellar.org',
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getHealth' }),
+      },
+    }, HOST_SENDER);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.bodyText).toBe('ok-body');
+      expect(result.status).toBe(200);
+    }
+  });
+
   it('fetches configured reads and refuses submit, unknown, and mixed bodies before fetch', async () => {
     expect(isSppTestnetBroadcastAuthorized()).toBe(false);
     const { handleSppHostNymFetchRequest } = await import(

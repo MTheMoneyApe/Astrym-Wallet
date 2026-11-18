@@ -220,6 +220,27 @@ describe('sppHostWritePool', () => {
     expect(after?.confirmedTxHashes).toEqual([]);
   });
 
+  it('clears in-flight without advancing when nextFreshSequence is missing on success', async () => {
+    registerOkPool();
+    const tracker = getSppHostSequenceTracker();
+    tracker.seed(SENDER, '100');
+
+    await expect(
+      executeSppHostWritePool(
+        request({
+          signingAccount: SENDER,
+          freshSequence: '100',
+          operationFingerprint: 'fp-no-next',
+        }),
+      ),
+    ).resolves.toMatchObject({ ok: false, code: 'INVALID_REQUEST' });
+
+    const after = tracker.get(SENDER);
+    expect(after?.expectedFreshSequence).toBe('100');
+    expect(after?.inFlightFingerprint).toBeNull();
+    expect(after?.confirmedTxHashes).toEqual([]);
+  });
+
   it('refuses sequence drift and aborts in-flight after gate refuse or execution failure', async () => {
     registerOkPool({
       deposit: vi.fn(async () => {
