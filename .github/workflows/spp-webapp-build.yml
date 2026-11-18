@@ -511,7 +511,7 @@ jobs:
           retention-days: 30
 
   publish-vercel-release:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'astrym/release-products-v3' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'astrym/release-products-v4' && github.event.pull_request.head.repo.full_name == github.repository
     needs: vercel-build
     runs-on: ubuntu-24.04
     permissions:
