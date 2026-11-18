@@ -506,36 +506,53 @@ export const FRIENDBOT_NYM_NOTICE =
 
 export const FRIENDBOT_MODE_CHECKING_NOTICE = 'Checking routing mode...';
 
+export const FRIENDBOT_EGRESS_BLOCKED_NOTICE =
+  'Friendbot is disabled while wallet network egress is blocked.';
+
 const FRIENDBOT_FUND_NOTICE_ID = 'friendbot-fund-notice';
 
 export type FriendbotModeGate = {
   mode: NymTransportMode;
   modeKnown: boolean;
+  egressBlocked: boolean;
 };
 
 export const FRIENDBOT_MODE_GATE_INITIAL: FriendbotModeGate = {
   mode: 'direct',
   modeKnown: false,
+  egressBlocked: true,
 };
 
 export function applyFriendbotModeStatus(
-  result: { ok: true; mode: NymTransportMode } | { ok: false },
+  result: { ok: true; mode: NymTransportMode; egressBlocked?: boolean } | { ok: false },
 ): FriendbotModeGate {
   if (!result.ok) return FRIENDBOT_MODE_GATE_INITIAL;
-  return { mode: result.mode, modeKnown: true };
+  return {
+    mode: result.mode,
+    modeKnown: true,
+    egressBlocked: result.egressBlocked !== false,
+  };
 }
 
-export function friendbotFundBlocked(mode: NymTransportMode, modeKnown: boolean): boolean {
-  return mode !== 'direct' || !modeKnown;
+export function friendbotFundBlocked(
+  mode: NymTransportMode,
+  modeKnown: boolean,
+  egressBlocked: boolean,
+): boolean {
+  return mode !== 'direct' || !modeKnown || egressBlocked;
 }
 
-function friendbotFundNotice(mode: NymTransportMode, modeKnown: boolean): string | null {
+function friendbotFundNotice(
+  mode: NymTransportMode,
+  modeKnown: boolean,
+  egressBlocked: boolean,
+): string | null {
   if (!modeKnown) return FRIENDBOT_MODE_CHECKING_NOTICE;
   switch (mode) {
     case 'nym':
       return FRIENDBOT_NYM_NOTICE;
     case 'direct':
-      return null;
+      return egressBlocked ? FRIENDBOT_EGRESS_BLOCKED_NOTICE : null;
     default: {
       const _exhaustive: never = mode;
       return _exhaustive;
@@ -546,16 +563,18 @@ function friendbotFundNotice(mode: NymTransportMode, modeKnown: boolean): string
 export function FriendbotFundButton({
   mode,
   modeKnown,
+  egressBlocked,
   fundingLoading,
   onFund,
 }: {
   mode: NymTransportMode;
   modeKnown: boolean;
+  egressBlocked: boolean;
   fundingLoading: boolean;
   onFund: () => void;
 }) {
-  const blocked = friendbotFundBlocked(mode, modeKnown);
-  const notice = friendbotFundNotice(mode, modeKnown);
+  const blocked = friendbotFundBlocked(mode, modeKnown, egressBlocked);
+  const notice = friendbotFundNotice(mode, modeKnown, egressBlocked);
   return (
     <>
       <button
@@ -1222,7 +1241,11 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     void sendIpcMessage('NYM_STATUS', {})
       .then((snap) => {
         if (cancelled) return;
-        const gate = applyFriendbotModeStatus({ ok: true, mode: snap.mode });
+        const gate = applyFriendbotModeStatus({
+          ok: true,
+          mode: snap.mode,
+          egressBlocked: snap.egressBlocked,
+        });
         setFriendbotGate(gate);
         setNymSnapshot((prev) => (prev.mode === gate.mode ? prev : { ...prev, mode: gate.mode }));
       })
@@ -1981,6 +2004,7 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
                 <FriendbotFundButton
                   mode={friendbotGate.mode}
                   modeKnown={friendbotGate.modeKnown}
+                  egressBlocked={friendbotGate.egressBlocked}
                   fundingLoading={fundingLoading}
                   onFund={() => handleFundTestnet(account.address)}
                 />

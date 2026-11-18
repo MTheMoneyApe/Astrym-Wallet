@@ -7,7 +7,7 @@
     }
   },
   "installCommand": "pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm build:webapp",
+  "buildCommand": "SPP_BUILD_ROOT=/tmp/spp-path-a/cache CARGO_HOME=/tmp/spp-path-a/cargo RUSTUP_HOME=/tmp/spp-path-a/rustup pnpm build:webapp",
   "outputDirectory": "packages/extension/dist-webapp",
   "headers": [
     {

@@ -13,6 +13,7 @@ import {
 } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 import type { SppHostRemoteSigner } from './sppHostRemoteSigner.js';
 
+const SPP_STORAGE_UNLOCK_DIALOG_ALARM = 'spp-storage-unlock-dialog';
 const DIRECTORY = '.opfs-sahpool-encrypted';
 const DIRECTORY_PREFIX = `${DIRECTORY}-`;
 const validDirectory = (value: unknown): value is string =>
