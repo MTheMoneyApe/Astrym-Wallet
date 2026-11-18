@@ -111,7 +111,7 @@ describe('createStellarTransportFetch', () => {
       body: JSON_RPC_BODY,
     });
     const call = fetchViaRouter.mock.calls[0];
-    expect(call?.[0]).toBe(STELLAR_SOROBAN_TESTNET_RPC);
+    expect(call?.[0]).toBe(new URL(STELLAR_SOROBAN_TESTNET_RPC).href);
     expect(call?.[1]?.method).toBe('POST');
     expect(call?.[1]?.body).toBe(JSON_RPC_BODY);
     const headers = new Headers(call?.[1]?.headers);
@@ -133,16 +133,15 @@ describe('createStellarTransportFetch', () => {
     expect(fetchViaRouter).not.toHaveBeenCalled();
   });
 
-  it('strips a body on Horizon GET', async () => {
+  it('refuses a body on Horizon GET', async () => {
     const { fetchViaRouter, fetchImpl } = nymHarness();
-    await fetchImpl(`${STELLAR_LOGICAL_TESTNET_HORIZON_URL}/accounts/GABC`, {
-      method: 'GET',
-      body: JSON_RPC_BODY,
-    });
-    const init = fetchViaRouter.mock.calls[0]?.[1];
-    expect(init?.method).toBe('GET');
-    expect(init?.body).toBeUndefined();
-    expect(fetchViaRouter).toHaveBeenCalledOnce();
+    await expect(
+      fetchImpl(`${STELLAR_LOGICAL_TESTNET_HORIZON_URL}/accounts/GABC`, {
+        method: 'GET',
+        body: JSON_RPC_BODY,
+      }),
+    ).rejects.toThrow(/refused body on GET/);
+    expect(fetchViaRouter).not.toHaveBeenCalled();
   });
 });
 
