@@ -6,11 +6,9 @@
       "master": true
     }
   },
-  "installCommand": "curl -sL https://github.com/MTheMoneyApe/Astrym-Wallet/releases/download/astrym-products-487228b73f06fba36ac71fef4523ec730d490cf5/astrym-vercel-products.tar.gz -o /tmp/a;sha256sum /tmp/a|grep 74c88dc360f2eb7c8132f7b495e05d72839c3a3408222ec53217b21e2736ed65",
-  "buildCommand": "mkdir -p packages/extension/dist-webapp && tar xzf /tmp/a -C packages/extension/dist-webapp",
+  "installCommand": "(dnf install -y clang || yum install -y clang) && pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm build:webapp",
   "outputDirectory": "packages/extension/dist-webapp",
-  "cleanUrls": false,
-  "trailingSlash": false,
   "headers": [
     {
       "source": "/(.*)\\.wasm",
@@ -41,15 +39,6 @@
           "key": "Content-Type",
           "value": "application/manifest+json"
         },
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=0, must-revalidate"
-        }
-      ]
-    },
-    {
-      "source": "/webapp-sw.js",
-      "headers": [
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
