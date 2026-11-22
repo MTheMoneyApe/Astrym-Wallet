@@ -34,9 +34,14 @@ describe('Astrym landing page', () => {
     expect(css).toContain('#3ce894');
     expect(css).toContain('#f7cb08');
     expect(css).toContain('.status-board');
-    expect(html).not.toContain('fonts.googleapis.com');
-    expect(html).not.toContain('fonts.gstatic.com');
-    expect(css).toContain('system-ui');
+    expect(html).toContain('fonts.googleapis.com');
+    expect(html).toContain('fonts.gstatic.com');
+    expect(html).toContain('Instrument+Sans');
+    expect(html).toContain('JetBrains+Mono');
+    expect(html).toContain('Orbitron');
+    expect(css).toContain('"Instrument Sans", sans-serif');
+    expect(css).toContain('"JetBrains Mono", ui-monospace, monospace');
+    expect(css).toContain('Orbitron, sans-serif');
   });
 
   it('points Vercel at the webapp build', () => {
