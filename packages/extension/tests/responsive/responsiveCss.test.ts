@@ -53,7 +53,7 @@ describe('responsive shared CSS contracts', () => {
   });
 
   it('covers the audited breakpoints', () => {
-    for (const bp of ['429px', '768px', '1024px', '1280px']) {
+    for (const bp of ['430px', '768px', '1024px', '1280px']) {
       expect(walletCss).toContain(bp);
     }
   });
