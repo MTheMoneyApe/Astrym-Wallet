@@ -278,7 +278,7 @@ export async function executeSppPrivatePayment(input: {
   txHash: string | null;
   txHashes: readonly string[];
   rpcRoutedViaNym: true;
-  confirmation: 'confirmed' | 'submitted' | 'unknown';
+  confirmation: 'confirmed' | 'submitted' | 'failed' | 'unknown';
 }> {
   if (sppOptionAvailability(input.gate) !== 'ready_to_enable') {
     throw new SppPrivatePaymentError(
@@ -432,11 +432,12 @@ async function ledgerStatusOf(
 
 function confirmationFromLedger(
   status: 'SUCCESS' | 'FAILED' | 'NOT_FOUND' | 'UNKNOWN',
-): 'confirmed' | 'submitted' {
+): 'confirmed' | 'submitted' | 'failed' {
   switch (status) {
     case 'SUCCESS':
       return 'confirmed';
     case 'FAILED':
+      return 'failed';
     case 'NOT_FOUND':
     case 'UNKNOWN':
       return 'submitted';
@@ -477,7 +478,7 @@ async function runSppProbedPoolPayment(
   txHash: string | null;
   txHashes: readonly string[];
   rpcRoutedViaNym: true;
-  confirmation: 'confirmed' | 'submitted' | 'unknown';
+  confirmation: 'confirmed' | 'submitted' | 'failed' | 'unknown';
 }> {
   const pool = input.pool;
   const request = input.request;
@@ -498,13 +499,17 @@ async function runSppProbedPoolPayment(
       }
       const txHash = hashes[0] ?? '';
       const ledger = await ledgerStatusOf(txHash, input.confirmTransaction);
-      flags.completed = true;
+      const confirmation = confirmationFromLedger(ledger);
+      if (confirmation === 'submitted') {
+        flags.reconcile = true;
+        flags.hashes = [txHash];
+      }
       return {
         operation: request.operation,
         txHash,
         txHashes: hashes,
         rpcRoutedViaNym: true as const,
-        confirmation: confirmationFromLedger(ledger),
+        confirmation,
       };
     } catch (cause) {
       if (cause instanceof SppPrivatePaymentError) {

@@ -37,7 +37,7 @@ export type PrivatePaymentRouteInput = {
    * Ledger outcome of lastTxHash. A hash alone stays submitted until
    * getTransaction reports SUCCESS.
    */
-  ledgerConfirmation?: 'submitted' | 'confirmed' | null;
+  ledgerConfirmation?: 'submitted' | 'confirmed' | 'failed' | null;
 };
 
 export type PrivatePaymentRoute = {
@@ -128,6 +128,15 @@ export function routePrivatePayment(input: PrivatePaymentRouteInput): PrivatePay
   }
 
   if (input.lastTxHash && !input.inFlight && !input.lastErrorCode) {
+    if (input.ledgerConfirmation === 'failed') {
+      return {
+        status: 'failed',
+        canAuthorize: false,
+        canSubmit: false,
+        blockPublicFallback,
+        message: 'Pago privado fallido en ledger (getTransaction FAILED).',
+      };
+    }
     const confirmed = input.ledgerConfirmation === 'confirmed';
     return {
       status: confirmed ? 'confirmed' : 'submitted',

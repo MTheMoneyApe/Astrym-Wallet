@@ -94,6 +94,13 @@ describe('routePrivatePayment', () => {
     });
     expect(confirmed.status).toBe('confirmed');
     expect(confirmed.canAuthorize).toBe(false);
+    const failed = routePrivatePayment({
+      ...base,
+      lastTxHash: 'hash-1',
+      ledgerConfirmation: 'failed',
+    });
+    expect(failed.status).toBe('failed');
+    expect(failed.canAuthorize).toBe(false);
   });
 
   it('blocks submit when proving keys or contract config are missing', () => {

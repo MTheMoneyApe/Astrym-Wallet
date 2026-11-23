@@ -32,7 +32,7 @@ export async function runSppProbedPoolPayment(input: {
   txHash: string | null;
   txHashes: readonly string[];
   rpcRoutedViaNym: true;
-  confirmation: 'confirmed' | 'submitted' | 'unknown';
+  confirmation: 'confirmed' | 'submitted' | 'failed' | 'unknown';
 }> {
   const poolContract = StrKey.encodeContract(Keypair.random().rawPublicKey());
   const amountStroops = input.request.amount.toString();

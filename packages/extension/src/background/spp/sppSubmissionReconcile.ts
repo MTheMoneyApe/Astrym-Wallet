@@ -9,6 +9,7 @@ import {
   reconcileUnresolvedSubmission,
   setUnresolvedSubmissionStore,
   type ReconcileTxStatus,
+  type SubmissionReconcileResult,
   type UnresolvedSubmissionRecord,
   type UnresolvedSubmissionStore,
 } from '@solanym/wallet-core/src/stellar/spp/sppExecutionGuard.js';
@@ -204,7 +205,7 @@ export async function reconcileFingerprintThroughReadAllowlist(input: {
   fingerprint: string;
   fetchRead: (url: string, init?: RequestInit) => Promise<Response>;
   rpcUrl?: string;
-}): Promise<boolean> {
+}): Promise<SubmissionReconcileResult> {
   return reconcileUnresolvedSubmission({
     fingerprint: input.fingerprint,
     readTransaction: async (hash) => {
@@ -234,12 +235,13 @@ export async function confirmationFromAllowlistedGetTransaction(
   hash: string,
   fetchRead: (url: string, init?: RequestInit) => Promise<Response>,
   rpcUrl?: string,
-): Promise<'confirmed' | 'submitted'> {
+): Promise<'confirmed' | 'submitted' | 'failed'> {
   const status = await readAllowlistedGetTransactionStatus(hash, fetchRead, rpcUrl);
   switch (status) {
     case 'SUCCESS':
       return 'confirmed';
     case 'FAILED':
+      return 'failed';
     case 'NOT_FOUND':
     case 'UNKNOWN':
       return 'submitted';

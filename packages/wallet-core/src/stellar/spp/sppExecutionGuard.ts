@@ -48,6 +48,11 @@ export type UnresolvedSubmissionStore = {
 
 export type ReconcileTxStatus = 'SUCCESS' | 'FAILED' | 'NOT_FOUND';
 
+/** Durable lock outcome after allowlisted getTransaction. */
+export type SubmissionReconcileResult =
+  | { locked: true }
+  | { locked: false; confirmation: 'confirmed' | 'failed' };
+
 type PendingSubmission = {
   hashes: readonly string[];
   at: number;
@@ -195,20 +200,23 @@ export async function persistUnresolvedSubmission(
 
 /**
  * Clear the durable lock only after every hash has a terminal getTransaction
- * status. NOT_FOUND keeps the lock. The reader must be the read allowlist.
+ * status. SUCCESS unlocks as confirmed. FAILED unlocks as failed. NOT_FOUND
+ * keeps the lock. The reader must be the read allowlist.
  */
 export async function reconcileUnresolvedSubmission(input: {
   fingerprint: string;
   readTransaction: (hash: string) => Promise<ReconcileTxStatus>;
   state?: GuardState;
-}): Promise<boolean> {
+}): Promise<SubmissionReconcileResult> {
   const state = input.state ?? globalGuard;
   await hydrateUnresolvedSubmissions(state);
   const pending = state.unresolved.get(input.fingerprint);
-  if (!pending) return true;
+  if (!pending) return { locked: false, confirmation: 'confirmed' };
+  let failed = false;
   for (const hash of pending.hashes) {
     const status = await input.readTransaction(hash);
-    if (!isTerminalStatus(status)) return false;
+    if (!isTerminalStatus(status)) return { locked: true };
+    if (status === 'FAILED') failed = true;
   }
   state.unresolved.delete(input.fingerprint);
   state.recent.delete(input.fingerprint);
@@ -218,7 +226,8 @@ export async function reconcileUnresolvedSubmission(input: {
     if (copy && copy.fingerprint !== input.fingerprint) remaining.push(copy);
   }
   await unresolvedStore.write(remaining);
-  return true;
+  if (failed) return { locked: false, confirmation: 'failed' };
+  return { locked: false, confirmation: 'confirmed' };
 }
 
 /** Test helper — clears process-local guard state. */

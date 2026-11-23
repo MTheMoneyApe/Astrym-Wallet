@@ -1,3 +1,4 @@
+import { Keypair, StrKey } from '@stellar/stellar-sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/stellar/spp/sppSignGate.js', async (importOriginal) => {
@@ -14,13 +15,18 @@ vi.mock('../../../src/stellar/spp/sppSignGate.js', async (importOriginal) => {
   };
 });
 
+import { sppProbeEconomicsBypass } from './seams/sppProbeEconomicsBypass.js';
 import { runSppProbedPoolPayment } from './seams/runSppProbedPoolPayment.js';
-import type { SppPrivatePool } from '../../../src/stellar/spp/sppNymOption.js';
+import {
+  executeSppPrivatePayment,
+  type SppPrivatePool,
+} from '../../../src/stellar/spp/sppNymOption.js';
 import {
   beginPrivatePaymentExecution,
   hasUnresolvedSubmission,
   hydrateUnresolvedSubmissions,
   persistUnresolvedSubmission,
+  privatePaymentFingerprint,
   reconcileUnresolvedSubmission,
   resetPrivatePaymentExecutionGuardForTests,
   resetUnresolvedSubmissionStoreForTests,
@@ -115,7 +121,7 @@ describe('unresolved SPP submission lock', () => {
         return hash === 'hash-1' ? 'SUCCESS' : 'NOT_FOUND';
       },
     });
-    expect(stillLocked).toBe(false);
+    expect(stillLocked).toEqual({ locked: true });
     expect(seen).toEqual(['hash-1', 'hash-2']);
     expect(() => beginPrivatePaymentExecution(fingerprint)).toThrow(/reconcil/);
 
@@ -123,9 +129,76 @@ describe('unresolved SPP submission lock', () => {
       fingerprint,
       readTransaction: async () => 'FAILED',
     });
-    expect(cleared).toBe(true);
+    expect(cleared).toEqual({ locked: false, confirmation: 'failed' });
     expect(saved).toEqual([]);
     const release = beginPrivatePaymentExecution(fingerprint);
     release.release();
+  });
+
+  it('locks a single submitted hash until getTransaction reconciles it', async () => {
+    const saved: UnresolvedSubmissionRecord[] = [];
+    setUnresolvedSubmissionStore(memoryStore(saved));
+    const poolContract = StrKey.encodeContract(Keypair.random().rawPublicKey());
+    const amountStroops = '10';
+    const fingerprint = privatePaymentFingerprint({
+      operation: 'deposit',
+      poolContract,
+      amountStroops,
+      recipient: null,
+    });
+    const request = { operation: 'deposit' as const, poolContract, amountStroops };
+    const pay = async (
+      confirmTransaction: (hash: string) => Promise<'SUCCESS' | 'FAILED' | 'NOT_FOUND'>,
+      txHash = 'only-hash',
+    ) => {
+      sppProbeEconomicsBypass.enabled = true;
+      try {
+        return await executeSppPrivatePayment({
+          gate: { mode: 'nym', connected: true, selected: true },
+          request,
+          rpcUrl: RPC,
+          nymFetch: async () => new Response('{"result":"ok"}', { status: 200 }),
+          pool: poolWith(async () => ({ txHash })),
+          preferInjectedTransport: true,
+          authorizationFingerprint: fingerprint,
+          confirmTransaction,
+        });
+      } finally {
+        sppProbeEconomicsBypass.enabled = false;
+      }
+    };
+
+    const submitted = await pay(async () => 'NOT_FOUND');
+    expect(submitted.confirmation).toBe('submitted');
+    expect(submitted.txHashes).toEqual(['only-hash']);
+    expect(saved).toEqual([
+      expect.objectContaining({ fingerprint, hashes: ['only-hash'] }),
+    ]);
+    resetPrivatePaymentExecutionGuardForTests();
+    expect(await hasUnresolvedSubmission(fingerprint)).toBe(true);
+    await hydrateUnresolvedSubmissions();
+    await expect(pay(async () => 'SUCCESS')).rejects.toMatchObject({ code: 'SUBMISSION_UNKNOWN' });
+
+    const pending = await reconcileUnresolvedSubmission({
+      fingerprint,
+      readTransaction: async () => 'NOT_FOUND',
+    });
+    expect(pending).toEqual({ locked: true });
+    expect(() => beginPrivatePaymentExecution(fingerprint)).toThrow(/reconcil/);
+
+    const failed = await reconcileUnresolvedSubmission({
+      fingerprint,
+      readTransaction: async () => 'FAILED',
+    });
+    expect(failed).toEqual({ locked: false, confirmation: 'failed' });
+    expect(saved).toEqual([]);
+    const failedPayment = await pay(async () => 'FAILED');
+    expect(failedPayment.confirmation).toBe('failed');
+    expect(await hasUnresolvedSubmission(fingerprint)).toBe(false);
+
+    const confirmed = await pay(async () => 'SUCCESS', 'ok-hash');
+    expect(confirmed.confirmation).toBe('confirmed');
+    expect(saved).toEqual([]);
+    expect(await hasUnresolvedSubmission(fingerprint)).toBe(false);
   });
 });

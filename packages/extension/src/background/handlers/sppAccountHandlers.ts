@@ -234,7 +234,7 @@ export function createSppRegisterPublicKeysHandler(deps: {
       const nym = requireNymAndWritePool();
       const result = await querySppHostAccount({ ...nym, action: 'register_public_keys' });
       if (!result.ok) mapHostFailure(result);
-      let confirmation: 'confirmed' | 'submitted' | 'unknown' = result.registerTxHash
+      let confirmation: 'confirmed' | 'submitted' | 'failed' | 'unknown' = result.registerTxHash
         ? 'submitted'
         : 'unknown';
       if (result.registerTxHash) {

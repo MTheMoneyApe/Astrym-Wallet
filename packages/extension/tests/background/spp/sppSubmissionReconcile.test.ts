@@ -110,7 +110,7 @@ describe('SPP submission reconcile', () => {
         );
       },
     });
-    expect(cleared).toBe(true);
+    expect(cleared).toEqual({ locked: false, confirmation: 'confirmed' });
     expect(bodies).toHaveLength(2);
     for (const body of bodies) {
       expect(JSON.parse(body).method).toBe('getTransaction');
@@ -136,5 +136,55 @@ describe('SPP submission reconcile', () => {
     await expect(confirmationFromAllowlistedGetTransaction('ok-hash', fetchRead)).resolves.toBe(
       'confirmed',
     );
+  });
+
+  it('keeps a single submitted hash locked until allowlisted getTransaction resolves it', async () => {
+    installChromeLocal();
+    const fingerprint = 'fp-single-hash';
+    await persistUnresolvedSubmission({
+      fingerprint,
+      hashes: ['only-hash'],
+      at: 9,
+    });
+    resetPrivatePaymentExecutionGuardForTests();
+    await hydrateUnresolvedSubmissions();
+    expect(() => beginPrivatePaymentExecution(fingerprint)).toThrow(/reconcil/);
+
+    const read = (status: 'NOT_FOUND' | 'FAILED' | 'SUCCESS') => {
+      return async (_url: string, init?: RequestInit) => {
+        const parsed = JSON.parse(String(init?.body ?? '')) as { method?: string; id?: string };
+        expect(parsed.method).toBe('getTransaction');
+        expect(String(init?.body ?? '')).not.toContain('sendTransaction');
+        return new Response(
+          JSON.stringify({ jsonrpc: '2.0', id: parsed.id, result: { status } }),
+          { status: 200 },
+        );
+      };
+    };
+
+    await expect(reconcileFingerprintThroughReadAllowlist({
+      fingerprint,
+      fetchRead: read('NOT_FOUND'),
+    })).resolves.toEqual({ locked: true });
+    expect(() => beginPrivatePaymentExecution(fingerprint)).toThrow(/getTransaction/);
+
+    await expect(reconcileFingerprintThroughReadAllowlist({
+      fingerprint,
+      fetchRead: read('SUCCESS'),
+    })).resolves.toEqual({ locked: false, confirmation: 'confirmed' });
+    const afterSuccess = beginPrivatePaymentExecution(fingerprint);
+    afterSuccess.release();
+
+    await persistUnresolvedSubmission({
+      fingerprint,
+      hashes: ['only-hash'],
+      at: 10,
+    });
+    await expect(reconcileFingerprintThroughReadAllowlist({
+      fingerprint,
+      fetchRead: read('FAILED'),
+    })).resolves.toEqual({ locked: false, confirmation: 'failed' });
+    const afterFailed = beginPrivatePaymentExecution(fingerprint);
+    afterFailed.release();
   });
 });
