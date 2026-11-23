@@ -290,8 +290,14 @@ describe('sppHostWritePool', () => {
     expect(after?.confirmedTxHashes).toEqual([TX_DEP]);
   });
 
-  it('refuses sequence drift and aborts in-flight when the broadcast gate refuses', async () => {
-    registerOkPool();
+  it('refuses sequence drift and aborts in-flight after gate refuse or execution failure', async () => {
+    // TODO: drop this seam and re-enable against the real gate when SPP_POOL_ECONOMICS_NOT_VERIFIED is lifted.
+    poolEconomicsSeam.pass = true;
+    registerOkPool({
+      deposit: vi.fn(async () => {
+        throw new Error('wasm boom');
+      }),
+    });
     const tracker = new SppMultiAccountSequenceTracker();
     tracker.seed(SENDER, '100');
     setSppHostSequenceTracker(tracker);
@@ -320,6 +326,23 @@ describe('sppHostWritePool', () => {
     );
     expect(gated.ok).toBe(false);
     if (!gated.ok) expect(gated.code).toBe('UNAUTHORIZED');
+    expect(tracker.get(SENDER)?.inFlightFingerprint).toBeNull();
+    expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('100');
+
+    setSppTestnetBroadcastAuthorized(true);
+    const failed = await executeSppHostWritePool(
+      request({
+        signingAccount: SENDER,
+        freshSequence: '100',
+        nextFreshSequence: '101',
+        operationFingerprint: 'fp-exec-fail',
+      }),
+    );
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) {
+      expect(failed.code).toBe('EXECUTION_FAILED');
+      expect(failed.message).toContain('wasm boom');
+    }
     expect(tracker.get(SENDER)?.inFlightFingerprint).toBeNull();
     expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('100');
   });
@@ -377,150 +400,150 @@ describe('sppHostWritePool', () => {
     expect(tracker.get(RECIPIENT)?.inFlightFingerprint).toBeNull();
   });
 
-  // TODO: re-enable this block against the real assertSppPoolPaymentEconomicsBound
-  // when SPP_POOL_ECONOMICS_NOT_VERIFIED is lifted. Offline pool mocks only; no RPC.
-  describe('success path under the test-only economics seam', () => {
-    beforeEach(() => {
-      poolEconomicsSeam.pass = true;
+  // TODO: drop poolEconomicsSeam.pass in the cases below and re-enable them
+  // against the real gate when SPP_POOL_ECONOMICS_NOT_VERIFIED is lifted.
+  // Names stay at this describe level so the T9 delta still sees the baseline cases.
+  it('executes deposit/transfer/withdraw against a registered adapter and propagates failures', async () => {
+    poolEconomicsSeam.pass = true;
+    clearSppHostWritePool();
+    const deposit = vi.fn(async () => ({ txHash: 'dep' }));
+    const transfer = vi.fn(async () => ({ txHash: 'tr' }));
+    const withdraw = vi.fn(async () => {
+      throw new Error('wasm boom');
+    });
+    registerSppHostWritePool({
+      poolContract: POOL,
+      pool: { deposit, transfer, withdraw },
     });
 
-    it('executes deposit/transfer against a registered adapter and propagates withdraw failures', async () => {
-      clearSppHostWritePool();
-      const deposit = vi.fn(async () => ({ txHash: 'dep' }));
-      const transfer = vi.fn(async () => ({ txHash: 'tr' }));
-      const withdraw = vi.fn(async () => {
-        throw new Error('wasm boom');
-      });
-      registerSppHostWritePool({
-        poolContract: POOL,
-        pool: { deposit, transfer, withdraw },
-      });
-
-      await expect(executeSppHostWritePool(request({ operation: 'deposit' }))).resolves.toMatchObject({
-        ok: true,
-        operation: 'deposit',
-        txHash: 'dep',
-        txHashes: ['dep'],
-        rpcRoutedViaNym: true,
-      });
-      await expect(
-        executeSppHostWritePool(
-          request({ operation: 'transfer', recipient: 'G'.padEnd(56, 'B') }),
-        ),
-      ).resolves.toMatchObject({
-        ok: true,
-        operation: 'transfer',
-        txHash: 'tr',
-        rpcRoutedViaNym: true,
-      });
-
-      const failed = await executeSppHostWritePool(request({ operation: 'withdraw' }));
-      expect(failed.ok).toBe(false);
-      if (!failed.ok) {
-        expect(failed.code).toBe('EXECUTION_FAILED');
-        expect(failed.message).toContain('wasm boom');
-      }
-      expect(deposit).toHaveBeenCalledTimes(1);
-      expect(deposit).toHaveBeenCalledWith(10n);
-      expect(transfer).toHaveBeenCalledWith('G'.padEnd(56, 'B'), 10n);
-      expect(withdraw).toHaveBeenCalledWith(10n, null);
+    await expect(executeSppHostWritePool(request({ operation: 'deposit' }))).resolves.toMatchObject({
+      ok: true,
+      operation: 'deposit',
+      txHash: 'dep',
+      txHashes: ['dep'],
+      rpcRoutedViaNym: true,
+    });
+    await expect(
+      executeSppHostWritePool(
+        request({ operation: 'transfer', recipient: 'G'.padEnd(56, 'B') }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      operation: 'transfer',
+      txHash: 'tr',
+      rpcRoutedViaNym: true,
     });
 
-    it('advances account sequence only when execute returns txHash + nextFreshSequence', async () => {
-      registerOkPool();
-      const tracker = getSppHostSequenceTracker();
-      tracker.seed(SENDER, '100');
+    const failed = await executeSppHostWritePool(request({ operation: 'withdraw' }));
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) {
+      expect(failed.code).toBe('EXECUTION_FAILED');
+      expect(failed.message).toContain('wasm boom');
+    }
+    expect(deposit).toHaveBeenCalledTimes(1);
+    expect(deposit).toHaveBeenCalledWith(10n);
+    expect(transfer).toHaveBeenCalledWith('G'.padEnd(56, 'B'), 10n);
+    expect(withdraw).toHaveBeenCalledWith(10n, null);
+  });
 
-      await expect(
-        executeSppHostWritePool(
-          request({
-            signingAccount: SENDER,
-            freshSequence: '100',
-            nextFreshSequence: '101',
-            operationFingerprint: 'fp-deposit-1',
-          }),
-        ),
-      ).resolves.toMatchObject({ ok: true, txHash: TX_DEP, rpcRoutedViaNym: true });
+  it('advances account sequence only when execute returns txHash + nextFreshSequence', async () => {
+    poolEconomicsSeam.pass = true;
+    registerOkPool();
+    const tracker = getSppHostSequenceTracker();
+    tracker.seed(SENDER, '100');
 
-      const after = tracker.get(SENDER);
-      expect(after?.expectedFreshSequence).toBe('101');
-      expect(after?.inFlightFingerprint).toBeNull();
-      expect(after?.confirmedTxHashes).toEqual([TX_DEP]);
-    });
-
-    it('clears in-flight without advancing when nextFreshSequence is missing on success', async () => {
-      registerOkPool();
-      const tracker = getSppHostSequenceTracker();
-      tracker.seed(SENDER, '100');
-
-      await expect(
-        executeSppHostWritePool(
-          request({
-            signingAccount: SENDER,
-            freshSequence: '100',
-            operationFingerprint: 'fp-no-next',
-          }),
-        ),
-      ).resolves.toMatchObject({ ok: true, txHash: TX_DEP });
-
-      const after = tracker.get(SENDER);
-      expect(after?.expectedFreshSequence).toBe('100');
-      expect(after?.inFlightFingerprint).toBeNull();
-      expect(after?.confirmedTxHashes).toEqual([]);
-    });
-
-    it('aborts in-flight after execution failure without advancing sequence', async () => {
-      const deposit = vi.fn(async () => {
-        throw new Error('wasm boom');
-      });
-      registerOkPool({ deposit });
-      const tracker = new SppMultiAccountSequenceTracker();
-      tracker.seed(SENDER, '100');
-      setSppHostSequenceTracker(tracker);
-
-      const failed = await executeSppHostWritePool(
+    await expect(
+      executeSppHostWritePool(
         request({
           signingAccount: SENDER,
           freshSequence: '100',
           nextFreshSequence: '101',
-          operationFingerprint: 'fp-exec-fail',
+          operationFingerprint: 'fp-deposit-1',
         }),
-      );
-      expect(failed.ok).toBe(false);
-      if (!failed.ok) {
-        expect(failed.code).toBe('EXECUTION_FAILED');
-        expect(failed.message).toContain('wasm boom');
-      }
-      expect(deposit).toHaveBeenCalledTimes(1);
-      expect(tracker.get(SENDER)?.inFlightFingerprint).toBeNull();
-      expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('100');
+      ),
+    ).resolves.toMatchObject({ ok: true, txHash: TX_DEP, rpcRoutedViaNym: true });
+
+    const after = tracker.get(SENDER);
+    expect(after?.expectedFreshSequence).toBe('101');
+    expect(after?.inFlightFingerprint).toBeNull();
+    expect(after?.confirmedTxHashes).toEqual([TX_DEP]);
+  });
+
+  it('clears in-flight without advancing when execute succeeds without nextFreshSequence', async () => {
+    poolEconomicsSeam.pass = true;
+    registerOkPool();
+    const tracker = getSppHostSequenceTracker();
+    tracker.seed(SENDER, '100');
+
+    await expect(
+      executeSppHostWritePool(
+        request({
+          signingAccount: SENDER,
+          freshSequence: '100',
+          operationFingerprint: 'fp-no-next',
+        }),
+      ),
+    ).resolves.toMatchObject({ ok: true, txHash: TX_DEP });
+
+    const after = tracker.get(SENDER);
+    expect(after?.expectedFreshSequence).toBe('100');
+    expect(after?.inFlightFingerprint).toBeNull();
+    expect(after?.confirmedTxHashes).toEqual([]);
+  });
+
+  it('aborts in-flight after execution failure without advancing sequence', async () => {
+    poolEconomicsSeam.pass = true;
+    const deposit = vi.fn(async () => {
+      throw new Error('wasm boom');
     });
+    registerOkPool({ deposit });
+    const tracker = new SppMultiAccountSequenceTracker();
+    tracker.seed(SENDER, '100');
+    setSppHostSequenceTracker(tracker);
 
-    it('tracks sender and recipient accounts independently', async () => {
-      registerOkPool({
-        transfer: vi.fn(async () => ({ txHash: 'tr-hash-ok12' })),
-      });
-      const tracker = getSppHostSequenceTracker();
-      tracker.seed(SENDER, '100');
-      tracker.seed(RECIPIENT, '200');
+    const failed = await executeSppHostWritePool(
+      request({
+        signingAccount: SENDER,
+        freshSequence: '100',
+        nextFreshSequence: '101',
+        operationFingerprint: 'fp-exec-fail',
+      }),
+    );
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) {
+      expect(failed.code).toBe('EXECUTION_FAILED');
+      expect(failed.message).toContain('wasm boom');
+    }
+    expect(deposit).toHaveBeenCalledTimes(1);
+    expect(tracker.get(SENDER)?.inFlightFingerprint).toBeNull();
+    expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('100');
+  });
 
-      await expect(
-        executeSppHostWritePool(
-          request({
-            operation: 'transfer',
-            recipient: RECIPIENT,
-            signingAccount: SENDER,
-            freshSequence: '100',
-            nextFreshSequence: '101',
-            operationFingerprint: 'fp-sender-xfer',
-          }),
-        ),
-      ).resolves.toMatchObject({ ok: true, txHash: 'tr-hash-ok12' });
-
-      expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('101');
-      expect(tracker.get(SENDER)?.confirmedTxHashes).toEqual(['tr-hash-ok12']);
-      expect(tracker.get(RECIPIENT)?.expectedFreshSequence).toBe('200');
-      expect(tracker.get(RECIPIENT)?.inFlightFingerprint).toBeNull();
+  it('tracks sender and recipient accounts independently', async () => {
+    poolEconomicsSeam.pass = true;
+    registerOkPool({
+      transfer: vi.fn(async () => ({ txHash: 'tr-hash-ok12' })),
     });
+    const tracker = getSppHostSequenceTracker();
+    tracker.seed(SENDER, '100');
+    tracker.seed(RECIPIENT, '200');
+
+    await expect(
+      executeSppHostWritePool(
+        request({
+          operation: 'transfer',
+          recipient: RECIPIENT,
+          signingAccount: SENDER,
+          freshSequence: '100',
+          nextFreshSequence: '101',
+          operationFingerprint: 'fp-sender-xfer',
+        }),
+      ),
+    ).resolves.toMatchObject({ ok: true, txHash: 'tr-hash-ok12' });
+
+    expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('101');
+    expect(tracker.get(SENDER)?.confirmedTxHashes).toEqual(['tr-hash-ok12']);
+    expect(tracker.get(RECIPIENT)?.expectedFreshSequence).toBe('200');
+    expect(tracker.get(RECIPIENT)?.inFlightFingerprint).toBeNull();
   });
 });
