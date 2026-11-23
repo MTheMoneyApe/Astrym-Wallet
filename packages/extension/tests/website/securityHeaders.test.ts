@@ -25,6 +25,8 @@ describe('webapp response headers', () => {
     expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval'");
     expect(csp).toContain("worker-src 'self' blob:");
     expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain('https://mainnet-node-status-api.nymtech.cc');
+    expect(csp).not.toMatch(/mainnet-node-status-api\.nymtech\.cc\//);
     const withoutWasmEval = csp.replaceAll("'wasm-unsafe-eval'", '');
     expect(withoutWasmEval).not.toContain('unsafe-inline');
     expect(withoutWasmEval).not.toContain('unsafe-eval');
@@ -34,6 +36,16 @@ describe('webapp response headers', () => {
       const policy = headerMap(rule)['Content-Security-Policy'];
       if (policy) expect(policy).not.toContain("frame-ancestors 'self'");
     }
+  });
+
+  it('serves spp-host presentation from a same-origin stylesheet', () => {
+    const html = readFileSync(resolve(root, 'spp-host.html'), 'utf8');
+    const css = readFileSync(resolve(root, 'public/spp-host.css'), 'utf8');
+    expect(html).toContain('href="./spp-host.css"');
+    expect(html).not.toMatch(/<style[\s>]/i);
+    expect(html).not.toMatch(/\sstyle="/);
+    expect(css).toContain('--font-ui');
+    expect(css).not.toContain('fonts.googleapis.com');
   });
 
   it('does not load receive QR codes from api.qrserver.com', () => {
