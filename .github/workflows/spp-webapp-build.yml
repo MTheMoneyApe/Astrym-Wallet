@@ -345,6 +345,43 @@ jobs:
           print(f"All {len(result['matches'])} versioned SPP runtime files match.")
           PY
 
+      - name: Publish pin-verified canonical SPP wasm
+        if: success()
+        run: |
+          set -euo pipefail
+          manifest="packages/wallet-core/src/stellar/spp/nethermind/spp-runtime-manifest.json"
+          pin="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["files"]["dist/stellar_private_payments_web_bg.wasm"]["sha256"])' "$manifest")"
+          artifact="vendor/spp-canonical/$pin"
+          node scripts/verify-spp-canonical-artifact.mjs --artifact "$artifact" --manifest "$manifest"
+          runtime="$SPP_BUILD_ROOT/stellar-private-payments/sdk/web"
+          python3 - "$artifact" "$runtime" <<'PY'
+          import json, sys
+          from pathlib import Path
+          artifact, runtime = map(Path, sys.argv[1:])
+          index = json.loads((artifact / "canonical-artifact.json").read_text(encoding="utf-8"))
+          for rel, name in index["files"].items():
+              vendored = (artifact / name).read_bytes()
+              built = (runtime / rel).read_bytes()
+              if vendored != built:
+                  raise SystemExit(f"canonical artifact drifted from the GHA build: {rel}")
+          print(f"canonical artifact matches the GHA build ({len(index['files'])} files)")
+          PY
+          publish="$RUNNER_TEMP/spp-canonical-publish"
+          rm -rf "$publish"
+          mkdir -p "$publish"
+          cp -a "$artifact/." "$publish/"
+          printf '%s\n' "$pin" > "$publish/PIN.txt"
+          echo "SPP_CANONICAL_PIN=$pin" >> "$GITHUB_ENV"
+
+      - name: Upload pin-verified canonical SPP wasm
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: spp-canonical-wasm-${{ env.SPP_CANONICAL_PIN }}
+          path: ${{ runner.temp }}/spp-canonical-publish
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Validate installable MV3 package
         if: success()
         run: |
