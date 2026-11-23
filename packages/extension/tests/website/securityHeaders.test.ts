@@ -35,4 +35,11 @@ describe('webapp response headers', () => {
       if (policy) expect(policy).not.toContain("frame-ancestors 'self'");
     }
   });
+
+  it('sends referrer, permissions, opener, and transport headers', () => {
+    expect(headers['Referrer-Policy']).toBe('no-referrer');
+    expect(headers['Permissions-Policy']).toBe('camera=(), microphone=(), geolocation=()');
+    expect(headers['Cross-Origin-Opener-Policy']).toBe('same-origin');
+    expect(headers['Strict-Transport-Security']).toBe('max-age=63072000; includeSubDomains');
+  });
 });
