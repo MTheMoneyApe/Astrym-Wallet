@@ -500,9 +500,19 @@ async function runSppProbedPoolPayment(
       const txHash = hashes[0] ?? '';
       const ledger = await ledgerStatusOf(txHash, input.confirmTransaction);
       const confirmation = confirmationFromLedger(ledger);
-      if (confirmation === 'submitted') {
-        flags.reconcile = true;
-        flags.hashes = [txHash];
+      switch (confirmation) {
+        case 'submitted':
+          flags.reconcile = true;
+          flags.hashes = [txHash];
+          break;
+        case 'confirmed':
+        case 'failed':
+          flags.completed = true;
+          break;
+        default: {
+          const unexpected: never = confirmation;
+          throw new SppPrivatePaymentError('EXECUTION_FAILED', `Confirmación inesperada: ${String(unexpected)}`);
+        }
       }
       return {
         operation: request.operation,

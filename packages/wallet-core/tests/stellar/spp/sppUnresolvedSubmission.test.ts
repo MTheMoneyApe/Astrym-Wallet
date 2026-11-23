@@ -195,10 +195,73 @@ describe('unresolved SPP submission lock', () => {
     const failedPayment = await pay(async () => 'FAILED');
     expect(failedPayment.confirmation).toBe('failed');
     expect(await hasUnresolvedSubmission(fingerprint)).toBe(false);
+    resetPrivatePaymentExecutionGuardForTests();
 
     const confirmed = await pay(async () => 'SUCCESS', 'ok-hash');
     expect(confirmed.confirmation).toBe('confirmed');
     expect(saved).toEqual([]);
     expect(await hasUnresolvedSubmission(fingerprint)).toBe(false);
+  });
+
+  it('rejects a repeat after a confirmed payment as DUPLICATE_EXECUTION', async () => {
+    const poolContract = StrKey.encodeContract(Keypair.random().rawPublicKey());
+    const amountStroops = '10';
+    const deposit = vi.fn(async () => ({ txHash: 'ok-hash' }));
+    const request = { operation: 'deposit' as const, poolContract, amountStroops };
+    const fingerprint = privatePaymentFingerprint({
+      operation: 'deposit',
+      poolContract,
+      amountStroops,
+      recipient: null,
+    });
+    const run = () => {
+      sppProbeEconomicsBypass.enabled = true;
+      return executeSppPrivatePayment({
+        gate: { mode: 'nym', connected: true, selected: true },
+        request,
+        rpcUrl: RPC,
+        nymFetch: async () => new Response('{"result":"ok"}', { status: 200 }),
+        pool: poolWith(deposit),
+        preferInjectedTransport: true,
+        authorizationFingerprint: fingerprint,
+        confirmTransaction: async () => 'SUCCESS',
+      }).finally(() => {
+        sppProbeEconomicsBypass.enabled = false;
+      });
+    };
+    await expect(run()).resolves.toMatchObject({ confirmation: 'confirmed' });
+    await expect(run()).rejects.toMatchObject({ code: 'DUPLICATE_EXECUTION' });
+    expect(deposit).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a repeat after a failed payment as DUPLICATE_EXECUTION', async () => {
+    const poolContract = StrKey.encodeContract(Keypair.random().rawPublicKey());
+    const amountStroops = '10';
+    const deposit = vi.fn(async () => ({ txHash: 'bad-hash' }));
+    const request = { operation: 'deposit' as const, poolContract, amountStroops };
+    const fingerprint = privatePaymentFingerprint({
+      operation: 'deposit',
+      poolContract,
+      amountStroops,
+      recipient: null,
+    });
+    const run = () => {
+      sppProbeEconomicsBypass.enabled = true;
+      return executeSppPrivatePayment({
+        gate: { mode: 'nym', connected: true, selected: true },
+        request,
+        rpcUrl: RPC,
+        nymFetch: async () => new Response('{"result":"ok"}', { status: 200 }),
+        pool: poolWith(deposit),
+        preferInjectedTransport: true,
+        authorizationFingerprint: fingerprint,
+        confirmTransaction: async () => 'FAILED',
+      }).finally(() => {
+        sppProbeEconomicsBypass.enabled = false;
+      });
+    };
+    await expect(run()).resolves.toMatchObject({ confirmation: 'failed' });
+    await expect(run()).rejects.toMatchObject({ code: 'DUPLICATE_EXECUTION' });
+    expect(deposit).toHaveBeenCalledOnce();
   });
 });
