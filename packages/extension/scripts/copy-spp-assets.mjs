@@ -29,8 +29,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { homedir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXTENSION_ROOT = resolve(__dirname, '..');
@@ -72,8 +73,14 @@ function repoRoot() {
   return resolve(EXTENSION_ROOT, '../..');
 }
 
-function candidateRoots() {
-  const buildRoot = process.env.SPP_BUILD_ROOT || '/tmp/spp-path-a/cache';
+export function defaultSppBuildRoot() {
+  const xdg = process.env.XDG_CACHE_HOME;
+  if (typeof xdg === 'string' && xdg.length > 0) return join(xdg, 'astrym', 'spp-path-a');
+  return join(homedir(), '.cache', 'astrym', 'spp-path-a');
+}
+
+export function candidateRoots() {
+  const buildRoot = process.env.SPP_BUILD_ROOT || defaultSppBuildRoot();
   return [
     process.env.SPP_SDK_ROOT,
     join(buildRoot, 'stellar-private-payments/sdk/web'),
@@ -86,8 +93,9 @@ function assertVersionedPins(sdkRoot) {
   if (manifest.sourceCommit !== SOURCE_COMMIT) {
     fail(`Versioned manifest sourceCommit is not ${SOURCE_COMMIT}`);
   }
+  const pinned = manifest.files ?? {};
   const problems = [];
-  for (const [rel, expect] of Object.entries(manifest.files ?? {})) {
+  for (const [rel, expect] of Object.entries(pinned)) {
     const file = join(sdkRoot, ...rel.split('/'));
     if (!existsSync(file)) {
       problems.push(`missing ${rel}; expected sha256 ${expect.sha256} from the versioned manifest`);
@@ -99,6 +107,15 @@ function assertVersionedPins(sdkRoot) {
       problems.push(
         `mismatch ${rel}: got ${sha256} ${data.length} expected ${expect.sha256} ${expect.size} from the versioned manifest`,
       );
+    }
+  }
+  for (const subDir of ['js', 'dist']) {
+    for (const relUnderSub of listFilesRecursive(join(sdkRoot, subDir))) {
+      const relPosix = toPosix(join(subDir, relUnderSub).split(sep).join('/'));
+      if (shouldExclude(relPosix)) continue;
+      if (!Object.prototype.hasOwnProperty.call(pinned, relPosix)) {
+        problems.push(`unpinned ${relPosix}; refusing a copied file absent from the versioned manifest`);
+      }
     }
   }
   if (problems.length > 0) {
@@ -433,6 +450,9 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  fail(err instanceof Error ? err.stack || err.message : String(err));
-});
+const entry = process.argv[1] ? resolve(process.argv[1]) : '';
+if (entry && import.meta.url === pathToFileURL(entry).href) {
+  main().catch((err) => {
+    fail(err instanceof Error ? err.stack || err.message : String(err));
+  });
+}

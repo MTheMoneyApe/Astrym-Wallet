@@ -1,7 +1,33 @@
 import browser from 'webextension-polyfill';
 import { BaseRequestEnvelopeSchema, MessageSchemas } from '../shared/ipcSchemas.js';
 import type { BaseResponseEnvelope, MessageTypes, ValidatedRequestPayload, ValidatedResponsePayload } from '../shared/ipcTypes.js';
-import { isInternalWalletSender, isTrustedWalletPageUrl } from './trustedWalletOrigin.js';
+import {
+  isInternalWalletSender,
+  isNymOffscreenDocumentSender,
+  isSppHostDocumentSender,
+  isTrustedWalletPageUrl,
+} from './trustedWalletOrigin.js';
+
+/**
+ * Wallet IPC is default-deny. popup.html and webapp.html may call every
+ * internal route. These documents may call only the routes they send today.
+ * nym-offscreen.html uses its own channel and sends no wallet IPC.
+ */
+const SPP_HOST_INTERNAL_ROUTES = new Set<string>([
+  'GET_ACCOUNTS',
+  'GET_ACTIVE_ACCOUNT',
+  'NYM_STATUS',
+  'SPP_AUTHORIZE_STORAGE_UNLOCK',
+]);
+
+const NYM_OFFSCREEN_INTERNAL_ROUTES = new Set<string>([]);
+
+function senderMayCallInternalRoute(type: string, sender: browser.Runtime.MessageSender): boolean {
+  if (isTrustedWalletPageUrl(sender.url)) return true;
+  if (isSppHostDocumentSender(sender)) return SPP_HOST_INTERNAL_ROUTES.has(type);
+  if (isNymOffscreenDocumentSender(sender)) return NYM_OFFSCREEN_INTERNAL_ROUTES.has(type);
+  return false;
+}
 
 export type MessageHandler<T extends MessageTypes> = (
   payload: ValidatedRequestPayload<T>,
@@ -78,15 +104,12 @@ export class MessageRouter {
           },
         };
       }
-    } else {
-      // Internal route
-      if (!isInternalSender) {
-        return {
-          id: envelope.id,
-          type: 'ERROR',
-          error: { name: 'UnauthorizedSenderError', message: 'Message sender is not authorized for internal routes' }
-        };
-      }
+    } else if (!isInternalSender || !senderMayCallInternalRoute(envelope.type, sender)) {
+      return {
+        id: envelope.id,
+        type: 'ERROR',
+        error: { name: 'UnauthorizedSenderError', message: 'Message sender is not authorized for internal routes' }
+      };
     }
 
 

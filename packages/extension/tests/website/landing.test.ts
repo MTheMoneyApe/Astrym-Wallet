@@ -1,8 +1,17 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(__dirname, '../..');
+
+const localFonts = [
+  'public/fonts/instrument-sans/instrument-sans-latin.woff2',
+  'public/fonts/instrument-sans/OFL.txt',
+  'public/fonts/jetbrains-mono/jetbrains-mono-latin-500.woff2',
+  'public/fonts/jetbrains-mono/OFL.txt',
+  'public/fonts/orbitron/orbitron-latin.woff2',
+  'public/fonts/orbitron/OFL.txt',
+];
 
 describe('Astrym landing page', () => {
   const html = readFileSync(resolve(root, 'index.html'), 'utf8');
@@ -34,14 +43,20 @@ describe('Astrym landing page', () => {
     expect(css).toContain('#3ce894');
     expect(css).toContain('#f7cb08');
     expect(css).toContain('.status-board');
-    expect(html).toContain('fonts.googleapis.com');
-    expect(html).toContain('fonts.gstatic.com');
-    expect(html).toContain('Instrument+Sans');
-    expect(html).toContain('JetBrains+Mono');
-    expect(html).toContain('Orbitron');
+    expect(html).not.toContain('fonts.googleapis.com');
+    expect(html).not.toContain('fonts.gstatic.com');
+    expect(css).not.toContain('fonts.googleapis.com');
+    expect(css).not.toContain('fonts.gstatic.com');
+    expect(css).toContain('@font-face');
+    expect(css).toContain('./fonts/instrument-sans/instrument-sans-latin.woff2');
+    expect(css).toContain('./fonts/jetbrains-mono/jetbrains-mono-latin-500.woff2');
+    expect(css).toContain('./fonts/orbitron/orbitron-latin.woff2');
     expect(css).toContain('"Instrument Sans", sans-serif');
     expect(css).toContain('"JetBrains Mono", ui-monospace, monospace');
     expect(css).toContain('Orbitron, sans-serif');
+    for (const file of localFonts) {
+      expect(existsSync(resolve(root, file)), file).toBe(true);
+    }
   });
 
   it('points Vercel at the webapp build', () => {

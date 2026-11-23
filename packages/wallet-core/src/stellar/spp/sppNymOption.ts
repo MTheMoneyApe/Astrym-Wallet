@@ -388,11 +388,11 @@ export async function executeSppPrivatePayment(input: {
 }
 
 /**
- * Probe and pool execution that sits below the economics gate.
- * Exported so tests can exercise this path without opening that gate.
- * `flags` is the same completion record `executeSppPrivatePayment` releases.
+ * Probe and pool execution. Invoked only after the broadcast gate, the
+ * economics block, the fee ceiling, the fingerprint check, and the in-flight
+ * guard. Not exported.
  */
-export async function runSppProbedPoolPayment(
+async function runSppProbedPoolPayment(
   input: {
     request: {
       operation: SppPrivateOperation;

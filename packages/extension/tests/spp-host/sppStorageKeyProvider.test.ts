@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Keypair } from '@stellar/stellar-sdk';
 import { hashSep53Message } from '@solanym/wallet-core/src/stellar/spp/sep53.js';
-import { SPP_STORAGE_DATABASE_ID, SPP_STORAGE_UNLOCK_RECORD_KEY } from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
+import {
+  SPP_STORAGE_DATABASE_ID,
+  SPP_STORAGE_UNLOCK_RECORD_KEY,
+  SPP_STORAGE_UNLOCK_TTL_MS,
+} from '@solanym/wallet-core/src/stellar/spp/sppStorageUnlockGate.js';
 import {
   SPP_STORAGE_UNLOCK_DIALOG_ALARM,
   confirmStorageUnlock,
@@ -95,7 +99,10 @@ function fixture() {
   return { values, sendMessage, signer, signatures, storageOpen, opened, storage, confirmUnlock, failCompletedRecordWrite: (value: boolean) => { failCompletedRecordWrite = value; } };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe('openSppEncryptedStorage', () => {
   it('creates a random encrypted envelope, opens once and reopens with the same key', async () => {
@@ -329,9 +336,11 @@ const UNLOCK_DIALOG = {
 
 describe('confirmStorageUnlock alarm path', () => {
   it('returns false when the alarms API is missing', async () => {
+    vi.useFakeTimers();
     installDialogDom();
     vi.stubGlobal('chrome', {});
     await expect(confirmStorageUnlock(UNLOCK_DIALOG)).resolves.toBe(false);
+    await vi.advanceTimersByTimeAsync(SPP_STORAGE_UNLOCK_TTL_MS);
   });
 
   it('returns false when alarm create throws or rejects', async () => {
@@ -347,14 +356,42 @@ describe('confirmStorageUnlock alarm path', () => {
   });
 
   it('returns false when the unlock alarm fires', async () => {
+    vi.useFakeTimers();
     installDialogDom();
     const { listeners, clear } = installAlarms(() => Promise.resolve());
     const pending = confirmStorageUnlock(UNLOCK_DIALOG);
     expect(listeners).toHaveLength(1);
-    listeners[0]?.({ name: SPP_STORAGE_UNLOCK_DIALOG_ALARM });
+    const onAlarm = listeners[0];
+    onAlarm?.({ name: SPP_STORAGE_UNLOCK_DIALOG_ALARM });
+    onAlarm?.({ name: SPP_STORAGE_UNLOCK_DIALOG_ALARM });
     await expect(pending).resolves.toBe(false);
+    expect(clear).toHaveBeenCalledTimes(1);
     expect(clear).toHaveBeenCalledWith(SPP_STORAGE_UNLOCK_DIALOG_ALARM);
     expect(listeners).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(SPP_STORAGE_UNLOCK_TTL_MS);
+    expect(clear).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns false when the setTimeout backstop fires first', async () => {
+    vi.useFakeTimers();
+    installDialogDom();
+    const { listeners, clear } = installAlarms(() => Promise.resolve());
+    const pending = confirmStorageUnlock(UNLOCK_DIALOG);
+    expect(listeners).toHaveLength(1);
+    const onAlarm = listeners[0];
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(SPP_STORAGE_UNLOCK_TTL_MS - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toBe(false);
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(clear).toHaveBeenCalledWith(SPP_STORAGE_UNLOCK_DIALOG_ALARM);
+    expect(listeners).toHaveLength(0);
+    onAlarm?.({ name: SPP_STORAGE_UNLOCK_DIALOG_ALARM });
+    expect(clear).toHaveBeenCalledTimes(1);
   });
 
   it('returns false when the dialog is cancelled', async () => {

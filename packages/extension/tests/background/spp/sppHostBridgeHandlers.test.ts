@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Networks } from '@stellar/stellar-sdk';
 import {
   isSppTestnetBroadcastAuthorized,
@@ -9,10 +9,19 @@ import { STELLAR_SOROBAN_TESTNET_RPC } from '@solanym/wallet-core/src/stellar/sp
 import {
   mintSppSignApproval,
   resetSppSignApprovalsForTests,
-  setSppPaymentIdentityChecksForTests,
   sppSignApprovalCount,
   type SppSignIntent,
 } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+
+const sppPaymentIdentityChecks = vi.hoisted(() => ({ enabled: false }));
+
+function setSppPaymentIdentityChecksForTests(enabled: boolean): void {
+  sppPaymentIdentityChecks.enabled = enabled;
+}
+
+vi.mock('@solanym/wallet-core/src/stellar/spp/sppPaymentIdentityChecks.js', () => ({
+  sppPaymentIdentityChecksEnabled: () => sppPaymentIdentityChecks.enabled,
+}));
 
 vi.mock('webextension-polyfill', () => ({
   default: {
@@ -82,6 +91,9 @@ describe('handleSppHostNymFetchRequest', () => {
     resetSppSignApprovalsForTests();
     setSppPaymentIdentityChecksForTests(true);
     setSppTestnetBroadcastAuthorized(false);
+  });
+  afterEach(() => {
+    setSppPaymentIdentityChecksForTests(false);
   });
 
   it('proxies same-origin Soroban requests when Nym is connected', async () => {

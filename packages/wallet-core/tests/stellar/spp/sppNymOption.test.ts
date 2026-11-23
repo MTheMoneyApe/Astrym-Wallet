@@ -4,13 +4,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createSppNymScopedFetch,
   executeSppPrivatePayment,
-  runSppProbedPoolPayment,
   sppOptionAvailability,
   sppPrivatePaymentsAllowed,
   withSppRpcThroughNym,
   xlmToStroops,
   type SppPrivatePool,
 } from '../../../src/stellar/spp/sppNymOption.js';
+import { runSppProbedPoolPayment } from './seams/runSppProbedPoolPayment.js';
+
+// vi.mock is hoisted above imports. The dynamic import loads only the bypass
+// flag so this factory does not cycle through sppNymOption while sppSignGate is mocked.
+vi.mock('../../../src/stellar/spp/sppSignGate.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/stellar/spp/sppSignGate.js')>();
+  const { sppProbeEconomicsBypass } = await import('./seams/sppProbeEconomicsBypass.js');
+  return {
+    ...actual,
+    assertSppPoolPaymentEconomicsBound(
+      operation: Parameters<typeof actual.assertSppPoolPaymentEconomicsBound>[0],
+    ): void {
+      if (sppProbeEconomicsBypass.enabled) return;
+      actual.assertSppPoolPaymentEconomicsBound(operation);
+    },
+  };
+});
 import {
   privatePaymentFingerprint,
   resetPrivatePaymentExecutionGuardForTests,

@@ -39,7 +39,6 @@ import {
   approveSppKeyDerivationRequest,
   mintSppSignApproval,
   resetSppSignApprovalsForTests,
-  setSppPaymentIdentityChecksForTests,
   waitForSppKeyDerivationApproval,
   sppKeyDerivationMessage,
   type SppSignIntent,
@@ -48,6 +47,16 @@ import {
   resetSppBroadcastGateForTests,
   setSppTestnetBroadcastAuthorized,
 } from '../../../src/stellar/spp/sppBroadcastGate.js';
+import { setSppPaymentIdentityChecksForTests } from './seams/sppPaymentIdentityChecks.js';
+
+// vi.mock is hoisted above imports. The dynamic import loads the test seam
+// without a static import cycle while sppPaymentIdentityChecks.js is mocked.
+vi.mock('../../../src/stellar/spp/sppPaymentIdentityChecks.js', async () => {
+  const seam = await import('./seams/sppPaymentIdentityChecks.js');
+  return {
+    sppPaymentIdentityChecksEnabled: () => seam.sppPaymentIdentityChecks.enabled,
+  };
+});
 import { NETHERMIND_PUBLIC_KDF_DOMAIN } from '../../../src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import {
   approveSppStorageUnlockRequest,
@@ -395,6 +404,7 @@ describe('SppWalletSignerAdapter hardening (offline)', () => {
   afterEach(() => {
     resetSppBroadcastGateForTests();
     resetSppStorageUnlockApprovalsForTests();
+    setSppPaymentIdentityChecksForTests(false);
   });
 
   it('signs the separately approved storage unlock challenge with broadcasts disabled', async () => {

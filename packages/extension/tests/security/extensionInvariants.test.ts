@@ -102,6 +102,8 @@ describe('Extension Security — Static Invariants', () => {
         // Offscreen MixFetch hang bound (95s). Not vault lock and not clearnet.
         'nym-offscreen/runtime.ts',
         'spp-host/storageLabPrep.ts',
+        // Storage-unlock dialog TTL backstop beside chrome.alarms. Not vault lock.
+        'spp-host/sppStorageKeyProvider.ts',
       ].map((rel) => path.normalize(rel)),
     );
 

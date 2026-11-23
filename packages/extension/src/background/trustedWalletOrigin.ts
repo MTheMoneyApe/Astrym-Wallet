@@ -35,6 +35,14 @@ export function isSppHostDocumentSender(
   return sameDocumentUrl(sender.url, browser.runtime.getURL('spp-host.html'));
 }
 
+/** Offscreen MixFetch document. It does not own wallet IPC routes. */
+export function isNymOffscreenDocumentSender(
+  sender: { id?: string | undefined; url?: string | undefined } | undefined,
+): boolean {
+  if (!sender?.id || !sender.url || sender.id !== browser.runtime.id) return false;
+  return sameDocumentUrl(sender.url, browser.runtime.getURL('nym-offscreen.html'));
+}
+
 function sameDocumentUrl(actual: string, expected: string): boolean {
   const base = 'http://astrym.invalid';
   let actualUrl: URL;

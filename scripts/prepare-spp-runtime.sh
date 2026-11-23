@@ -18,7 +18,19 @@ CIRCUITS_URL="https://github.com/NethermindEth/stellar-private-payments/releases
 CIRCUITS_SHA256="c4ad54de6cc146bd8323e502341d545e09d0cd95d21b4f60ad2388188f64a2f9"
 CIRCUITS_LOCK_SHA256="35c36f4d0f7055514156b67df9995cb9550e5f380e9a84d85dddb457d17b241e"
 CIRCOMLIB_REPO="https://github.com/iden3/circomlib.git"
-BUILD_ROOT="${SPP_BUILD_ROOT:-/tmp/spp-path-a/cache}"
+# User-owned cache. CI sets SPP_BUILD_ROOT to the content-addressed toolchain path.
+spp_default_build_root() {
+  if [ -n "${XDG_CACHE_HOME:-}" ]; then
+    printf '%s\n' "${XDG_CACHE_HOME}/astrym/spp-path-a"
+  else
+    printf '%s\n' "${HOME:?HOME is required when SPP_BUILD_ROOT is unset}/.cache/astrym/spp-path-a"
+  fi
+}
+if [ -n "${SPP_BUILD_ROOT:-}" ]; then
+  BUILD_ROOT="$SPP_BUILD_ROOT"
+else
+  BUILD_ROOT="$(spp_default_build_root)"
+fi
 SRC="$BUILD_ROOT/stellar-private-payments"
 MANIFEST="$REPO_ROOT/packages/wallet-core/src/stellar/spp/nethermind/spp-runtime-manifest.json"
 

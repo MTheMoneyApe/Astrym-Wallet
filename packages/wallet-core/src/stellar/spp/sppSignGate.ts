@@ -42,6 +42,7 @@ import {
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hashSep53Message } from './sep53.js';
 import { isSppTestnetBroadcastAuthorized } from './sppBroadcastGate.js';
+import { sppPaymentIdentityChecksEnabled } from './sppPaymentIdentityChecks.js';
 import { NETHERMIND_PUBLIC_KDF_DOMAIN } from './nethermind/nethermindPublicTestnet.js';
 import {
   SPP_PROPOSED_MAX_FEE_STROOPS,
@@ -621,16 +622,9 @@ export function assertSppPoolPaymentEconomicsBound(operation: SppSignOperation):
   );
 }
 
-/** Test-only. Production mint rejects deposit, transfer, and withdraw. */
-let paymentIdentityChecksForTests = false;
-
-export function setSppPaymentIdentityChecksForTests(enabled: boolean): void {
-  paymentIdentityChecksForTests = enabled;
-}
-
 export function mintSppSignApproval(intent: SppSignIntent, nowMs: number = Date.now()): string {
   if (
-    !paymentIdentityChecksForTests
+    !sppPaymentIdentityChecksEnabled()
     && (intent.operation === 'deposit' || intent.operation === 'transfer' || intent.operation === 'withdraw')
   ) {
     throw new SppSignerError(

@@ -47,7 +47,8 @@ jobs:
       - name: Focal invariants
         env:
           T9_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-          # sdk/web from prepare-spp-runtime.sh (BUILD_ROOT default /tmp/spp-path-a/cache).
+          # CI pins the content-addressed toolchain path. The script default is the user cache.
+          SPP_BUILD_ROOT: /tmp/spp-path-a/cache
           SPP_SDK_ROOT: /tmp/spp-path-a/cache/stellar-private-payments/sdk/web
         run: bash .github/ci/t9-check.sh focal
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -75,7 +76,8 @@ jobs:
       - name: Full typecheck and vitest
         env:
           T9_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-          # sdk/web from prepare-spp-runtime.sh (BUILD_ROOT default /tmp/spp-path-a/cache).
+          # CI pins the content-addressed toolchain path. The script default is the user cache.
+          SPP_BUILD_ROOT: /tmp/spp-path-a/cache
           SPP_SDK_ROOT: /tmp/spp-path-a/cache/stellar-private-payments/sdk/web
         run: bash .github/ci/t9-check.sh full
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -120,7 +122,8 @@ jobs:
           T9_BASE_DIR: ${{ github.workspace }}/t9-baseline
           T9_HEAD_DIR: ${{ github.workspace }}/t9-head
           T9_SCRIPT_FALLBACK: ${{ github.event_name == 'workflow_dispatch' && 'workflow' || '' }}
-          # sdk/web from prepare-spp-runtime.sh (BUILD_ROOT default /tmp/spp-path-a/cache).
+          # CI pins the content-addressed toolchain path. The script default is the user cache.
+          SPP_BUILD_ROOT: /tmp/spp-path-a/cache
           SPP_SDK_ROOT: /tmp/spp-path-a/cache/stellar-private-payments/sdk/web
         run: bash .github/ci/t9-delta-job.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
