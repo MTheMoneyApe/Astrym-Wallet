@@ -7,7 +7,7 @@
  * hashed install-prompt module left in place, and public/fonts is copied
  * beside them.
  */
-import { copyFileSync, cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -75,4 +75,9 @@ for (const rel of fontFiles) {
   if (!existsSync(resolve(fontsDest, rel))) {
     throw new Error(`copy-canonical-landing: missing shipped font ${rel}`);
   }
+}
+
+const shippedManifest = resolve(dist, 'manifest.json');
+if (existsSync(shippedManifest) && readFileSync(shippedManifest, 'utf8').includes('"manifest_version"')) {
+  unlinkSync(shippedManifest);
 }

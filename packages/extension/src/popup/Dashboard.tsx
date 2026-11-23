@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { toDataURL } from 'qrcode';
 import { sendIpcMessage } from './ipc.js';
 import { Send } from './Send.js';
 import { SppStatusPanel } from './SppStatusPanel.js';
@@ -481,6 +482,25 @@ export function AccountMenu({
 function ReceiveAddressView({ account, onBack }: { account: { address: string; label: string; index: number } | null; onBack: () => void }) {
   const [qrError, setQrError] = useState('');
   const [copyStatus, setCopyStatus] = useState('');
+  const [qrUrl, setQrUrl] = useState('');
+  const address = account?.address ?? '';
+
+  useEffect(() => {
+    if (!address) return;
+    let cancelled = false;
+    setQrUrl('');
+    setQrError('');
+    void toDataURL(address, { width: 240, margin: 1, errorCorrectionLevel: 'M' })
+      .then((url) => {
+        if (!cancelled) setQrUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrError('Unable to load QR. Please copy the address below.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [address]);
 
   if (!account) {
     return (
@@ -496,8 +516,6 @@ function ReceiveAddressView({ account, onBack }: { account: { address: string; l
       </div>
     );
   }
-
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(account.address)}`;
 
   const handleCopy = async () => {
     try {
@@ -517,13 +535,14 @@ function ReceiveAddressView({ account, onBack }: { account: { address: string; l
 
       <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
         <div style={{ background: 'var(--surface-color)', padding: 15, borderRadius: 16, border: '1px solid var(--border-dark)', display: 'grid', placeItems: 'center' }}>
-          <img
-            src={qrUrl}
-            alt={`Receive address QR for ${account.address}`}
-            className="receive-qr"
-            style={{ width: 200, height: 200, display: 'block', background: '#fff', borderRadius: 12, border: '1px solid var(--border-dark)' }}
-            onError={() => setQrError('Unable to load QR. Please copy the address below.')}
-          />
+          {qrUrl ? (
+            <img
+              src={qrUrl}
+              alt={`Receive address QR for ${account.address}`}
+              className="receive-qr"
+              style={{ width: 200, height: 200, display: 'block', background: '#fff', borderRadius: 12, border: '1px solid var(--border-dark)' }}
+            />
+          ) : null}
         </div>
 
         {qrError ? <p className="error-text" style={{ margin: 0 }}>{qrError}</p> : null}
