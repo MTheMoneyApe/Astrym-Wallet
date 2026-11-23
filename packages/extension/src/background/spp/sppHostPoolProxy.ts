@@ -84,11 +84,22 @@ async function executeViaHost(
     );
   }
   if (!result.ok) {
-    throw new SppPrivatePaymentError(result.code, result.message, {
-      txHashes: result.txHashes ?? [],
-    });
+    const txHashes = result.txHashes ?? [];
+    const code =
+      result.code === 'SUBMISSION_UNKNOWN' ||
+      (txHashes.length > 0 && (result.code === 'EXECUTION_FAILED' || txHashes.length > 1))
+        ? 'SUBMISSION_UNKNOWN'
+        : result.code;
+    throw new SppPrivatePaymentError(code, result.message, { txHashes });
   }
   const txHashes = result.txHashes ?? (result.txHash ? [result.txHash] : []);
+  if (txHashes.length > 1) {
+    throw new SppPrivatePaymentError(
+      'SUBMISSION_UNKNOWN',
+      `spp-host returned ${txHashes.length} hash(es); not confirming one.`,
+      { txHashes },
+    );
+  }
   return {
     txHash: txHashes.length === 1 ? (txHashes[0] ?? null) : null,
     txHashes,

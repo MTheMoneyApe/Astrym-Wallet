@@ -159,7 +159,7 @@ export function SppPrivateSend({
           style={{ width: '100%', marginTop: 4 }}
           value={operation}
           data-testid="spp-private-operation"
-          disabled={busy || route.status === 'confirmed'}
+          disabled={busy || route.status === 'confirmed' || route.status === 'submitted' || route.status === 'unknown'}
           onChange={(event) => {
             setOperation(event.target.value as SppPrivateOperation);
             setAuthorized(false);
@@ -220,6 +220,7 @@ export function SppPrivateSend({
           busy ||
           route.status === 'initializing' ||
           route.status === 'confirmed' ||
+          route.status === 'submitted' ||
           route.status === 'unknown' ||
           (!route.canAuthorize && !route.canSubmit && route.status !== 'awaiting_authorization')
         }

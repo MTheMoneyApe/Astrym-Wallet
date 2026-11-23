@@ -14,6 +14,7 @@ import {
 } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 import { isSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
 import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
+import { STELLAR_SOROBAN_TESTNET_RPC } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import type { ValidatedRequestPayload, ValidatedResponsePayload } from '../../shared/ipcTypes.js';
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
@@ -21,6 +22,7 @@ import { getSppHostLifecycle } from '../spp/sppPrivatePoolRegistry.js';
 import { querySppHostAccount } from '../spp/sppHostAccountProxy.js';
 import { isTrustedWalletPageUrl } from '../trustedWalletOrigin.js';
 import { resolveActiveStellarAddress } from '../spp/sppBoundAccount.js';
+import { confirmationFromAllowlistedGetTransaction } from '../spp/sppSubmissionReconcile.js';
 
 function requireNymAndWritePool(): { nymMode: 'direct' | 'nym'; nymConnected: boolean } {
   const snap = getNymRuntimeController().getSnapshot();
@@ -232,10 +234,24 @@ export function createSppRegisterPublicKeysHandler(deps: {
       const nym = requireNymAndWritePool();
       const result = await querySppHostAccount({ ...nym, action: 'register_public_keys' });
       if (!result.ok) mapHostFailure(result);
+      let confirmation: 'confirmed' | 'submitted' | 'unknown' = result.registerTxHash
+        ? 'submitted'
+        : 'unknown';
+      if (result.registerTxHash) {
+        try {
+          confirmation = await confirmationFromAllowlistedGetTransaction(
+            result.registerTxHash,
+            getNymRuntimeController().getStellarFetch(),
+            STELLAR_SOROBAN_TESTNET_RPC,
+          );
+        } catch {
+          confirmation = 'submitted';
+        }
+      }
       return {
         txHash: result.registerTxHash ?? null,
         rpcRoutedViaNym: true as const,
-        confirmation: result.registerTxHash ? ('confirmed' as const) : ('unknown' as const),
+        confirmation,
       };
     } catch (cause) {
       if (minted) revokeSppSignApprovals(address);

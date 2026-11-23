@@ -573,6 +573,36 @@ export async function handleSppHostSignRequest(
   }
 }
 
+/**
+ * Body for one getTransaction read. Null unless the Soroban read allowlist
+ * accepts it. Reconciliation must not build sendTransaction or any other method.
+ */
+export function allowlistedGetTransactionBody(hash: string): string | null {
+  if (typeof hash !== 'string' || hash.length === 0 || hash.length > 128) return null;
+  const body = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 'spp-reconcile',
+    method: 'getTransaction',
+    params: { hash },
+  });
+  if (classifySorobanBody(body) !== 'read') return null;
+  const rebuilt = rebuildSorobanReadBody(body);
+  if (!rebuilt) return null;
+  try {
+    const method = (JSON.parse(rebuilt) as { method?: unknown }).method;
+    if (method !== 'getTransaction') return null;
+  } catch {
+    return null;
+  }
+  return rebuilt;
+}
+
+/** Read-allowlist rebuild. Send and mixed bodies are refused. */
+export function allowlistedSorobanReadBody(body: string): string | null {
+  if (classifySorobanBody(body) !== 'read') return null;
+  return rebuildSorobanReadBody(body);
+}
+
 /** Host → SW: route Soroban-origin HTTP through Nym fail-closed fetch. */
 export async function handleSppHostNymFetchRequest(
   request: SppHostNymFetchRequest,

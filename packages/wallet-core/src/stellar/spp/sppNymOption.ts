@@ -8,6 +8,9 @@ import { StrKey } from '@stellar/stellar-sdk';
 import {
   assertAuthorizationFingerprint,
   beginPrivatePaymentExecution,
+  hasUnresolvedSubmission,
+  hydrateUnresolvedSubmissions,
+  persistUnresolvedSubmission,
   privatePaymentFingerprint,
 } from './sppExecutionGuard.js';
 import { assertSppTestnetBroadcastAuthorized } from './sppBroadcastGate.js';
@@ -264,12 +267,18 @@ export async function executeSppPrivatePayment(input: {
   senderAddress?: string | null;
   /** Explicit max fee ceiling in stroops (never unbounded). */
   maxFeeStroops?: string | null;
+  /**
+   * Read-allowlist getTransaction. Absent readers never promote a hash to confirmed.
+   */
+  confirmTransaction?: (
+    hash: string,
+  ) => Promise<'SUCCESS' | 'FAILED' | 'NOT_FOUND' | 'UNKNOWN'>;
 }): Promise<{
   operation: SppPrivateOperation;
   txHash: string | null;
   txHashes: readonly string[];
   rpcRoutedViaNym: true;
-  confirmation: 'confirmed' | 'unknown';
+  confirmation: 'confirmed' | 'submitted' | 'unknown';
 }> {
   if (sppOptionAvailability(input.gate) !== 'ready_to_enable') {
     throw new SppPrivatePaymentError(
@@ -312,6 +321,13 @@ export async function executeSppPrivatePayment(input: {
     amountStroops: request.amount.toString(),
     recipient: request.recipient,
   });
+  await hydrateUnresolvedSubmissions();
+  if (await hasUnresolvedSubmission(fingerprint)) {
+    throw new SppPrivatePaymentError(
+      'SUBMISSION_UNKNOWN',
+      'Reautorización bloqueada hasta reconciliar la operación por getTransaction.',
+    );
+  }
   let release: (opts?: { completed?: boolean; reconcile?: boolean }) => void;
   try {
     ({ release } = beginPrivatePaymentExecution(fingerprint));
@@ -371,7 +387,7 @@ export async function executeSppPrivatePayment(input: {
     );
   }
 
-  const flags = { completed: false, reconcile: false };
+  const flags = { completed: false, reconcile: false, hashes: [] as string[] };
   try {
     return await runSppProbedPoolPayment({
       request,
@@ -381,9 +397,53 @@ export async function executeSppPrivatePayment(input: {
       ...(input.preferInjectedTransport === undefined
         ? {}
         : { preferInjectedTransport: input.preferInjectedTransport }),
+      ...(input.confirmTransaction === undefined
+        ? {}
+        : { confirmTransaction: input.confirmTransaction }),
     }, flags);
   } finally {
-    release(flags.completed ? { completed: true } : flags.reconcile ? { reconcile: true } : undefined);
+    try {
+      if (flags.hashes.length > 0) {
+        await persistUnresolvedSubmission({
+          fingerprint,
+          hashes: flags.hashes,
+          at: Date.now(),
+        });
+      }
+    } finally {
+      release(flags.completed ? { completed: true } : flags.reconcile ? { reconcile: true } : undefined);
+    }
+  }
+}
+
+async function ledgerStatusOf(
+  hash: string,
+  confirmTransaction:
+    | ((hash: string) => Promise<'SUCCESS' | 'FAILED' | 'NOT_FOUND' | 'UNKNOWN'>)
+    | undefined,
+): Promise<'SUCCESS' | 'FAILED' | 'NOT_FOUND' | 'UNKNOWN'> {
+  if (!hash || !confirmTransaction) return 'UNKNOWN';
+  try {
+    return await confirmTransaction(hash);
+  } catch {
+    return 'UNKNOWN';
+  }
+}
+
+function confirmationFromLedger(
+  status: 'SUCCESS' | 'FAILED' | 'NOT_FOUND' | 'UNKNOWN',
+): 'confirmed' | 'submitted' {
+  switch (status) {
+    case 'SUCCESS':
+      return 'confirmed';
+    case 'FAILED':
+    case 'NOT_FOUND':
+    case 'UNKNOWN':
+      return 'submitted';
+    default: {
+      const unexpected: never = status;
+      return unexpected;
+    }
   }
 }
 
@@ -403,14 +463,21 @@ async function runSppProbedPoolPayment(
     nymFetch: SppRpcFetch;
     pool: SppPrivatePool;
     preferInjectedTransport?: boolean;
+    confirmTransaction?: (
+      hash: string,
+    ) => Promise<'SUCCESS' | 'FAILED' | 'NOT_FOUND' | 'UNKNOWN'>;
   },
-  flags: { completed: boolean; reconcile: boolean } = { completed: false, reconcile: false },
+  flags: { completed: boolean; reconcile: boolean; hashes: string[] } = {
+    completed: false,
+    reconcile: false,
+    hashes: [],
+  },
 ): Promise<{
   operation: SppPrivateOperation;
   txHash: string | null;
   txHashes: readonly string[];
   rpcRoutedViaNym: true;
-  confirmation: 'confirmed' | 'unknown';
+  confirmation: 'confirmed' | 'submitted' | 'unknown';
 }> {
   const pool = input.pool;
   const request = input.request;
@@ -422,33 +489,45 @@ async function runSppProbedPoolPayment(
       const hashes = reportedPoolHashes(result);
       if (hashes.length !== 1) {
         flags.reconcile = true;
+        if (hashes.length > 0) flags.hashes = [...hashes];
         throw new SppPrivatePaymentError(
           'SUBMISSION_UNKNOWN',
           `El SDK devolvió ${hashes.length} hash(es). No se confirma solo el primero y no hay reintento. hashes=${hashes.join(',')}`,
           { txHashes: hashes },
         );
       }
+      const txHash = hashes[0] ?? '';
+      const ledger = await ledgerStatusOf(txHash, input.confirmTransaction);
       flags.completed = true;
       return {
         operation: request.operation,
-        txHash: hashes[0] ?? null,
+        txHash,
         txHashes: hashes,
         rpcRoutedViaNym: true as const,
-        confirmation: 'confirmed' as const,
+        confirmation: confirmationFromLedger(ledger),
       };
     } catch (cause) {
       if (cause instanceof SppPrivatePaymentError) {
-        if (cause.txHashes.length > 0) flags.reconcile = true;
+        if (cause.txHashes.length > 0) {
+          flags.reconcile = true;
+          if (cause.code === 'SUBMISSION_UNKNOWN' || cause.code === 'EXECUTION_FAILED') {
+            flags.hashes = [...cause.txHashes];
+          }
+        }
         throw cause;
       }
       const message = cause instanceof Error ? cause.message : 'El pago privado SPP falló';
       const recovered = hashesCarriedBy(cause);
-      if (recovered.length > 0) flags.reconcile = true;
-      throw new SppPrivatePaymentError(
-        'EXECUTION_FAILED',
-        recovered.length > 0 ? `${message} completedHashes=${recovered.join(',')}` : message,
-        { cause, txHashes: recovered },
-      );
+      if (recovered.length > 0) {
+        flags.reconcile = true;
+        flags.hashes = [...recovered];
+        throw new SppPrivatePaymentError(
+          'SUBMISSION_UNKNOWN',
+          `${message} completedHashes=${recovered.join(',')}`,
+          { cause, txHashes: recovered },
+        );
+      }
+      throw new SppPrivatePaymentError('EXECUTION_FAILED', message, { cause });
     }
   };
 

@@ -362,9 +362,10 @@ export async function executeSppHostWritePool(
     const hashes = hashesOf(mapped);
     if (hashes.length !== 1) {
       abortSequenceInFlight(sequenceBegun);
+      const ambiguous = hashes.length > 1;
       return failureResult(
         id,
-        'EXECUTION_FAILED',
+        ambiguous ? 'SUBMISSION_UNKNOWN' : 'EXECUTION_FAILED',
         `SPP execute returned ${hashes.length} hash(es); not confirming one and not retrying. hashes=${hashes.join(',')}`,
         hashes,
       );
@@ -392,6 +393,12 @@ export async function executeSppHostWritePool(
         : 'EXECUTION_FAILED';
     const recovered = hashesFromCause(cause);
     const message = cause instanceof Error ? cause.message : 'WASM/private pool execution failed';
-    return failureResult(id, code, message, recovered);
+    const ambiguous = recovered.length > 0 && code !== 'INVALID_REQUEST';
+    return failureResult(
+      id,
+      ambiguous ? 'SUBMISSION_UNKNOWN' : code,
+      ambiguous ? `${message} completedHashes=${recovered.join(',')}` : message,
+      recovered,
+    );
   }
 }

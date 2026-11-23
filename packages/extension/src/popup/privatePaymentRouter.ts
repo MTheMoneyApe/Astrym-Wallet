@@ -13,6 +13,7 @@ export type PrivatePaymentUiStatus =
   | 'awaiting_authorization'
   | 'sending'
   | 'sent'
+  | 'submitted'
   | 'confirmed'
   | 'failed'
   | 'unknown';
@@ -28,8 +29,15 @@ export type PrivatePaymentRouteInput = {
   authorized: boolean;
   inFlight: boolean;
   lastTxHash: string | null;
+  /** Every hash from one execute. More than one is an ambiguous submission. */
+  lastTxHashes?: readonly string[] | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  /**
+   * Ledger outcome of lastTxHash. A hash alone stays submitted until
+   * getTransaction reports SUCCESS.
+   */
+  ledgerConfirmation?: 'submitted' | 'confirmed' | null;
 };
 
 export type PrivatePaymentRoute = {
@@ -103,7 +111,11 @@ export function routePrivatePayment(input: PrivatePaymentRouteInput): PrivatePay
     };
   }
 
-  if (input.lastErrorCode === 'unknown' || input.lastErrorCode === 'SUBMISSION_UNKNOWN') {
+  if (
+    input.lastErrorCode === 'unknown' ||
+    input.lastErrorCode === 'SUBMISSION_UNKNOWN' ||
+    (input.lastTxHashes?.length ?? 0) > 1
+  ) {
     return {
       status: 'unknown',
       canAuthorize: false,
@@ -116,12 +128,15 @@ export function routePrivatePayment(input: PrivatePaymentRouteInput): PrivatePay
   }
 
   if (input.lastTxHash && !input.inFlight && !input.lastErrorCode) {
+    const confirmed = input.ledgerConfirmation === 'confirmed';
     return {
-      status: 'confirmed',
+      status: confirmed ? 'confirmed' : 'submitted',
       canAuthorize: false,
       canSubmit: false,
       blockPublicFallback,
-      message: 'Pago privado confirmado (hash disponible).',
+      message: confirmed
+        ? 'Pago privado confirmado en ledger (getTransaction SUCCESS).'
+        : 'Pago privado enviado. Sigue submitted hasta getTransaction SUCCESS.',
     };
   }
 
