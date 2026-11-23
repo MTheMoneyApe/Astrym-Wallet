@@ -2,10 +2,12 @@
  * Solanym SPP isolated host page entry.
  * Extension page only — not the service worker, popup React tree, or dapp provider.
  *
- * Nothing runs on load. Probe, WASM init, and storage lab prep/run/free stay on
- * their buttons. A later storage change may start auto-prepare; opening the
- * encrypted OPFS database still requires the visible unlock consent dialog and
- * a one-shot vault signature bound to the active account/generation.
+ * Probe, WASM init, and storage lab prep/run/free: Nothing runs on load.
+ * A current service-worker auto-prepare intent may run the packaged facade probe,
+ * WASM initialization, and an SPP read-only session on host load. A later storage
+ * change may start auto-prepare again. Opening the encrypted OPFS database still
+ * requires the visible unlock consent dialog and a one-shot vault signature bound
+ * to the active account/generation.
  *
  * Manual lab controls remain separate:
  * - Storage lab prep only evaluates operator gates.
@@ -537,6 +539,7 @@ function main(): void {
       }
     });
   }
+  processAutoPrepareIntent();
 }
 
 try {
