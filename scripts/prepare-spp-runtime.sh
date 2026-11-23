@@ -270,6 +270,13 @@ if [ "$SPP_CANONICAL_GHA_PROFILE" = "1" ]; then
   # Ubuntu 24.04 manifest build. These homes are supplied by the workflow.
   CARGO_HOME_REMAP="$CARGO_HOME"
   RUSTUP_HOME_REMAP="$RUSTUP_HOME"
+elif [ "$CONSUME_CANONICAL_ARTIFACT" = "1" ]; then
+  # The published wasm keeps Rust's virtual /rust and /rustc strings.
+  # Those are not host paths. Scan the real cache directories instead.
+  export CARGO_HOME="$BUILD_ROOT/cargo"
+  export RUSTUP_HOME="$BUILD_ROOT/rustup"
+  CARGO_HOME_REMAP="$CARGO_HOME"
+  RUSTUP_HOME_REMAP="$RUSTUP_HOME"
 else
   # Retain caller-provided homes (or the image /rust fallback) as explicit
   # remap inputs before assigning isolated homes for the non-canonical image.
