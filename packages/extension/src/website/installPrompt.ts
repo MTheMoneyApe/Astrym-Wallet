@@ -1,3 +1,5 @@
+import './i18n';
+
 /**
  * Android install affordance for the Astrym landing page.
  * Uses the browser prompt when Chrome/Brave offers it. Otherwise explains

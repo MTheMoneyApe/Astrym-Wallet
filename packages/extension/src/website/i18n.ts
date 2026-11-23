@@ -1,95 +1,201 @@
 type Language = 'es' | 'en';
 
-const translations: Record<Language, Record<string, string>> = {
+const HTML_KEYS = new Set(['extension_step2', 'extension_step3', 'extension_step4']);
+
+export const translations: Record<Language, Record<string, string>> = {
   es: {
-    nav_status: 'Estado', nav_wallet: 'Abrir wallet',
-    hero_lede: 'Billetera Stellar de autocustodia. Conecta Nym MixFetch cuando quieras ocultar tu tráfico de red, y usa Stellar Private Payments (SPP) sobre el pool público Nethermind Testnet cuando el mixnet esté verificado.',
-    hero_open: 'Abrir Astrym Webapp', hero_install: 'Instalar PWA (Android / iOS)',
-    hero_note: 'Extensión de escritorio, webapp y móvil son superficies distintas: el popup MV3 no muestra el modo Android; la PWA vive aquí.',
-    product_kicker: '01 · PRODUCTO', product_title: 'Qué hace Astrym hoy',
-    custody_title: 'Autocustodia', custody_body: 'Frase de 24 palabras y claves en el dispositivo. Astrym no custodia tu cuenta.',
-    stellar_title: 'Stellar (Testnet / Mainnet lecturas)', stellar_body: 'Saldos, envíos públicos y Friendbot Testnet con el cliente Stellar endurecido.',
-    nym_title: 'Nym MixFetch (opcional)', nym_body: 'Horizon y Soroban pueden salir por el mixnet. Si el modo Nym está activo y falla, Astrym se detiene: sin fallback silencioso a clearnet.',
-    spp_title: 'SPP privado (Testnet)', spp_body: 'Depósito, transferencia y retiro contra el pool Nethermind cuando Nym + write_pool_ready están verificados.',
-    status_kicker: '02 · ESTADO HONESTO', status_title: 'Implementado · En curso · Futuro',
-    done_title: 'Implementado', done_1: 'Vault local, onboarding y firma Stellar', done_2: 'MixFetch 1.4.2 con gateway/NR verificados', done_3: 'HTTP smoke + Horizon-over-Nym (Ankr remap documentado)', done_4: 'SPP SDK 0.2.1, WASM, 16 proving keys, PrivatePool + write_pool_ready', done_5: 'Host SPP embebido en webapp (sin depender de popups bloqueados)',
-    wip_title: 'En curso', wip_1: 'Registro on-chain de claves + discovery de destinatarios', wip_2: 'Pago privado Testnet extremo a extremo (requiere aprobación explícita antes de broadcast)', wip_3: 'UX de notas / saldo privado y reconciliación',
-    next_title: 'Futuro', next_1: 'Auditorías de seguridad independientes', next_2: 'Claims de anonimato / producción Mainnet SPP', next_3: 'Pools propios o políticas ASP adicionales',
-    status_disclaimer: 'Astrym no afirma anonimato criptográfico, auditorías completadas ni readiness de producción. Nym reduce la visibilidad de red; SPP aporta notas privadas en Stellar Testnet cuando el stack está listo.',
-    workflow_kicker: '03 · FLUJO', workflow_title: 'Flujo técnico', workflow_1: 'Bóveda cifrada, cuenta Stellar y firma local en extensión o webapp.', workflow_2: 'MixFetch en offscreen (extensión) o bridge in-page (Android / navegador).', workflow_3: 'Horizon/Soroban por Nym cuando está activo; SPP solo con prepare.phase = ready y gate de broadcast.',
-    surfaces_kicker: '04 · SUPERFICIES', surfaces_title: 'Cómo usar Astrym', extension_title: 'Extensión de escritorio', extension_body: 'Popup 400×600 centrado en la wallet. Sin barra Android. Ideal para Chrome/Chromium.',
-    webapp_title: 'Webapp / PWA', webapp_body: 'Misma wallet a pantalla completa, responsive, instalable. CTA de instalación solo aquí.',
-    host_title: 'SPP Host', host_body: 'Laboratorio de sesión SPP', host_note: 'En la webapp se embebe en proceso; no abras runtimes duplicados.',
-    founder_kicker: '05 · FUNDADOR', founder_title: 'Fundador', footer_wallet: 'Abrir webapp',
-    install_title: 'Instalar en Android / iOS', install_body: 'Pulsa el menú ⋮ del navegador → Añadir a pantalla de inicio / Instalar app', install_close: 'Entendido',
+    nav_menu: 'Menú',
+    nav_label: 'Navegación principal',
+    nav_try: 'Probar Astrym',
+    nav_status: 'Estado',
+    nav_wallet: 'Abrir wallet',
+    hero_title: 'Privacidad con ingeniería cuidadosa.',
+    hero_lede: 'Astrym es una wallet experimental de autocustodia construida sobre Stellar. Puedes explorar las distintas superficies de prueba y consultar el estado real del desarrollo.',
+    hero_status: 'EN DESARROLLO ACTIVO',
+    hero_open: 'Abrir Astrym Webapp',
+    hero_try: 'Probar las versiones ↘',
+    hero_code: 'Explorar el código ↗',
+    try_kicker: '01 · PRUEBA ASTRYM',
+    try_title: 'Elige cómo quieres probarlo',
+    try_lede: 'Son tres superficies distintas. La webapp y la PWA usan el preview experimental; la extensión se compila localmente desde el repositorio.',
+    web_title: 'Astrym Webapp',
+    web_body: 'Abre la wallet en una pestaña del navegador, en formato de aplicación completa. No necesitas instalar una extensión.',
+    web_cta: 'Probar Webapp ↗',
+    web_note: 'Preview experimental · Stellar Testnet',
+    extension_title: 'Extensión de navegador',
+    extension_body: 'Prepara la extensión MV3 para Chrome o Chromium. Descarga el código, instala dependencias y genera el paquete localmente.',
+    extension_step1: 'Descarga o clona el repositorio.',
+    extension_step2: 'Ejecuta <code>pnpm install</code>.',
+    extension_step3: 'Ejecuta <code>pnpm --filter @solanym/extension build</code>.',
+    extension_step4: 'Carga <code>packages/extension/dist</code> en <code>chrome://extensions</code> con el modo desarrollador.',
+    extension_cta: 'Código e instrucciones ↗',
+    extension_note: 'No hay todavía un instalador público de Chrome Web Store.',
+    android_title: 'Android · PWA',
+    android_body: 'Abre la Webapp en Chrome para Android y añádela a la pantalla de inicio. Se instala como PWA; no es un APK nativo.',
+    android_step1: 'Abre la Webapp desde tu móvil.',
+    android_step2: 'Abre el menú ⋮ de Chrome.',
+    android_step3: 'Selecciona «Instalar aplicación» o «Añadir a pantalla de inicio».',
+    android_cta: 'Abrir PWA en Android ↗',
+    android_note: 'Preview experimental · requiere navegador compatible.',
+    hero_install: 'Instalar PWA (Android / iOS)',
+    try_warning: 'Aviso: utiliza únicamente una wallet desechable de Stellar Testnet. No introduzcas frases semilla con fondos reales. Estas versiones son experimentales y no están certificadas para producción.',
+    status_kicker: '02 · ESTADO HONESTO',
+    status_title: 'Investigación, implementación y validación',
+    stellar_title: 'Stellar first',
+    stellar_body: 'La arquitectura actual prioriza Stellar y el desarrollo controlado sobre Testnet.',
+    privacy_title: 'Privacidad de red',
+    privacy_body: 'La integración de transporte privado se valida por separado. No se presenta como anonimato garantizado ni como protección universal del tráfico.',
+    payments_title: 'Pagos privados',
+    payments_body: 'El runtime, los artefactos criptográficos y el flujo extremo a extremo siguen sujetos a validación reproducible antes de anunciar disponibilidad.',
+    status_disclaimer: 'Astrym sigue siendo software experimental. Esta página es informativa: no solicita claves ni habilita transacciones. No debe utilizarse con fondos reales.',
+    footer_note: 'Software experimental · Solo Stellar Testnet',
+    footer_wallet: 'Abrir webapp',
+    install_title: 'Instalar en Android / iOS',
+    install_body: 'Pulsa el menú ⋮ del navegador → Añadir a pantalla de inicio / Instalar app',
+    install_close: 'Entendido',
   },
   en: {
-    nav_status: 'Status', nav_wallet: 'Open wallet',
-    hero_lede: 'A self-custody Stellar wallet. Connect Nym MixFetch when you want to shield your network traffic, and use Stellar Private Payments (SPP) on the public Nethermind Testnet pool once the mixnet is verified.',
-    hero_open: 'Open Astrym Webapp', hero_install: 'Install PWA (Android / iOS)',
-    hero_note: 'The desktop extension, webapp, and mobile experience are distinct surfaces: the MV3 popup does not show Android mode; the PWA lives here.',
-    product_kicker: '01 · PRODUCT', product_title: 'What Astrym does today',
-    custody_title: 'Self-custody', custody_body: 'A 24-word recovery phrase and keys stay on your device. Astrym never takes custody of your account.',
-    stellar_title: 'Stellar (Testnet / Mainnet reads)', stellar_body: 'Balances, public transfers, and Testnet Friendbot through the hardened Stellar client.',
-    nym_title: 'Nym MixFetch (optional)', nym_body: 'Horizon and Soroban traffic can travel through the mixnet. If Nym mode is enabled and fails, Astrym stops—there is no silent fallback to clearnet.',
-    spp_title: 'Private SPP (Testnet)', spp_body: 'Deposit, transfer, and withdrawal through the Nethermind pool when Nym and write_pool_ready have been verified.',
-    status_kicker: '02 · HONEST STATUS', status_title: 'Implemented · In progress · Future',
-    done_title: 'Implemented', done_1: 'Local vault, onboarding, and Stellar signing', done_2: 'MixFetch 1.4.2 with verified gateway/NR', done_3: 'HTTP smoke + Horizon-over-Nym (documented Ankr remap)', done_4: 'SPP SDK 0.2.1, WASM, 16 proving keys, PrivatePool + write_pool_ready', done_5: 'SPP host embedded in the webapp (no reliance on blocked popups)',
-    wip_title: 'In progress', wip_1: 'On-chain key registration + recipient discovery', wip_2: 'End-to-end private Testnet payment (explicit approval required before broadcast)', wip_3: 'Note / private-balance UX and reconciliation',
-    next_title: 'Future', next_1: 'Independent security audits', next_2: 'Anonymity claims / SPP Mainnet production', next_3: 'Custom pools or additional ASP policies',
-    status_disclaimer: 'Astrym does not claim cryptographic anonymity, completed audits, or production readiness. Nym reduces network visibility; SPP provides private notes on Stellar Testnet when the stack is ready.',
-    workflow_kicker: '03 · WORKFLOW', workflow_title: 'Technical workflow', workflow_1: 'Encrypted vault, Stellar account, and local signing in the extension or webapp.', workflow_2: 'MixFetch offscreen (extension) or through an in-page bridge (Android / browser).', workflow_3: 'Horizon/Soroban over Nym when enabled; SPP only when prepare.phase = ready and the broadcast gate is satisfied.',
-    surfaces_kicker: '04 · SURFACES', surfaces_title: 'How to use Astrym', extension_title: 'Desktop extension', extension_body: 'A 400×600 wallet-focused popup. No Android bar. Ideal for Chrome/Chromium.',
-    webapp_title: 'Webapp / PWA', webapp_body: 'The same wallet in a full-screen, responsive, installable experience. The install CTA appears here only.',
-    host_title: 'SPP Host', host_body: 'SPP session laboratory', host_note: 'It is embedded in the webapp flow; do not open duplicate runtimes.',
-    founder_kicker: '05 · FOUNDER', founder_title: 'Founder', footer_wallet: 'Open webapp',
-    install_title: 'Install on Android / iOS', install_body: 'Open your browser menu ⋮ → Add to Home Screen / Install app', install_close: 'Got it',
+    nav_menu: 'Menu',
+    nav_label: 'Main',
+    nav_try: 'Try Astrym',
+    nav_status: 'Status',
+    nav_wallet: 'Open wallet',
+    hero_title: 'Privacy, engineered with care.',
+    hero_lede: 'Astrym is an experimental self-custody wallet built on Stellar. Explore the available test surfaces and check the actual state of development.',
+    hero_status: 'ACTIVE DEVELOPMENT',
+    hero_open: 'Open Astrym Webapp',
+    hero_try: 'Try the builds ↘',
+    hero_code: 'Explore the code ↗',
+    try_kicker: '01 · TRY ASTRYM',
+    try_title: 'Choose how you want to try it',
+    try_lede: 'These are three distinct surfaces. The webapp and PWA use the experimental preview; the browser extension is built locally from the repository.',
+    web_title: 'Astrym Webapp',
+    web_body: 'Open the wallet in a browser tab as a full-page application. No browser extension required.',
+    web_cta: 'Try Webapp ↗',
+    web_note: 'Experimental preview · Stellar Testnet',
+    extension_title: 'Browser extension',
+    extension_body: 'Prepare the MV3 extension for Chrome or Chromium. Download the source, install dependencies and build the package locally.',
+    extension_step1: 'Download or clone the repository.',
+    extension_step2: 'Run <code>pnpm install</code>.',
+    extension_step3: 'Run <code>pnpm --filter @solanym/extension build</code>.',
+    extension_step4: 'Load <code>packages/extension/dist</code> in <code>chrome://extensions</code> with Developer mode enabled.',
+    extension_cta: 'Source & instructions ↗',
+    extension_note: 'There is no public Chrome Web Store installer yet.',
+    android_title: 'Android · PWA',
+    android_body: 'Open the Webapp in Chrome for Android and add it to your home screen. It installs as a PWA; it is not a native APK.',
+    android_step1: 'Open the Webapp on your phone.',
+    android_step2: "Open Chrome's ⋮ menu.",
+    android_step3: 'Choose “Install app” or “Add to Home screen”.',
+    android_cta: 'Open Android PWA ↗',
+    android_note: 'Experimental preview · compatible browser required.',
+    hero_install: 'Install PWA (Android / iOS)',
+    try_warning: 'Important: use only a disposable Stellar Testnet wallet. Never enter a seed phrase holding real funds. These builds are experimental and are not production-certified.',
+    status_kicker: '02 · HONEST STATUS',
+    status_title: 'Research, implementation and validation',
+    stellar_title: 'Stellar first',
+    stellar_body: 'The current architecture prioritizes Stellar and controlled development on Testnet.',
+    privacy_title: 'Network privacy',
+    privacy_body: 'Private transport integration is being validated separately. It is not presented as guaranteed anonymity or universal traffic protection.',
+    payments_title: 'Private payments',
+    payments_body: 'The runtime, cryptographic artifacts and end-to-end flow still require reproducible validation before availability is announced.',
+    status_disclaimer: 'Astrym remains experimental software. This page is informational: it does not request keys or enable transactions. Do not use it with real funds.',
+    footer_note: 'Experimental software · Stellar Testnet only',
+    footer_wallet: 'Open webapp',
+    install_title: 'Install on Android / iOS',
+    install_body: 'Open your browser menu ⋮ → Add to Home Screen / Install app',
+    install_close: 'Got it',
   },
 };
 
-const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-language]'));
+export function resolveInitialLanguage(saved: string | null, navigatorLanguage: string): Language {
+  if (saved === 'es' || saved === 'en') return saved;
+  if (navigatorLanguage.toLowerCase().startsWith('en')) return 'en';
+  return 'es';
+}
 
-function applyLanguage(language: Language): void {
+function pageMeta(language: Language): { title: string; description: string } {
+  switch (language) {
+    case 'es':
+      return {
+        title: 'Astrym — Stellar · Privacidad',
+        description: 'Astrym — wallet experimental de autocustodia Stellar con opciones de prueba para web, navegador y Android.',
+      };
+    case 'en':
+      return {
+        title: 'Astrym — Stellar · Privacy',
+        description: 'Astrym — an experimental self-custody Stellar wallet with test builds for web, browser, and Android.',
+      };
+    default: {
+      const unreachable: never = language;
+      return unreachable;
+    }
+  }
+}
+
+export function applyLanguage(language: Language): void {
   const dictionary = translations[language];
   document.documentElement.lang = language;
   document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((element) => {
     const key = element.dataset['i18n'];
     const value = key ? dictionary[key] : undefined;
-    if (value !== undefined) element.textContent = value;
+    if (value === undefined) return;
+    if (key && HTML_KEYS.has(key)) element.innerHTML = value;
+    else element.textContent = value;
   });
-
-  const description = language === 'en'
-    ? 'Astrym — self-custody Stellar wallet with optional Nym Mixnet transport and SPP private payments on Testnet.'
-    : 'Astrym — billetera Stellar de autocustodia con transporte opcional Nym Mixnet y pagos privados SPP en Testnet.';
-  const meta = document.querySelector<HTMLMetaElement>('meta[name="description"]');
-  if (meta) meta.content = description;
-  document.title = language === 'en'
-    ? 'Astrym — Stellar self-custody · Nym · SPP'
-    : 'Astrym — Autocustodia Stellar · Nym · SPP';
-
-  buttons.forEach((button) => {
+  document.querySelectorAll<HTMLElement>('[data-i18n-aria]').forEach((element) => {
+    const key = element.dataset['i18nAria'];
+    const value = key ? dictionary[key] : undefined;
+    if (value !== undefined) element.setAttribute('aria-label', value);
+  });
+  const meta = pageMeta(language);
+  const description = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+  if (description) description.content = meta.description;
+  document.title = meta.title;
+  document.querySelectorAll<HTMLButtonElement>('[data-language]').forEach((button) => {
     const active = button.dataset['language'] === language;
     button.classList.toggle('is-active', active);
     button.setAttribute('aria-pressed', String(active));
   });
-
-  try { localStorage.setItem('astrym-site-language', language); } catch { /* Storage may be unavailable. */ }
+  try {
+    localStorage.setItem('astrym-site-language', language);
+  } catch {
+    /* Storage may be unavailable. */
+  }
 }
 
-let initialLanguage: Language = 'es';
-try {
-  const saved = localStorage.getItem('astrym-site-language');
-  if (saved === 'es' || saved === 'en') initialLanguage = saved;
-  else if (navigator.language.toLowerCase().startsWith('en')) initialLanguage = 'en';
-} catch {
-  if (navigator.language.toLowerCase().startsWith('en')) initialLanguage = 'en';
+function readSavedLanguage(): string | null {
+  try {
+    return localStorage.getItem('astrym-site-language');
+  } catch {
+    return null;
+  }
 }
 
-buttons.forEach((button) => {
-  button.addEventListener('click', () => {
-    const language = button.dataset['language'];
-    if (language === 'es' || language === 'en') applyLanguage(language);
+let wired = false;
+
+export function initSiteLanguage(): void {
+  const navigatorLanguage = typeof navigator === 'undefined' ? 'es' : navigator.language;
+  applyLanguage(resolveInitialLanguage(readSavedLanguage(), navigatorLanguage || 'es'));
+  if (wired) return;
+  wired = true;
+  document.querySelectorAll<HTMLButtonElement>('[data-language]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const language = button.dataset['language'];
+      if (language === 'es' || language === 'en') applyLanguage(language);
+    });
   });
-});
+  const toggle = document.querySelector<HTMLButtonElement>('[data-nav-toggle]');
+  const nav = document.getElementById('site-nav');
+  toggle?.addEventListener('click', () => {
+    const open = nav?.classList.toggle('is-open') ?? false;
+    toggle.setAttribute('aria-expanded', String(open));
+  });
+  nav?.querySelectorAll('a').forEach((link) => {
+    link.addEventListener('click', () => {
+      nav.classList.remove('is-open');
+      toggle?.setAttribute('aria-expanded', 'false');
+    });
+  });
+}
 
-applyLanguage(initialLanguage);
+if (typeof document !== 'undefined') initSiteLanguage();
