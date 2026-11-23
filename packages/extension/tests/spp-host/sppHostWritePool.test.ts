@@ -21,6 +21,29 @@ import {
   setSppHostSequenceTracker,
 } from '../../src/spp-host/sppHostWritePool.js';
 
+/**
+ * Test-only seam. Production execute still calls assertSppPoolPaymentEconomicsBound
+ * and fail-closes with SPP_POOL_ECONOMICS_NOT_VERIFIED. Nothing here is exported
+ * from production.
+ * TODO: delete this seam and re-enable the success cases against the real gate
+ * when SPP_POOL_ECONOMICS_NOT_VERIFIED is lifted.
+ */
+const poolEconomicsSeam = vi.hoisted(() => ({ pass: false }));
+
+vi.mock('@solanym/wallet-core/src/stellar/spp/sppSignGate.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@solanym/wallet-core/src/stellar/spp/sppSignGate.js')>();
+  return {
+    ...actual,
+    assertSppPoolPaymentEconomicsBound(
+      operation: Parameters<typeof actual.assertSppPoolPaymentEconomicsBound>[0],
+    ): void {
+      if (poolEconomicsSeam.pass) return;
+      actual.assertSppPoolPaymentEconomicsBound(operation);
+    },
+  };
+});
+
 const POOL = 'C'.padEnd(56, 'A');
 const SENDER = 'G'.padEnd(56, 'A');
 const RECIPIENT = 'G'.padEnd(56, 'B');
@@ -86,6 +109,7 @@ function registerOkPool(
 
 describe('sppHostWritePool', () => {
   beforeEach(() => {
+    poolEconomicsSeam.pass = false;
     setSppTestnetBroadcastAuthorized(true);
     resetSppHostSequenceTrackerForTests();
   });
@@ -245,6 +269,27 @@ describe('sppHostWritePool', () => {
     expect(after?.confirmedTxHashes).toEqual([]);
   });
 
+  it('advances sequence when confirmOrAbortSequence receives txHash and nextFreshSequence', () => {
+    const tracker = new SppMultiAccountSequenceTracker();
+    const seeded = tracker.seed(SENDER, '100');
+    const begun = beginSppAccountOperation(seeded, 'fp-confirm-ok');
+    expect(begun.ok).toBe(true);
+    if (!begun.ok) return;
+    tracker.replace(begun.state);
+    setSppHostSequenceTracker(tracker);
+
+    confirmOrAbortSequence(
+      { address: SENDER, fingerprint: 'fp-confirm-ok' },
+      TX_DEP,
+      '101',
+    );
+
+    const after = tracker.get(SENDER);
+    expect(after?.expectedFreshSequence).toBe('101');
+    expect(after?.inFlightFingerprint).toBeNull();
+    expect(after?.confirmedTxHashes).toEqual([TX_DEP]);
+  });
+
   it('refuses sequence drift and aborts in-flight when the broadcast gate refuses', async () => {
     registerOkPool();
     const tracker = new SppMultiAccountSequenceTracker();
@@ -330,5 +375,152 @@ describe('sppHostWritePool', () => {
     expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('100');
     expect(tracker.get(RECIPIENT)?.expectedFreshSequence).toBe('200');
     expect(tracker.get(RECIPIENT)?.inFlightFingerprint).toBeNull();
+  });
+
+  // TODO: re-enable this block against the real assertSppPoolPaymentEconomicsBound
+  // when SPP_POOL_ECONOMICS_NOT_VERIFIED is lifted. Offline pool mocks only; no RPC.
+  describe('success path under the test-only economics seam', () => {
+    beforeEach(() => {
+      poolEconomicsSeam.pass = true;
+    });
+
+    it('executes deposit/transfer against a registered adapter and propagates withdraw failures', async () => {
+      clearSppHostWritePool();
+      const deposit = vi.fn(async () => ({ txHash: 'dep' }));
+      const transfer = vi.fn(async () => ({ txHash: 'tr' }));
+      const withdraw = vi.fn(async () => {
+        throw new Error('wasm boom');
+      });
+      registerSppHostWritePool({
+        poolContract: POOL,
+        pool: { deposit, transfer, withdraw },
+      });
+
+      await expect(executeSppHostWritePool(request({ operation: 'deposit' }))).resolves.toMatchObject({
+        ok: true,
+        operation: 'deposit',
+        txHash: 'dep',
+        txHashes: ['dep'],
+        rpcRoutedViaNym: true,
+      });
+      await expect(
+        executeSppHostWritePool(
+          request({ operation: 'transfer', recipient: 'G'.padEnd(56, 'B') }),
+        ),
+      ).resolves.toMatchObject({
+        ok: true,
+        operation: 'transfer',
+        txHash: 'tr',
+        rpcRoutedViaNym: true,
+      });
+
+      const failed = await executeSppHostWritePool(request({ operation: 'withdraw' }));
+      expect(failed.ok).toBe(false);
+      if (!failed.ok) {
+        expect(failed.code).toBe('EXECUTION_FAILED');
+        expect(failed.message).toContain('wasm boom');
+      }
+      expect(deposit).toHaveBeenCalledTimes(1);
+      expect(deposit).toHaveBeenCalledWith(10n);
+      expect(transfer).toHaveBeenCalledWith('G'.padEnd(56, 'B'), 10n);
+      expect(withdraw).toHaveBeenCalledWith(10n, null);
+    });
+
+    it('advances account sequence only when execute returns txHash + nextFreshSequence', async () => {
+      registerOkPool();
+      const tracker = getSppHostSequenceTracker();
+      tracker.seed(SENDER, '100');
+
+      await expect(
+        executeSppHostWritePool(
+          request({
+            signingAccount: SENDER,
+            freshSequence: '100',
+            nextFreshSequence: '101',
+            operationFingerprint: 'fp-deposit-1',
+          }),
+        ),
+      ).resolves.toMatchObject({ ok: true, txHash: TX_DEP, rpcRoutedViaNym: true });
+
+      const after = tracker.get(SENDER);
+      expect(after?.expectedFreshSequence).toBe('101');
+      expect(after?.inFlightFingerprint).toBeNull();
+      expect(after?.confirmedTxHashes).toEqual([TX_DEP]);
+    });
+
+    it('clears in-flight without advancing when nextFreshSequence is missing on success', async () => {
+      registerOkPool();
+      const tracker = getSppHostSequenceTracker();
+      tracker.seed(SENDER, '100');
+
+      await expect(
+        executeSppHostWritePool(
+          request({
+            signingAccount: SENDER,
+            freshSequence: '100',
+            operationFingerprint: 'fp-no-next',
+          }),
+        ),
+      ).resolves.toMatchObject({ ok: true, txHash: TX_DEP });
+
+      const after = tracker.get(SENDER);
+      expect(after?.expectedFreshSequence).toBe('100');
+      expect(after?.inFlightFingerprint).toBeNull();
+      expect(after?.confirmedTxHashes).toEqual([]);
+    });
+
+    it('aborts in-flight after execution failure without advancing sequence', async () => {
+      const deposit = vi.fn(async () => {
+        throw new Error('wasm boom');
+      });
+      registerOkPool({ deposit });
+      const tracker = new SppMultiAccountSequenceTracker();
+      tracker.seed(SENDER, '100');
+      setSppHostSequenceTracker(tracker);
+
+      const failed = await executeSppHostWritePool(
+        request({
+          signingAccount: SENDER,
+          freshSequence: '100',
+          nextFreshSequence: '101',
+          operationFingerprint: 'fp-exec-fail',
+        }),
+      );
+      expect(failed.ok).toBe(false);
+      if (!failed.ok) {
+        expect(failed.code).toBe('EXECUTION_FAILED');
+        expect(failed.message).toContain('wasm boom');
+      }
+      expect(deposit).toHaveBeenCalledTimes(1);
+      expect(tracker.get(SENDER)?.inFlightFingerprint).toBeNull();
+      expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('100');
+    });
+
+    it('tracks sender and recipient accounts independently', async () => {
+      registerOkPool({
+        transfer: vi.fn(async () => ({ txHash: 'tr-hash-ok12' })),
+      });
+      const tracker = getSppHostSequenceTracker();
+      tracker.seed(SENDER, '100');
+      tracker.seed(RECIPIENT, '200');
+
+      await expect(
+        executeSppHostWritePool(
+          request({
+            operation: 'transfer',
+            recipient: RECIPIENT,
+            signingAccount: SENDER,
+            freshSequence: '100',
+            nextFreshSequence: '101',
+            operationFingerprint: 'fp-sender-xfer',
+          }),
+        ),
+      ).resolves.toMatchObject({ ok: true, txHash: 'tr-hash-ok12' });
+
+      expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('101');
+      expect(tracker.get(SENDER)?.confirmedTxHashes).toEqual(['tr-hash-ok12']);
+      expect(tracker.get(RECIPIENT)?.expectedFreshSequence).toBe('200');
+      expect(tracker.get(RECIPIENT)?.inFlightFingerprint).toBeNull();
+    });
   });
 });
