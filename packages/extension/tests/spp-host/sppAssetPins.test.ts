@@ -19,6 +19,64 @@ function sha(body: string): string {
 }
 
 describe('spp cache pins and dist smoke', () => {
+  it('defaults the asset root to the user cache and honors SPP_BUILD_ROOT', () => {
+    const probeRoots = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { candidateRoots, defaultSppBuildRoot } from './scripts/copy-spp-assets.mjs';
+      import { homedir } from 'node:os';
+      import { join } from 'node:path';
+      delete process.env.SPP_BUILD_ROOT;
+      delete process.env.SPP_SDK_ROOT;
+      delete process.env.XDG_CACHE_HOME;
+      const homeDefault = defaultSppBuildRoot();
+      const homeRoots = candidateRoots().join('\\n');
+      process.env.XDG_CACHE_HOME = '/var/cache/tester';
+      const xdgDefault = defaultSppBuildRoot();
+      const xdgRoots = candidateRoots();
+      process.env.SPP_BUILD_ROOT = '/explicit/spp-build';
+      const overrideRoots = candidateRoots();
+      console.log(JSON.stringify({
+        homeDefault,
+        expectedHome: join(homedir(), '.cache', 'astrym', 'spp-path-a'),
+        homeRoots,
+        xdgDefault,
+        xdgRoots,
+        overrideRoots,
+      }));
+    `], { cwd: extension, env: { ...process.env }, encoding: 'utf8' });
+    expect(probeRoots.status, probeRoots.stderr).toBe(0);
+    const reported = JSON.parse(probeRoots.stdout) as {
+      homeDefault: string;
+      expectedHome: string;
+      homeRoots: string;
+      xdgDefault: string;
+      xdgRoots: string[];
+      overrideRoots: string[];
+    };
+    expect(reported.homeDefault).toBe(reported.expectedHome);
+    expect(reported.homeRoots).not.toContain('/tmp/spp-path-a/cache');
+    expect(reported.xdgDefault).toBe('/var/cache/tester/astrym/spp-path-a');
+    expect(reported.xdgRoots).toContain('/var/cache/tester/astrym/spp-path-a/stellar-private-payments/sdk/web');
+    expect(reported.overrideRoots).toContain('/explicit/spp-build/stellar-private-payments/sdk/web');
+    expect(reported.overrideRoots.join('\n')).not.toContain('/tmp/spp-path-a/cache');
+
+    const script = readFileSync(join(repo, 'scripts/prepare-spp-runtime.sh'), 'utf8');
+    const probe = spawnSync('bash', ['-c', `
+      set -euo pipefail
+      unset SPP_BUILD_ROOT
+      export HOME=/home/tester
+      export XDG_CACHE_HOME=/var/cache/tester
+      eval "$(sed -n '/^spp_default_build_root()/,/^}/p' scripts/prepare-spp-runtime.sh)"
+      spp_default_build_root
+      unset XDG_CACHE_HOME
+      spp_default_build_root
+    `], { cwd: repo, encoding: 'utf8' });
+    expect(probe.status, probe.stderr).toBe(0);
+    expect(probe.stdout).toBe(
+      '/var/cache/tester/astrym/spp-path-a\n/home/tester/.cache/astrym/spp-path-a\n',
+    );
+    expect(script).not.toContain('SPP_BUILD_ROOT:-/tmp/spp-path-a/cache');
+  });
+
   it('rejects a tampered cache against the versioned manifest', () => {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
     const expected = manifest.files['js/index.js'];
@@ -46,6 +104,33 @@ describe('spp cache pins and dist smoke', () => {
       expect(result.stderr).toContain('js/index.js');
       expect(result.stderr).toContain(expected.sha256);
       expect(result.stderr).toContain('versioned manifest');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(dest, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an unpinned copied file absent from the versioned manifest', () => {
+    const root = mkdtempSync(join(tmpdir(), 'spp-unpinned-'));
+    const dest = mkdtempSync(join(tmpdir(), 'spp-unpinned-dest-'));
+    try {
+      mkdirSync(join(root, 'js'), { recursive: true });
+      writeFileSync(join(root, 'package.json'), JSON.stringify({
+        name: 'stellar-private-payments',
+        version: '0.2.1',
+      }));
+      writeFileSync(join(root, 'SPP_SOURCE_PROVENANCE.json'), JSON.stringify({ sourceCommit: commit }));
+      writeFileSync(join(root, 'js/index.js'), 'tampered\n');
+      writeFileSync(join(root, 'js/unpinned-injected.js'), 'unpinned\n');
+      const result = spawnSync(process.execPath, ['scripts/copy-spp-assets.mjs'], {
+        cwd: extension,
+        env: { ...process.env, SPP_SDK_ROOT: root, SPP_ASSET_DEST: dest },
+        encoding: 'utf8',
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('unpinned js/unpinned-injected.js');
+      expect(result.stderr).toContain('versioned manifest');
+      expect(result.stderr).toContain('js/index.js');
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(dest, { recursive: true, force: true });

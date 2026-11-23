@@ -160,13 +160,23 @@ export async function confirmStorageUnlock(details: {
     authorize.type = 'button';
     authorize.textContent = 'Autorizar firma de desbloqueo';
     authorize.style.cssText = 'padding:10px 16px;border-radius:10px;background:#155e75;color:white;font-weight:600';
+    let settled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let cancelAlarm: (() => void) | null = null;
     const finish = (accepted: boolean) => {
-      cancelAlarm?.();
+      if (settled) return;
+      settled = true;
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+        timeoutId = undefined;
+      }
+      const cancel = cancelAlarm;
       cancelAlarm = null;
-      if (!dialog.isConnected) return;
-      if (dialog.open) dialog.close();
-      dialog.remove();
+      cancel?.();
+      if (dialog.isConnected) {
+        if (dialog.open) dialog.close();
+        dialog.remove();
+      }
       resolve(accepted);
     };
     cancel.addEventListener('click', () => finish(false));
@@ -181,6 +191,9 @@ export async function confirmStorageUnlock(details: {
     try {
       dialog.showModal();
       window.focus();
+      // Same TTL as the one-shot unlock approval. The alarm and this backstop
+      // race; whichever fires first refuses the dialog and clears both.
+      timeoutId = setTimeout(() => finish(false), SPP_STORAGE_UNLOCK_TTL_MS);
       const alarms = typeof chrome !== 'undefined' ? chrome.alarms : undefined;
       if (!alarms?.create || !alarms.onAlarm?.addListener || !alarms.clear) {
         finish(false);
@@ -194,7 +207,6 @@ export async function confirmStorageUnlock(details: {
         alarms.onAlarm.removeListener(onAlarm);
         void alarms.clear(SPP_STORAGE_UNLOCK_DIALOG_ALARM);
       };
-      // Same TTL as the one-shot unlock approval. A missing alarm refuses the dialog.
       void Promise.resolve(
         alarms.create(SPP_STORAGE_UNLOCK_DIALOG_ALARM, {
           when: Date.now() + SPP_STORAGE_UNLOCK_TTL_MS,
