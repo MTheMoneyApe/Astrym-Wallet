@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import browser from 'webextension-polyfill';
 import { MessageRouter } from '../../src/background/MessageRouter.js';
 import type { MessageTypes } from '../../src/shared/ipcTypes.js';
 
@@ -68,6 +69,15 @@ const SPP_HOST_ALLOWED = [
   'GET_ACCOUNTS',
   'SPP_AUTHORIZE_STORAGE_UNLOCK',
 ] as const satisfies readonly MessageTypes[];
+
+const INTERNAL_ROUTES = [
+  ...DENIED_FROM_UNTRUSTED_PAGES,
+  ...SPP_HOST_ALLOWED,
+] as const satisfies readonly MessageTypes[];
+
+function contentScriptSender(page: string) {
+  return { id: browser.runtime.id, url: `https://evil.example/${page}` };
+}
 
 async function expectRejected(type: MessageTypes, who: { id: string; url: string }) {
   const router = new MessageRouter();
@@ -161,6 +171,30 @@ describe('MessageRouter internal sender allowlist', () => {
 
   it('rejects spp-host.html from another extension id', async () => {
     await expectRejected('NYM_STATUS', sender('spp-host.html', 'other-extension'));
+  });
+
+  describe.each([
+    'spp-host.html',
+    'popup.html',
+    'webapp.html',
+    'nym-offscreen.html',
+  ] as const)('content-script sender https://evil.example/%s', (page) => {
+    const who = contentScriptSender(page);
+
+    it.each(INTERNAL_ROUTES)('rejects %s', async (type) => {
+      await expectRejected(type, who);
+    });
+  });
+
+  describe('spp-host sender with a matching id and an https url', () => {
+    const who = {
+      id: browser.runtime.id,
+      url: `https://${browser.runtime.id}/spp-host.html`,
+    };
+
+    it.each(INTERNAL_ROUTES)('rejects %s', async (type) => {
+      await expectRejected(type, who);
+    });
   });
 
   describe.each([
