@@ -1,11 +1,10 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { candidateRoots, defaultSppBuildRoot } from '../../scripts/copy-spp-assets.mjs';
+import { describe, expect, it } from 'vitest';
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const extension = join(repo, 'packages/extension');
@@ -19,38 +18,46 @@ function sha(body: string): string {
   return createHash('sha256').update(body).digest('hex');
 }
 
-const ENV_KEYS = ['SPP_BUILD_ROOT', 'SPP_SDK_ROOT', 'XDG_CACHE_HOME'] as const;
-
 describe('spp cache pins and dist smoke', () => {
-  const saved = new Map<string, string | undefined>();
-
-  beforeEach(() => {
-    saved.clear();
-    for (const key of ENV_KEYS) saved.set(key, process.env[key]);
-  });
-
-  afterEach(() => {
-    for (const key of ENV_KEYS) {
-      const value = saved.get(key);
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  });
-
   it('defaults the asset root to the user cache and honors SPP_BUILD_ROOT', () => {
-    delete process.env.SPP_BUILD_ROOT;
-    delete process.env.SPP_SDK_ROOT;
-    delete process.env.XDG_CACHE_HOME;
-    expect(defaultSppBuildRoot()).toBe(join(homedir(), '.cache', 'astrym', 'spp-path-a'));
-    expect(candidateRoots().join('\n')).not.toContain('/tmp/spp-path-a/cache');
-
-    process.env.XDG_CACHE_HOME = '/var/cache/tester';
-    expect(defaultSppBuildRoot()).toBe('/var/cache/tester/astrym/spp-path-a');
-    expect(candidateRoots()).toContain('/var/cache/tester/astrym/spp-path-a/stellar-private-payments/sdk/web');
-
-    process.env.SPP_BUILD_ROOT = '/explicit/spp-build';
-    expect(candidateRoots()).toContain('/explicit/spp-build/stellar-private-payments/sdk/web');
-    expect(candidateRoots().join('\n')).not.toContain('/tmp/spp-path-a/cache');
+    const probeRoots = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { candidateRoots, defaultSppBuildRoot } from './scripts/copy-spp-assets.mjs';
+      import { homedir } from 'node:os';
+      import { join } from 'node:path';
+      delete process.env.SPP_BUILD_ROOT;
+      delete process.env.SPP_SDK_ROOT;
+      delete process.env.XDG_CACHE_HOME;
+      const homeDefault = defaultSppBuildRoot();
+      const homeRoots = candidateRoots().join('\\n');
+      process.env.XDG_CACHE_HOME = '/var/cache/tester';
+      const xdgDefault = defaultSppBuildRoot();
+      const xdgRoots = candidateRoots();
+      process.env.SPP_BUILD_ROOT = '/explicit/spp-build';
+      const overrideRoots = candidateRoots();
+      console.log(JSON.stringify({
+        homeDefault,
+        expectedHome: join(homedir(), '.cache', 'astrym', 'spp-path-a'),
+        homeRoots,
+        xdgDefault,
+        xdgRoots,
+        overrideRoots,
+      }));
+    `], { cwd: extension, env: { ...process.env }, encoding: 'utf8' });
+    expect(probeRoots.status, probeRoots.stderr).toBe(0);
+    const reported = JSON.parse(probeRoots.stdout) as {
+      homeDefault: string;
+      expectedHome: string;
+      homeRoots: string;
+      xdgDefault: string;
+      xdgRoots: string[];
+      overrideRoots: string[];
+    };
+    expect(reported.homeDefault).toBe(reported.expectedHome);
+    expect(reported.homeRoots).not.toContain('/tmp/spp-path-a/cache');
+    expect(reported.xdgDefault).toBe('/var/cache/tester/astrym/spp-path-a');
+    expect(reported.xdgRoots).toContain('/var/cache/tester/astrym/spp-path-a/stellar-private-payments/sdk/web');
+    expect(reported.overrideRoots).toContain('/explicit/spp-build/stellar-private-payments/sdk/web');
+    expect(reported.overrideRoots.join('\n')).not.toContain('/tmp/spp-path-a/cache');
 
     const script = readFileSync(join(repo, 'scripts/prepare-spp-runtime.sh'), 'utf8');
     const probe = spawnSync('bash', ['-c', `
