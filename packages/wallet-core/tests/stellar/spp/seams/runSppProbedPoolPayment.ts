@@ -24,12 +24,15 @@ export async function runSppProbedPoolPayment(input: {
   nymFetch: SppRpcFetch;
   pool: SppPrivatePool;
   preferInjectedTransport?: boolean;
+  confirmTransaction?: (
+    hash: string,
+  ) => Promise<'SUCCESS' | 'FAILED' | 'NOT_FOUND' | 'UNKNOWN'>;
 }): Promise<{
   operation: SppPrivateOperation;
   txHash: string | null;
   txHashes: readonly string[];
   rpcRoutedViaNym: true;
-  confirmation: 'confirmed' | 'unknown';
+  confirmation: 'confirmed' | 'submitted' | 'failed' | 'unknown';
 }> {
   const poolContract = StrKey.encodeContract(Keypair.random().rawPublicKey());
   const amountStroops = input.request.amount.toString();
@@ -58,6 +61,9 @@ export async function runSppProbedPoolPayment(input: {
       ...(input.preferInjectedTransport === undefined
         ? {}
         : { preferInjectedTransport: input.preferInjectedTransport }),
+      ...(input.confirmTransaction === undefined
+        ? {}
+        : { confirmTransaction: input.confirmTransaction }),
     });
   } finally {
     sppProbeEconomicsBypass.enabled = false;

@@ -53,6 +53,7 @@ import {
 } from './handlers/sppAccountHandlers.js';
 import { noteSppHostLifecycle } from './spp/sppPrivatePoolRegistry.js';
 import { installSppPrepareGenerationGuard } from './spp/sppAutoPrepare.js';
+import { installChromeUnresolvedSubmissionStore } from './spp/sppSubmissionReconcile.js';
 import { isSppHostDocumentSender } from './trustedWalletOrigin.js';
 import {
   handleSppHostNymFetchRequest,
@@ -95,6 +96,7 @@ import {
 } from './handlers/transactionHandlers.js';
 
 function initBackgroundSynchronous() {
+  installChromeUnresolvedSubmissionStore();
   installSppPrepareGenerationGuard();
   // 1. Initialize Chrome Adapters synchronously
   const alarmService = new ChromeAlarmService((lock) => stateCoordinator.runLockOperation(lock));

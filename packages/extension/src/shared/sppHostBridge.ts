@@ -81,6 +81,7 @@ export const SppHostExecuteFailureSchema = z.object({
     'SESSION_NOT_READY',
     'RPC_FAILED',
     'EXECUTION_FAILED',
+    'SUBMISSION_UNKNOWN',
     'HOST_UNAVAILABLE',
     'UNAUTHORIZED',
   ]),

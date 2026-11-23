@@ -34,7 +34,7 @@ describe('partial hash pipeline', () => {
       }),
     });
     await expect(pool.deposit(10n)).rejects.toMatchObject({
-      code: 'EXECUTION_FAILED',
+      code: 'SUBMISSION_UNKNOWN',
       txHashes: ['hash-1', 'hash-2'],
     });
   });

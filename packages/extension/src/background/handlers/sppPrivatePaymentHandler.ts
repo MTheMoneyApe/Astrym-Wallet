@@ -23,6 +23,7 @@ import {
   createSppHostPoolProxy,
 } from '../spp/sppHostPoolProxy.js';
 import { getSppPrivatePool, getSppHostLifecycle } from '../spp/sppPrivatePoolRegistry.js';
+import { readAllowlistedGetTransactionStatus } from '../spp/sppSubmissionReconcile.js';
 
 export function createSppPrivatePaymentHandler(deps: { keyManager: KeyManager }) {
   return async (
@@ -123,6 +124,8 @@ export function createSppPrivatePaymentHandler(deps: { keyManager: KeyManager })
       preferInjectedTransport: true,
       authorizationFingerprint: payload.authorizationFingerprint,
       maxFeeStroops,
+      confirmTransaction: (hash) =>
+        readAllowlistedGetTransactionStatus(hash, ctrl.getStellarFetch(), rpcUrl),
     });
     return {
       operation: payment.operation,

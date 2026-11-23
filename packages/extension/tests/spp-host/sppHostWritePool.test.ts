@@ -92,9 +92,9 @@ const TX_TR = 'tr00000000000001';
 
 function registerOkPool(
   hooks: Partial<{
-    deposit: () => Promise<{ txHash: string | null }>;
-    transfer: () => Promise<{ txHash: string | null }>;
-    withdraw: () => Promise<{ txHash: string | null }>;
+    deposit: () => Promise<{ txHash: string | null; txHashes?: readonly string[] }>;
+    transfer: () => Promise<{ txHash: string | null; txHashes?: readonly string[] }>;
+    withdraw: () => Promise<{ txHash: string | null; txHashes?: readonly string[] }>;
   }> = {},
 ) {
   const deposit = hooks.deposit ?? vi.fn(async () => ({ txHash: TX_DEP }));
@@ -545,5 +545,34 @@ describe('sppHostWritePool', () => {
     expect(tracker.get(SENDER)?.confirmedTxHashes).toEqual(['tr-hash-ok12']);
     expect(tracker.get(RECIPIENT)?.expectedFreshSequence).toBe('200');
     expect(tracker.get(RECIPIENT)?.inFlightFingerprint).toBeNull();
+  });
+
+  it('returns SUBMISSION_UNKNOWN when execute reports more than one hash', async () => {
+    poolEconomicsSeam.pass = true;
+    registerOkPool({
+      deposit: async () => ({ txHash: null, txHashes: ['hash-1', 'hash-2'] }),
+    });
+    const failed = await executeSppHostWritePool(request());
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) {
+      expect(failed.code).toBe('SUBMISSION_UNKNOWN');
+      expect(failed.txHashes).toEqual(['hash-1', 'hash-2']);
+    }
+  });
+
+  it('returns SUBMISSION_UNKNOWN when a failed execute recovers partial hashes', async () => {
+    poolEconomicsSeam.pass = true;
+    registerOkPool({
+      deposit: async () => {
+        throw Object.assign(new Error('partial write'), { txHashes: ['hash-1'] });
+      },
+    });
+    const failed = await executeSppHostWritePool(request());
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) {
+      expect(failed.code).toBe('SUBMISSION_UNKNOWN');
+      expect(failed.txHashes).toEqual(['hash-1']);
+      expect(failed.message).toContain('hash-1');
+    }
   });
 });

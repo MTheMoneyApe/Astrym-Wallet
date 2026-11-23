@@ -99,6 +99,28 @@ describe('createSppHostPoolProxy', () => {
     expect(maxInFlight).toBeGreaterThanOrEqual(1);
   });
 
+  it('propagates a multi-hash host failure as SUBMISSION_UNKNOWN', async () => {
+    const proxy = createSppHostPoolProxy({
+      rpcUrl: 'https://soroban-testnet.stellar.org',
+      nymMode: 'nym',
+      nymConnected: true,
+      poolContract: POOL,
+      send: async (req) => ({
+        channel: SPP_HOST_BRIDGE_CHANNEL,
+        type: 'SPP_HOST_EXECUTE_PRIVATE_PAYMENT_RESULT',
+        id: req.id,
+        ok: false,
+        code: 'EXECUTION_FAILED',
+        message: 'two hashes',
+        txHashes: ['hash-1', 'hash-2'],
+      }),
+    });
+    await expect(proxy.deposit(10n)).rejects.toMatchObject({
+      code: 'SUBMISSION_UNKNOWN',
+      txHashes: ['hash-1', 'hash-2'],
+    });
+  });
+
   it('returns HOST_UNAVAILABLE when the sender throws', async () => {
     const proxy = createSppHostPoolProxy({
       rpcUrl: 'https://soroban-testnet.stellar.org',

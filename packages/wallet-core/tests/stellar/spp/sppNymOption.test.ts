@@ -181,7 +181,7 @@ describe('SPP option while Nym is on', () => {
       });
       expect(result).toMatchObject({
         rpcRoutedViaNym: true,
-        confirmation: 'confirmed',
+        confirmation: 'submitted',
         txHash: 'deposit-tx',
       });
       expect(order).toEqual(['probe', 'deposit']);
@@ -367,6 +367,48 @@ describe('SPP option while Nym is on', () => {
     ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
     expect(pool.withdraw).not.toHaveBeenCalled();
     expect(nymFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns SUBMISSION_UNKNOWN when the pool reports more than one hash', async () => {
+    const nymFetch = vi.fn(async () => new Response('{"result":"ok"}', { status: 200 }));
+    const pool = readyPool();
+    pool.deposit = vi.fn(async () => ({ txHash: 'first', txHashes: ['first', 'second'] }));
+    await expect(runSppProbedPoolPayment({
+      request: { operation: 'deposit', amount: 10n, recipient: null },
+      rpcUrl: RPC,
+      nymFetch,
+      pool,
+      preferInjectedTransport: true,
+    })).rejects.toMatchObject({
+      code: 'SUBMISSION_UNKNOWN',
+      txHashes: ['first', 'second'],
+    });
+    expect(pool.deposit).toHaveBeenCalledOnce();
+  });
+
+  it('stays submitted until getTransaction SUCCESS and only then confirmed', async () => {
+    const nymFetch = vi.fn(async () => new Response('{"result":"ok"}', { status: 200 }));
+    const pool = readyPool();
+    const submitted = await runSppProbedPoolPayment({
+      request: { operation: 'deposit', amount: 10n, recipient: null },
+      rpcUrl: RPC,
+      nymFetch,
+      pool,
+      preferInjectedTransport: true,
+      confirmTransaction: async () => 'NOT_FOUND',
+    });
+    expect(submitted.confirmation).toBe('submitted');
+    expect(submitted.txHash).toBe('deposit-tx');
+    const confirmed = await runSppProbedPoolPayment({
+      request: { operation: 'deposit', amount: 11n, recipient: null },
+      rpcUrl: RPC,
+      nymFetch,
+      pool,
+      preferInjectedTransport: true,
+      confirmTransaction: async () => 'SUCCESS',
+    });
+    expect(confirmed.confirmation).toBe('confirmed');
+    expect(confirmed.txHash).toBe('deposit-tx');
   });
 
   it('does not run the pool when the Nym RPC probe fails', async () => {

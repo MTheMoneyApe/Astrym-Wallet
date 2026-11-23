@@ -771,7 +771,7 @@ export const MessageSchemas = {
       txHash: z.string().nullable(),
       txHashes: z.array(z.string().min(1)).optional(),
       rpcRoutedViaNym: z.literal(true),
-      confirmation: z.enum(['confirmed', 'unknown']),
+      confirmation: z.enum(['submitted', 'confirmed', 'failed', 'unknown']),
     }),
   },
   SPP_ACCOUNT_SNAPSHOT: {
@@ -815,7 +815,7 @@ export const MessageSchemas = {
     response: z.object({
       txHash: z.string().nullable(),
       rpcRoutedViaNym: z.literal(true),
-      confirmation: z.enum(['confirmed', 'unknown']),
+      confirmation: z.enum(['submitted', 'confirmed', 'failed', 'unknown']),
     }),
   },
   SPP_ACCOUNT_SYNC: {
