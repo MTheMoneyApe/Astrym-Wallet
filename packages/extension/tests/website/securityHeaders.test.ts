@@ -36,6 +36,13 @@ describe('webapp response headers', () => {
     }
   });
 
+  it('does not load receive QR codes from api.qrserver.com', () => {
+    const dashboard = readFileSync(resolve(root, 'src/popup/Dashboard.tsx'), 'utf8');
+    expect(dashboard).not.toContain('qrserver');
+    expect(dashboard).toContain("from 'qrcode'");
+    expect(JSON.stringify(vercel)).not.toContain('qrserver');
+  });
+
   it('sends referrer, permissions, opener, and transport headers', () => {
     expect(headers['Referrer-Policy']).toBe('no-referrer');
     expect(headers['Permissions-Policy']).toBe('camera=(), microphone=(), geolocation=()');
