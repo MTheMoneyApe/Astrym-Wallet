@@ -1,0 +1,15 @@
+{
+  "sourceCommit": "e6ce95c2a71ed6313f78bb19cfdd0de1d9663120",
+  "pinSha256": "8280c686ffc2d55c06a23aec92defb3e21850dd695bcb47a69ac45018b721027",
+  "note": "Bytes from the manifest-approved Ubuntu GHA toolchain. sha256 and size pins stay in spp-runtime-manifest.json.",
+  "files": {
+    "dist/stellar_private_payments_web_bg.wasm": "stellar_private_payments_web_bg.wasm",
+    "dist/stellar_private_payments_web.js": "stellar_private_payments_web.js",
+    "dist/workers/prover-worker-module_bg.wasm": "prover-worker-module_bg.wasm",
+    "dist/workers/prover-worker-module.js": "prover-worker-module.js",
+    "dist/workers/prover-worker.js": "prover-worker.js",
+    "dist/workers/storage-worker-module_bg.wasm": "storage-worker-module_bg.wasm",
+    "dist/workers/storage-worker-module.js": "storage-worker-module.js",
+    "dist/workers/storage-worker.js": "storage-worker.js"
+  }
+}

@@ -5,6 +5,9 @@
  * The npm tarball stellar-private-payments@0.2.1 is not this runtime.
  * If SPP_SOURCE_PROVENANCE.json is missing, this script runs the prepare
  * script once, then copies. It does not fall back to node_modules.
+ * Outside GitHub Actions, prepare installs the pin-verified canonical
+ * artifact and fails closed on a missing artifact or hash mismatch.
+ * It does not compile wasm on that path.
  * Never reads mv3-spike/vendor or prepare-vendor.mjs.
  *
  * Profile: full — Client.new requires circuitsBaseUrl + circuitLock; prover

@@ -6,7 +6,7 @@
       "master": true
     }
   },
-  "installCommand": "(dnf install -y clang || yum install -y clang) && pnpm install --frozen-lockfile",
+  "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm build:webapp",
   "outputDirectory": "packages/extension/dist-webapp",
   "headers": [
