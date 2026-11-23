@@ -1,3 +1,5 @@
+**WARNING:** Pushing `master` is a Vercel PRODUCTION deploy. Do not push `master` unless M has given an explicit OK and Victor and Elias have both recorded a final PASS. This prep branch does not push `master`.
+
 # PROMOTE-REPORT
 
 Ticket T-PROMOTE-MIX. Prep only. This branch is `astrym/promote-candidate`, built from dev tip `303504927a5bbef12c9b49df6adaac7ae80edd10` (`astrym/testnet-mvp`).
@@ -8,9 +10,11 @@ Nothing here was pushed to `master`. No deploy. No force-push. The promotion com
 
 ## History
 
-The tips are not unrelated. Both histories start at `5a75b5900544b6ae9c356cc5a59fc8a253e7f9ad` and share merge-base `bfc11dd975a477e4cfb0c9d2b5d2bb3ebdf9a86e`.
+The tips share history. They are not unrelated. `git merge-base origin/master origin/astrym/testnet-mvp` is `bfc11dd975a477e4cfb0c9d2b5d2bb3ebdf9a86e`. The same base is the merge-base with `astrym/promote-candidate`. Both histories start at `5a75b5900544b6ae9c356cc5a59fc8a253e7f9ad`.
 
-Master is three commits ahead of that base: `c110b6d` (public landing), `e670426` (test-surface copy), `01c7cc6` (webapp on `/webapp.html`, 157 files). Dev is 372 commits ahead of the base. Since the base, 92 paths were added on both sides, which is the add/add set a merge would conflict on. A content merge was not performed.
+`git merge-tree --write-tree --name-only origin/master origin/astrym/testnet-mvp` exits 1 with 71 conflicts: 44 `add/add` and 27 `content`. The same 71 conflicts are reported against `astrym/promote-candidate`. A content merge stops there. Do not pass `--allow-unrelated-histories`.
+
+Master is three commits ahead of that base: `c110b6d` (public landing), `e670426` (test-surface copy), `01c7cc6` (webapp on `/webapp.html`, 157 files). Dev is 372 commits ahead of the base.
 
 ## Counts
 
@@ -227,31 +231,19 @@ Master is three commits ahead of that base: `c110b6d` (public landing), `e670426
 
 Focal vitest `packages/extension/tests/website/landing.test.ts`: 3 passed. Test titles were not changed.
 
+## Review follow-ups
+
+F5 is skipped. No code change for that item. This paragraph is the only record.
+
+Marco F1–F4 are on this branch: catch-all CSP and framing headers, referrer/permissions/COOP/HSTS, MV3 `manifest.json` removed from `dist-webapp` (and `manifest.json.backup` deleted), receive QR drawn with pinned `qrcode@1.5.4`. `spp-host.html` is embedded in the same document, not an iframe, so it keeps `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
+
+`connect-src` is `'self'` plus `https://horizon-testnet.stellar.org`, `https://rpc.ankr.com` (Nym remap of testnet Horizon), `https://friendbot.stellar.org`, `https://soroban-testnet.stellar.org`, `https://validator.nymtech.net`, `https://rpc.nymtech.net`, `wss://rpc.nymtech.net`, and `wss://nym-node-cli.devrel.nymte.ch:9001`. Mainnet Horizon and Ankr mainnet stay out because the wallet refuses them. `postman-echo.com` and the MixFetch domain-fronting hosts are out, so those calls fail closed. SPP has no public bootnode; its wasm and circuits are same-origin. Workers need `worker-src 'self' blob:` because MixFetch loads `web-worker-0.js` and the SPP wasm calls `URL.createObjectURL`.
+
 ## Promotion plan (not executed)
 
-Goal: one ordinary commit on `master` whose tree equals this branch, parented on the current master tip. No rebase, no reset, no filter, no `--force`.
+Do not run this until the warning at the top is satisfied. If `origin/master` is not still `01c7cc6c9f556baee09ddd8272a51db389e6b7cc`, stop.
 
-`--allow-unrelated-histories` is the wrong flag here. A merge-base exists, and a normal `git merge` of this branch into `master` still stops on the 92 add/add paths. Do not resolve that merge by hand.
-
-Run the block below only when promotion is approved, from a clean clone, and only if `origin/master` is still `01c7cc6c9f556baee09ddd8272a51db389e6b7cc`. If master has moved, stop. Do not run it as part of this prep ticket. The last command fast-forwards `master`. It is not a force-push.
-
-```bash
-set -euo pipefail
-git fetch origin master astrym/promote-candidate
-test "$(git rev-parse origin/master)" = "01c7cc6c9f556baee09ddd8272a51db389e6b7cc"
-TREE=$(git rev-parse origin/astrym/promote-candidate^{tree})
-PARENT=$(git rev-parse origin/master)
-NEW=$(git commit-tree "$TREE" -p "$PARENT" -m "Promote astrym/promote-candidate tree onto master")
-git checkout master
-git merge --ff-only "$NEW"
-test "$(git rev-parse HEAD^{tree})" = "$TREE"
-test "$(git rev-parse HEAD^)" = "$PARENT"
-git push origin master
-```
-
-`git commit-tree` writes one commit object. `git merge --ff-only` moves local `master` only when that commit's parent is the current tip. `git push` without `--force` then updates the remote only if it is still a fast-forward.
-
-Equivalent merge form, still one commit, if a second parent should record this branch. Still not run:
+The histories share merge-base `bfc11dd975a477e4cfb0c9d2b5d2bb3ebdf9a86e`, and `git merge-tree` reports 71 conflicts, so a plain `git merge` stops. The command below still writes one normal merge commit: first parent is `master`, second parent is `astrym/promote-candidate`, and the tree is the candidate tree. `-s ours` avoids hand-resolving the 71 conflicts; `git read-tree` then installs the candidate tree before the commit is created. `git push` has no `--force`.
 
 ```bash
 set -euo pipefail
@@ -261,10 +253,36 @@ test "$(git rev-parse HEAD)" = "01c7cc6c9f556baee09ddd8272a51db389e6b7cc"
 git merge --no-ff --no-commit -s ours origin/astrym/promote-candidate
 git read-tree -u --reset origin/astrym/promote-candidate
 git commit -m "Promote astrym/promote-candidate tree onto master"
-test "$(git rev-parse HEAD^{tree})" = "$(git rev-parse origin/astrym/promote-candidate^{tree})"
 test "$(git rev-parse HEAD^1)" = "01c7cc6c9f556baee09ddd8272a51db389e6b7cc"
+test "$(git rev-parse HEAD^2)" = "$(git rev-parse origin/astrym/promote-candidate)"
+test "$(git rev-parse HEAD^{tree})" = "$(git rev-parse origin/astrym/promote-candidate^{tree})"
 git push origin master
 ```
 
-Do not use `git push --force`, `git reset` on `master`, or a branch deploy.
+That push is a Vercel production deploy. Do not run it from this prep work.
+
+## Rollback (not executed)
+
+Use this only after the promotion merge above exists. `PROMOTION_SHA` is that merge commit. `git revert -m 1` keeps history and restores the tree of the first parent, `01c7cc6c9f556baee09ddd8272a51db389e6b7cc`. No `--force` and no reset.
+
+```bash
+set -euo pipefail
+git fetch origin master
+git checkout master
+git revert -m 1 "$PROMOTION_SHA" --no-edit
+test "$(git rev-parse HEAD^{tree})" = "$(git rev-parse 01c7cc6c9f556baee09ddd8272a51db389e6b7cc^{tree})"
+git push origin master
+```
+
+The revert push is also a production deploy, because it is a push to `master`. Before that build finishes, roll production traffic back at the routing layer. Instant rollback does not rebuild and does not change git.
+
+Current production deployment, recorded before any promotion push: `dpl_3yrhnGWgr856xxKBJcEaQGpD4QbN` (`https://astrym-wallet-fyuclcj6w-astrym.vercel.app`), commit `5e651b4799c93c39faeae248aed827626157ec61` on `astrym/testnet-mvp`. Project `prj_sRaRUHPzE0fpfeOui5vWGiU5efVk`. The `01c7cc6c` deployment `dpl_4Et8P3GFvvqGgftawKT8aVyZzzXZ` is older and is not the immediate rollback candidate.
+
+After a bad promotion deploy, point traffic at that current production deployment:
+
+```bash
+vercel rollback dpl_3yrhnGWgr856xxKBJcEaQGpD4QbN
+```
+
+`vercel rollback` with no id rolls back to the immediately previous production deployment, which is the same target if nothing else shipped in between. On Hobby that is the only allowed target. This restores the pre-promotion site. It does not make the live site equal the `01c7cc6c` artifact; that tree returns only after the revert commit above is what Vercel builds.
 
