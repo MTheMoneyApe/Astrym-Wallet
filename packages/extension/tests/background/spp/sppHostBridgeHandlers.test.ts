@@ -129,7 +129,7 @@ describe('handleSppHostNymFetchRequest', () => {
       },
     }, HOST_SENDER);
 
-    for (const method of ['getHealth', 'getLatestLedger', 'getLedgerEntries', 'getEvents', 'getTransaction', 'simulateTransaction']) {
+    for (const method of ['getHealth', 'getLatestLedger', 'getLedgerEntries', 'getEvents', 'getTransaction']) {
       fetchImpl.mockClear();
       const result = await call(JSON.stringify({ jsonrpc: '2.0', id: 1, method }));
       expect(result.ok).toBe(true);

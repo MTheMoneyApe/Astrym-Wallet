@@ -4,6 +4,7 @@
  */
 
 import browser from 'webextension-polyfill';
+import { Address, xdr } from '@stellar/stellar-sdk';
 import type { SoftwareSigner } from '@solanym/wallet-core/src/signer/SoftwareSigner.js';
 import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import { SppWalletSignerAdapter } from '@solanym/wallet-core/src/stellar/spp/SppWalletSignerAdapter.js';
@@ -16,6 +17,7 @@ import {
   waitForSppKeyDerivationApproval,
 } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 import { isSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
+import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import { STELLAR_SOROBAN_TESTNET_RPC } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import {
   SPP_HOST_BRIDGE_CHANNEL,
@@ -52,6 +54,20 @@ const SOROBAN_READ_METHODS = new Set([
   'getTransaction',
   'simulateTransaction',
 ]);
+
+/** Read batches above this are refused. `simulateTransaction` is single-request only. */
+export const MAX_SOROBAN_READ_BATCH = 10;
+
+const RPC_ENTRY_KEYS = new Set(['jsonrpc', 'id', 'method', 'params']);
+
+const SIMULATE_CONTRACT_IDS: ReadonlySet<string> = (() => {
+  const config = getNethermindPublicTestnetContractConfig();
+  const ids = new Set<string>([config.public_key_registry]);
+  for (const pool of config.pools) {
+    if (pool.enabled) ids.add(pool.poolContractId);
+  }
+  return ids;
+})();
 
 type SorobanRpcClass = 'read' | 'send' | 'unknown' | 'mixed';
 
@@ -106,6 +122,179 @@ function isTrustedSorobanEndpoint(value: string): boolean {
     && given.search === ''
     && given.username === ''
     && given.password === '';
+}
+
+type RebuiltRpcEntry = {
+  jsonrpc: '2.0';
+  id: string | number;
+  method: string;
+  params?: unknown;
+};
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isRpcId(value: unknown): value is string | number {
+  return typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value));
+}
+
+function signatureIsVoid(signature: xdr.ScVal): boolean {
+  return signature.type === 'scvVoid';
+}
+
+function delegatesAreVoid(delegates: readonly xdr.SorobanDelegateSignature[]): boolean {
+  for (const delegate of delegates) {
+    if (!signatureIsVoid(delegate.signature)) return false;
+    if (!delegatesAreVoid(delegate.nestedDelegates)) return false;
+  }
+  return true;
+}
+
+function credentialsAreUnsigned(credentials: xdr.SorobanCredentials): boolean {
+  switch (credentials.type) {
+    case 'sorobanCredentialsSourceAccount':
+      return true;
+    case 'sorobanCredentialsAddress':
+      return signatureIsVoid(credentials.address.signature);
+    case 'sorobanCredentialsAddressV2':
+      return signatureIsVoid(credentials.addressV2.signature);
+    case 'sorobanCredentialsAddressWithDelegates': {
+      const body = credentials.addressWithDelegates;
+      return signatureIsVoid(body.addressCredentials.signature)
+        && delegatesAreVoid(body.delegates);
+    }
+    default: {
+      const unexpected: never = credentials;
+      return unexpected;
+    }
+  }
+}
+
+function contractIsPoolOrRegistry(address: xdr.ScAddress): boolean {
+  try {
+    return SIMULATE_CONTRACT_IDS.has(Address.fromScAddress(address).toString());
+  } catch {
+    return false;
+  }
+}
+
+function invokeIsAllowed(op: xdr.InvokeHostFunctionOp): boolean {
+  const host = op.hostFunction;
+  switch (host.type) {
+    case 'hostFunctionTypeInvokeContract':
+      return contractIsPoolOrRegistry(host.invokeContract.contractAddress)
+        && op.auth.every((entry) => credentialsAreUnsigned(entry.credentials));
+    case 'hostFunctionTypeCreateContract':
+    case 'hostFunctionTypeUploadContractWasm':
+    case 'hostFunctionTypeCreateContractV2':
+      return false;
+    default: {
+      const unexpected: never = host;
+      return unexpected;
+    }
+  }
+}
+
+function envelopeIsAllowedSimulate(envelope: xdr.TransactionEnvelope): boolean {
+  switch (envelope.type) {
+    case 'envelopeTypeTx': {
+      const v1 = envelope.v1;
+      if (v1.signatures.length !== 0) return false;
+      if (v1.tx.operations.length !== 1) return false;
+      const op = v1.tx.operations[0];
+      if (!op) return false;
+      if (op.body.type !== 'invokeHostFunction') return false;
+      return invokeIsAllowed(op.body.invokeHostFunctionOp);
+    }
+    case 'envelopeTypeTxV0':
+    case 'envelopeTypeTxFeeBump':
+      return false;
+    default: {
+      const unexpected: never = envelope;
+      return unexpected;
+    }
+  }
+}
+
+/** Canonical base64 TransactionEnvelope, or null when the simulate must not be fetched. */
+function canonicalAllowedSimulate(transaction: string): string | null {
+  if (transaction.length === 0) return null;
+  let envelope: xdr.TransactionEnvelope;
+  try {
+    envelope = xdr.TransactionEnvelope.fromXDR(transaction, 'base64');
+  } catch {
+    return null;
+  }
+  const canonical = envelope.toXDR('base64');
+  if (canonical !== transaction) return null;
+  if (!envelopeIsAllowedSimulate(envelope)) return null;
+  return canonical;
+}
+
+function sanitizeSimulateParams(params: unknown): { transaction: string } | null {
+  if (!isPlainRecord(params)) return null;
+  const keys = Object.keys(params);
+  if (keys.length !== 1 || keys[0] !== 'transaction') return null;
+  const transaction = params['transaction'];
+  if (typeof transaction !== 'string') return null;
+  const canonical = canonicalAllowedSimulate(transaction);
+  if (!canonical) return null;
+  return { transaction: canonical };
+}
+
+function sanitizeReadEntry(entry: unknown): RebuiltRpcEntry | null {
+  if (!isPlainRecord(entry)) return null;
+  for (const key of Object.keys(entry)) {
+    if (!RPC_ENTRY_KEYS.has(key)) return null;
+  }
+  if (entry['jsonrpc'] !== '2.0') return null;
+  const id = entry['id'];
+  if (!isRpcId(id)) return null;
+  const method = entry['method'];
+  if (typeof method !== 'string' || !SOROBAN_READ_METHODS.has(method)) return null;
+  const rebuilt: RebuiltRpcEntry = { jsonrpc: '2.0', id, method };
+  if (!Object.hasOwn(entry, 'params')) {
+    if (method === 'simulateTransaction') return null;
+    return rebuilt;
+  }
+  if (method === 'simulateTransaction') {
+    const params = sanitizeSimulateParams(entry['params']);
+    if (!params) return null;
+    rebuilt.params = params;
+    return rebuilt;
+  }
+  rebuilt.params = entry['params'];
+  return rebuilt;
+}
+
+/**
+ * Rebuild `{jsonrpc,id,method,params}` after strict checks.
+ * Returns null when the read must not be fetched. Send/mixed classification stays separate.
+ */
+function rebuildSorobanReadBody(body: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  const isBatch = Array.isArray(parsed);
+  const entries: unknown[] = isBatch ? parsed : [parsed];
+  if (entries.length === 0) return null;
+  if (isBatch && entries.length > MAX_SOROBAN_READ_BATCH) return null;
+  if (isBatch && entries.some((entry) => isPlainRecord(entry) && entry['method'] === 'simulateTransaction')) {
+    return null;
+  }
+  const rebuilt: RebuiltRpcEntry[] = [];
+  for (const entry of entries) {
+    const clean = sanitizeReadEntry(entry);
+    if (!clean) return null;
+    rebuilt.push(clean);
+  }
+  const payload = isBatch ? rebuilt : rebuilt[0];
+  if (payload === undefined) return null;
+  return JSON.stringify(payload);
 }
 
 /**
@@ -440,12 +629,24 @@ export async function handleSppHostNymFetchRequest(
       };
     }
 
+    const forwardedBody = body === undefined ? null : rebuildSorobanReadBody(body);
+    if (forwardedBody === null) {
+      return {
+        channel: SPP_HOST_BRIDGE_CHANNEL,
+        type: 'SPP_HOST_NYM_FETCH_RESULT',
+        id: request.id,
+        ok: false,
+        code: 'UNAUTHORIZED',
+        message: 'SPP RPC read failed validation. Not fetched.',
+      };
+    }
+
     const nymFetch = ctrl.getStellarFetch();
     const init: RequestInit = {
       method: 'POST',
       headers: headers ?? {},
     };
-    if (body !== undefined) init.body = body;
+    init.body = forwardedBody;
     const response = await nymFetch(STELLAR_SOROBAN_TESTNET_RPC, init);
     const responseHeaders: Record<string, string> = {};
     response.headers.forEach((value, key) => {
