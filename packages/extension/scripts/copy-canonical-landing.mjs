@@ -43,7 +43,7 @@ if (emitted.length > 0) {
   throw new Error('copy-canonical-landing: Vite output has no install-prompt asset to preserve');
 }
 
-for (const marker of ['HACKMERIDIAN 2026', 'Abrir Astrym Webapp', './website.css']) {
+for (const marker of ['STELLAR · PRIVACY · SELF-CUSTODY', 'href="./webapp.html"', 'data-language="en"', './website.css']) {
   if (!html.includes(marker)) {
     throw new Error(`copy-canonical-landing: landing lost ${marker}`);
   }
