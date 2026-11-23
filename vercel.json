@@ -6,9 +6,12 @@
       "master": true
     }
   },
+  "framework": null,
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm build:webapp",
   "outputDirectory": "packages/extension/dist-webapp",
+  "cleanUrls": false,
+  "trailingSlash": false,
   "headers": [
     {
       "source": "/(.*)\\.wasm",
