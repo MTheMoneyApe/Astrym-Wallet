@@ -17,7 +17,7 @@ import {
   waitForSppKeyDerivationApproval,
 } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
 import { isSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
-import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
+import { NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
 import { STELLAR_SOROBAN_TESTNET_RPC } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import {
   SPP_HOST_BRIDGE_CHANNEL,
@@ -60,14 +60,12 @@ export const MAX_SOROBAN_READ_BATCH = 10;
 
 const RPC_ENTRY_KEYS = new Set(['jsonrpc', 'id', 'method', 'params']);
 
-const SIMULATE_CONTRACT_IDS: ReadonlySet<string> = (() => {
-  const config = getNethermindPublicTestnetContractConfig();
-  const ids = new Set<string>([config.public_key_registry]);
-  for (const pool of config.pools) {
-    if (pool.enabled) ids.add(pool.poolContractId);
-  }
-  return ids;
-})();
+const SIMULATE_CONTRACT_IDS: ReadonlySet<string> = new Set<string>([
+  NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS.public_key_registry,
+  ...NETHERMIND_PUBLIC_TESTNET_DEPLOYMENTS.pools
+    .filter((pool) => pool.enabled)
+    .map((pool) => pool.poolContractId),
+]);
 
 type SorobanRpcClass = 'read' | 'send' | 'unknown' | 'mixed';
 
@@ -280,7 +278,7 @@ function rebuildSorobanReadBody(body: string): string | null {
     return null;
   }
   const isBatch = Array.isArray(parsed);
-  const entries: unknown[] = isBatch ? parsed : [parsed];
+  const entries: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
   if (entries.length === 0) return null;
   if (isBatch && entries.length > MAX_SOROBAN_READ_BATCH) return null;
   if (isBatch && entries.some((entry) => isPlainRecord(entry) && entry['method'] === 'simulateTransaction')) {
