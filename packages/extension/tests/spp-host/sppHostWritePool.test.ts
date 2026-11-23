@@ -108,7 +108,7 @@ describe('sppHostWritePool', () => {
     if (!result.ok) expect(result.code).toBe('SESSION_NOT_READY');
   });
 
-  it('executes deposit/transfer/withdraw against a registered adapter and propagates failures', async () => {
+  it('stays blocked: deposit, transfer, and withdraw while pool economics are unverified', async () => {
     clearSppHostWritePool();
     const deposit = vi.fn(async () => ({ txHash: 'dep' }));
     const transfer = vi.fn(async () => ({ txHash: 'tr' }));
@@ -181,7 +181,7 @@ describe('sppHostWritePool', () => {
     if (!mismatch.ok) expect(mismatch.code).toBe('INVALID_REQUEST');
   });
 
-  it('advances account sequence only when execute returns txHash + nextFreshSequence', async () => {
+  it('stays blocked: sequence does not advance while pool economics are unverified', async () => {
     registerOkPool();
     const tracker = getSppHostSequenceTracker();
     tracker.seed(SENDER, '100');
@@ -245,12 +245,8 @@ describe('sppHostWritePool', () => {
     expect(after?.confirmedTxHashes).toEqual([]);
   });
 
-  it('refuses sequence drift and aborts in-flight after gate refuse or execution failure', async () => {
-    registerOkPool({
-      deposit: vi.fn(async () => {
-        throw new Error('wasm boom');
-      }),
-    });
+  it('refuses sequence drift and aborts in-flight when the broadcast gate refuses', async () => {
+    registerOkPool();
     const tracker = new SppMultiAccountSequenceTracker();
     tracker.seed(SENDER, '100');
     setSppHostSequenceTracker(tracker);
@@ -281,8 +277,17 @@ describe('sppHostWritePool', () => {
     if (!gated.ok) expect(gated.code).toBe('UNAUTHORIZED');
     expect(tracker.get(SENDER)?.inFlightFingerprint).toBeNull();
     expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('100');
+  });
 
-    setSppTestnetBroadcastAuthorized(true);
+  it('stays blocked: an execution throw is not reached while pool economics are unverified', async () => {
+    const deposit = vi.fn(async () => {
+      throw new Error('wasm boom');
+    });
+    registerOkPool({ deposit });
+    const tracker = new SppMultiAccountSequenceTracker();
+    tracker.seed(SENDER, '100');
+    setSppHostSequenceTracker(tracker);
+
     const failed = await executeSppHostWritePool(
       request({
         signingAccount: SENDER,
@@ -292,12 +297,16 @@ describe('sppHostWritePool', () => {
       }),
     );
     expect(failed.ok).toBe(false);
-    if (!failed.ok) expect(failed.code).toBe('INVALID_REQUEST');
+    if (!failed.ok) {
+      expect(failed.code).toBe('INVALID_REQUEST');
+      expect(failed.message).toMatch(/SPP_POOL_ECONOMICS_NOT_VERIFIED/);
+    }
+    expect(deposit).not.toHaveBeenCalled();
     expect(tracker.get(SENDER)?.inFlightFingerprint).toBeNull();
     expect(tracker.get(SENDER)?.expectedFreshSequence).toBe('100');
   });
 
-  it('tracks sender and recipient accounts independently', async () => {
+  it('stays blocked: sender and recipient sequences stay put while pool economics are unverified', async () => {
     registerOkPool({
       transfer: vi.fn(async () => ({ txHash: 'tr-hash-ok12' })),
     });
