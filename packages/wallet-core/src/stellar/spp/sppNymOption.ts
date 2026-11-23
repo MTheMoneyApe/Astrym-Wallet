@@ -8,9 +8,13 @@ import { StrKey } from '@stellar/stellar-sdk';
 import {
   assertAuthorizationFingerprint,
   beginPrivatePaymentExecution,
+  hasUnresolvedSubmission,
+  hydrateUnresolvedSubmissions,
+  persistUnresolvedSubmission,
   privatePaymentFingerprint,
 } from './sppExecutionGuard.js';
 import { assertSppTestnetBroadcastAuthorized } from './sppBroadcastGate.js';
+import { assertSppPoolPaymentEconomicsBound } from './sppSignGate.js';
 import { assertFeeWithinCeiling, maxFeeStroopsForOperation } from './sppFeePolicy.js';
 
 export const STELLAR_SOROBAN_TESTNET_RPC = 'https://soroban-testnet.stellar.org';
@@ -34,7 +38,11 @@ export type SppPrivatePaymentRequest = {
   recipient?: string;
 };
 
-export type SppPrivatePoolResult = { txHash: string | null };
+export type SppPrivatePoolResult = {
+  txHash: string | null;
+  /** Every hash from one SDK execute. Omitted by mocks that only set txHash. */
+  txHashes?: readonly string[];
+};
 
 export type SppPrivatePool = {
   deposit(amount: bigint): Promise<SppPrivatePoolResult>;
@@ -57,12 +65,30 @@ export type SppPrivatePaymentCode =
 
 export class SppPrivatePaymentError extends Error {
   readonly code: SppPrivatePaymentCode;
+  readonly txHashes: readonly string[];
 
-  constructor(code: SppPrivatePaymentCode, message: string, options?: { cause?: unknown }) {
+  constructor(
+    code: SppPrivatePaymentCode,
+    message: string,
+    options?: { cause?: unknown; txHashes?: readonly string[] },
+  ) {
     super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = 'SppPrivatePaymentError';
     this.code = code;
+    this.txHashes = options?.txHashes ?? [];
   }
+}
+
+function reportedPoolHashes(result: SppPrivatePoolResult): readonly string[] {
+  if (result.txHashes) return result.txHashes;
+  return result.txHash ? [result.txHash] : [];
+}
+
+function hashesCarriedBy(cause: unknown): readonly string[] {
+  if (!cause || typeof cause !== 'object' || !('txHashes' in cause)) return [];
+  const value = (cause as { txHashes?: unknown }).txHashes;
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
 }
 
 export type SppRpcFetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -241,11 +267,18 @@ export async function executeSppPrivatePayment(input: {
   senderAddress?: string | null;
   /** Explicit max fee ceiling in stroops (never unbounded). */
   maxFeeStroops?: string | null;
+  /**
+   * Read-allowlist getTransaction. Absent readers never promote a hash to confirmed.
+   */
+  confirmTransaction?: (
+    hash: string,
+  ) => Promise<'SUCCESS' | 'FAILED' | 'NOT_FOUND' | 'UNKNOWN'>;
 }): Promise<{
   operation: SppPrivateOperation;
   txHash: string | null;
+  txHashes: readonly string[];
   rpcRoutedViaNym: true;
-  confirmation: 'confirmed' | 'unknown';
+  confirmation: 'confirmed' | 'submitted' | 'failed' | 'unknown';
 }> {
   if (sppOptionAvailability(input.gate) !== 'ready_to_enable') {
     throw new SppPrivatePaymentError(
@@ -288,7 +321,14 @@ export async function executeSppPrivatePayment(input: {
     amountStroops: request.amount.toString(),
     recipient: request.recipient,
   });
-  let release: (opts?: { completed?: boolean }) => void;
+  await hydrateUnresolvedSubmissions();
+  if (await hasUnresolvedSubmission(fingerprint)) {
+    throw new SppPrivatePaymentError(
+      'SUBMISSION_UNKNOWN',
+      'Reautorización bloqueada hasta reconciliar la operación por getTransaction.',
+    );
+  }
+  let release: (opts?: { completed?: boolean; reconcile?: boolean }) => void;
   try {
     ({ release } = beginPrivatePaymentExecution(fingerprint));
   } catch (cause) {
@@ -336,42 +376,180 @@ export async function executeSppPrivatePayment(input: {
     );
   }
 
-  const pool = input.pool;
-  const preferInjected = input.preferInjectedTransport !== false;
-  let completed = false;
+  try {
+    assertSppPoolPaymentEconomicsBound(request.operation);
+  } catch (cause) {
+    release();
+    throw new SppPrivatePaymentError(
+      'INVALID_REQUEST',
+      cause instanceof Error ? cause.message : 'SPP_POOL_ECONOMICS_NOT_VERIFIED',
+      { cause },
+    );
+  }
 
+  const flags = { completed: false, reconcile: false, hashes: [] as string[] };
+  try {
+    return await runSppProbedPoolPayment({
+      request,
+      rpcUrl: input.rpcUrl,
+      nymFetch: input.nymFetch,
+      pool: input.pool,
+      ...(input.preferInjectedTransport === undefined
+        ? {}
+        : { preferInjectedTransport: input.preferInjectedTransport }),
+      ...(input.confirmTransaction === undefined
+        ? {}
+        : { confirmTransaction: input.confirmTransaction }),
+    }, flags);
+  } finally {
+    try {
+      if (flags.hashes.length > 0) {
+        await persistUnresolvedSubmission({
+          fingerprint,
+          hashes: flags.hashes,
+          at: Date.now(),
+        });
+      }
+    } finally {
+      release(flags.completed ? { completed: true } : flags.reconcile ? { reconcile: true } : undefined);
+    }
+  }
+}
+
+async function ledgerStatusOf(
+  hash: string,
+  confirmTransaction:
+    | ((hash: string) => Promise<'SUCCESS' | 'FAILED' | 'NOT_FOUND' | 'UNKNOWN'>)
+    | undefined,
+): Promise<'SUCCESS' | 'FAILED' | 'NOT_FOUND' | 'UNKNOWN'> {
+  if (!hash || !confirmTransaction) return 'UNKNOWN';
+  try {
+    return await confirmTransaction(hash);
+  } catch {
+    return 'UNKNOWN';
+  }
+}
+
+function confirmationFromLedger(
+  status: 'SUCCESS' | 'FAILED' | 'NOT_FOUND' | 'UNKNOWN',
+): 'confirmed' | 'submitted' | 'failed' {
+  switch (status) {
+    case 'SUCCESS':
+      return 'confirmed';
+    case 'FAILED':
+      return 'failed';
+    case 'NOT_FOUND':
+    case 'UNKNOWN':
+      return 'submitted';
+    default: {
+      const unexpected: never = status;
+      return unexpected;
+    }
+  }
+}
+
+/**
+ * Probe and pool execution. Invoked only after the broadcast gate, the
+ * economics block, the fee ceiling, the fingerprint check, and the in-flight
+ * guard. Not exported.
+ */
+async function runSppProbedPoolPayment(
+  input: {
+    request: {
+      operation: SppPrivateOperation;
+      amount: bigint;
+      recipient: string | null;
+    };
+    rpcUrl: string;
+    nymFetch: SppRpcFetch;
+    pool: SppPrivatePool;
+    preferInjectedTransport?: boolean;
+    confirmTransaction?: (
+      hash: string,
+    ) => Promise<'SUCCESS' | 'FAILED' | 'NOT_FOUND' | 'UNKNOWN'>;
+  },
+  flags: { completed: boolean; reconcile: boolean; hashes: string[] } = {
+    completed: false,
+    reconcile: false,
+    hashes: [],
+  },
+): Promise<{
+  operation: SppPrivateOperation;
+  txHash: string | null;
+  txHashes: readonly string[];
+  rpcRoutedViaNym: true;
+  confirmation: 'confirmed' | 'submitted' | 'failed' | 'unknown';
+}> {
+  const pool = input.pool;
+  const request = input.request;
+  const preferInjected = input.preferInjectedTransport !== false;
   const run = async () => {
     await probeSorobanRpc(input.rpcUrl, input.nymFetch);
     try {
       const result = await runPool(pool, request);
-      if (!result.txHash) {
+      const hashes = reportedPoolHashes(result);
+      if (hashes.length !== 1) {
+        flags.reconcile = true;
+        if (hashes.length > 0) flags.hashes = [...hashes];
         throw new SppPrivatePaymentError(
           'SUBMISSION_UNKNOWN',
-          'El SDK no devolvió hash. No se inventa confirmación; verifica en el explorador antes de reintentar.',
+          `El SDK devolvió ${hashes.length} hash(es). No se confirma solo el primero y no hay reintento. hashes=${hashes.join(',')}`,
+          { txHashes: hashes },
         );
       }
-      completed = true;
+      const txHash = hashes[0] ?? '';
+      const ledger = await ledgerStatusOf(txHash, input.confirmTransaction);
+      const confirmation = confirmationFromLedger(ledger);
+      switch (confirmation) {
+        case 'submitted':
+          flags.reconcile = true;
+          flags.hashes = [txHash];
+          break;
+        case 'confirmed':
+        case 'failed':
+          flags.completed = true;
+          break;
+        default: {
+          const unexpected: never = confirmation;
+          throw new SppPrivatePaymentError('EXECUTION_FAILED', `Confirmación inesperada: ${String(unexpected)}`);
+        }
+      }
       return {
         operation: request.operation,
-        txHash: result.txHash,
+        txHash,
+        txHashes: hashes,
         rpcRoutedViaNym: true as const,
-        confirmation: 'confirmed' as const,
+        confirmation,
       };
     } catch (cause) {
-      if (cause instanceof SppPrivatePaymentError) throw cause;
+      if (cause instanceof SppPrivatePaymentError) {
+        if (cause.txHashes.length > 0) {
+          flags.reconcile = true;
+          if (cause.code === 'SUBMISSION_UNKNOWN' || cause.code === 'EXECUTION_FAILED') {
+            flags.hashes = [...cause.txHashes];
+          }
+        }
+        throw cause;
+      }
       const message = cause instanceof Error ? cause.message : 'El pago privado SPP falló';
+      const recovered = hashesCarriedBy(cause);
+      if (recovered.length > 0) {
+        flags.reconcile = true;
+        flags.hashes = [...recovered];
+        throw new SppPrivatePaymentError(
+          'SUBMISSION_UNKNOWN',
+          `${message} completedHashes=${recovered.join(',')}`,
+          { cause, txHashes: recovered },
+        );
+      }
       throw new SppPrivatePaymentError('EXECUTION_FAILED', message, { cause });
     }
   };
 
-  try {
-    if (preferInjected) {
-      return await run();
-    }
-    return await withSppRpcThroughNym(input.rpcUrl, input.nymFetch, run);
-  } finally {
-    release(completed ? { completed: true } : undefined);
+  if (preferInjected) {
+    return await run();
   }
+  return await withSppRpcThroughNym(input.rpcUrl, input.nymFetch, run);
 }
 
 async function runPool(

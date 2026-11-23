@@ -145,4 +145,108 @@ describe('NymOffscreenRuntime', () => {
     expect(again.connected).toBe(true);
     expect(again.state).toBe('connected');
   });
+
+  it('deduplicates concurrent identical mixFetch requests by method:url and cleans up after settlement', async () => {
+    let resolveFirst!: (res: Response) => void;
+    const firstGate = new Promise<Response>((resolve) => {
+      resolveFirst = resolve;
+    });
+    let callCount = 0;
+    const mixFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      callCount += 1;
+      if (callCount === 1) return firstGate;
+      return new Response(`${init?.method ?? 'GET'}:${url}:${callCount}`, { status: 200 });
+    });
+    const disconnectMixFetch = vi.fn(async () => undefined);
+    const createMixFetch = vi.fn(async () => ({ mixFetch, disconnectMixFetch }));
+
+    const rt = new NymOffscreenRuntime({
+      bootstrapApiOrigins: ['https://validator.nymtech.net'],
+      gatewayOrigins: [DOC_WSS],
+    });
+    (rt as unknown as { ensureModule: () => Promise<unknown> }).ensureModule = async () => ({
+      createMixFetch,
+      disconnectMixFetch,
+    });
+    (rt as unknown as { probePackagedAssets: () => Promise<boolean> }).probePackagedAssets =
+      async () => true;
+
+    await rt.connect({ preferredGateway: DOC_IDENTITY });
+
+    const accountUrl = 'https://horizon-testnet.stellar.org/accounts/GABC';
+    const p1 = rt.performProtectedRequest(accountUrl, { method: 'GET' });
+    const p2 = rt.performProtectedRequest(accountUrl);
+    const p3 = rt.performProtectedRequest(accountUrl, { method: 'get' });
+    const otherUrlPromise = rt.performProtectedRequest(
+      'https://horizon-testnet.stellar.org/fee_stats',
+      { method: 'GET' },
+    );
+    const postPromise = rt.performProtectedRequest(accountUrl, {
+      method: 'POST',
+      bodyText: 'tx=1',
+    });
+
+    // Three identical GET /accounts/GABC calls collapse into a single mixFetch invocation,
+    // while different URL or method run independently.
+    expect(mixFetch).toHaveBeenCalledTimes(3);
+
+    resolveFirst(new Response('{"balance":"100"}', { status: 200 }));
+    const [r1, r2, r3, otherRes, postRes] = await Promise.all([
+      p1,
+      p2,
+      p3,
+      otherUrlPromise,
+      postPromise,
+    ]);
+
+    expect(r1).toEqual(r2);
+    expect(r2).toEqual(r3);
+    expect(atob(r1.bodyBase64)).toBe('{"balance":"100"}');
+    expect(otherRes.status).toBe(200);
+    expect(postRes.status).toBe(200);
+
+    // After settlement, a subsequent identical GET performs a fresh mixFetch call.
+    const after = await rt.performProtectedRequest(accountUrl, { method: 'GET' });
+    expect(mixFetch).toHaveBeenCalledTimes(4);
+    expect(after.status).toBe(200);
+  });
+
+  it('cleans up inflightRequests entry when a mixFetch request fails so retries run fresh', async () => {
+    let rejectFirst!: (err: Error) => void;
+    const firstGate = new Promise<Response>((_, reject) => {
+      rejectFirst = reject;
+    });
+    const mixFetch = vi
+      .fn()
+      .mockImplementationOnce(() => firstGate)
+      .mockImplementationOnce(async () => new Response('recovered', { status: 200 }));
+    const disconnectMixFetch = vi.fn(async () => undefined);
+    const createMixFetch = vi.fn(async () => ({ mixFetch, disconnectMixFetch }));
+
+    const rt = new NymOffscreenRuntime({
+      bootstrapApiOrigins: ['https://validator.nymtech.net'],
+      gatewayOrigins: [DOC_WSS],
+    });
+    (rt as unknown as { ensureModule: () => Promise<unknown> }).ensureModule = async () => ({
+      createMixFetch,
+      disconnectMixFetch,
+    });
+    (rt as unknown as { probePackagedAssets: () => Promise<boolean> }).probePackagedAssets =
+      async () => true;
+
+    await rt.connect({ preferredGateway: DOC_IDENTITY });
+
+    const url = 'https://horizon-testnet.stellar.org/accounts/GFAIL';
+    const p1 = rt.performProtectedRequest(url, { method: 'GET' });
+    const p2 = rt.performProtectedRequest(url, { method: 'GET' });
+    expect(mixFetch).toHaveBeenCalledTimes(1);
+
+    rejectFirst(new Error('transient mixnet error'));
+    await expect(p1).rejects.toThrow(/transient mixnet error/);
+    await expect(p2).rejects.toThrow(/transient mixnet error/);
+
+    const retry = await rt.performProtectedRequest(url, { method: 'GET' });
+    expect(mixFetch).toHaveBeenCalledTimes(2);
+    expect(atob(retry.bodyBase64)).toBe('recovered');
+  });
 });

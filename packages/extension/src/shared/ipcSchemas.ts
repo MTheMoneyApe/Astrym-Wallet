@@ -7,6 +7,8 @@
 export const IpcErrorSchema = z.object({
   name: z.string(),
   message: z.string(),
+  code: z.string().optional(),
+  txHashes: z.array(z.string()).optional(),
 });
 
 export const BaseRequestEnvelopeSchema = z.object({
@@ -71,6 +73,25 @@ export const GetStellarBalanceResponseSchema = z.object({
   asset: z.literal('XLM'),
   subentryCount: z.number().int().min(0),
   balances: z.array(StellarBalanceItemSchema),
+});
+
+export const StellarPaymentRecordSchema = z.object({
+  id: z.string(),
+  txHash: z.string(),
+  direction: z.enum(['sent', 'received']),
+  amountXlm: z.string(),
+  createdAt: z.string(),
+  counterparty: z.string().optional(),
+});
+
+export const GetStellarRecentPaymentsRequestSchema = z.object({
+  address: z.string(),
+  limit: z.number().int().min(1).max(20).optional(),
+});
+
+export const GetStellarRecentPaymentsResponseSchema = z.object({
+  address: z.string(),
+  payments: z.array(StellarPaymentRecordSchema),
 });
 
 export const FundStellarTestnetRequestSchema = z.object({
@@ -361,6 +382,10 @@ export const NymRuntimeSnapshotSchema = z.object({
   implementation: z.string(),
   selfAddress: z.string().nullable().optional(),
   mode: NymTransportModeSchema,
+  preferenceHydrated: z.boolean(),
+  egressBlocked: z.boolean(),
+  privacyPreference: z.enum(['direct', 'nym']).nullable(),
+  preferenceDurable: z.boolean(),
   documentReady: z.boolean(),
   diagnosticCode: z.string().optional(),
   diagnosticStage: z.string().nullable().optional(),
@@ -519,6 +544,10 @@ export const MessageSchemas = {
   GET_STELLAR_BALANCE: {
     request: GetStellarBalanceRequestSchema,
     response: GetStellarBalanceResponseSchema,
+  },
+  GET_STELLAR_RECENT_PAYMENTS: {
+    request: GetStellarRecentPaymentsRequestSchema,
+    response: GetStellarRecentPaymentsResponseSchema,
   },
   FUND_STELLAR_TESTNET_ACCOUNT: {
     request: FundStellarTestnetRequestSchema,
@@ -697,6 +726,27 @@ export const MessageSchemas = {
       transportFetchInvoked: z.boolean(),
     }),
   },
+  SPP_AUTHORIZE_KEY_DERIVATION: {
+    request: z.object({
+      acknowledgeHighRisk: z.literal(true),
+      kdfDomain: z.string().min(1).max(64),
+      prepareGeneration: z.number().int().positive(),
+    }),
+    response: z.object({
+      approved: z.literal(true),
+    }),
+  },
+  SPP_AUTHORIZE_STORAGE_UNLOCK: {
+    request: z.object({
+      message: z.string().min(1).max(2_000),
+      prepareGeneration: z.number().int().positive(),
+      uses: z.union([z.literal(1), z.literal(2)]),
+    }),
+    response: z.object({
+      approved: z.literal(true),
+      approvalToken: z.string().uuid(),
+    }),
+  },
   SPP_PRIVATE_PAYMENT: {
     request: z.object({
       enabled: z.literal(true),
@@ -719,8 +769,9 @@ export const MessageSchemas = {
     response: z.object({
       operation: z.enum(['deposit', 'transfer', 'withdraw']),
       txHash: z.string().nullable(),
+      txHashes: z.array(z.string().min(1)).optional(),
       rpcRoutedViaNym: z.literal(true),
-      confirmation: z.enum(['confirmed', 'unknown']),
+      confirmation: z.enum(['submitted', 'confirmed', 'failed', 'unknown']),
     }),
   },
   SPP_ACCOUNT_SNAPSHOT: {
@@ -752,11 +803,19 @@ export const MessageSchemas = {
     request: z.object({
       /** Operator acknowledgment that this may broadcast once the gate opens. */
       acknowledgeBroadcast: z.literal(true),
+      /** 32-byte note public key the user is registering, hex. */
+      noteKeyHex: z.string().regex(/^[0-9a-fA-F]{64}$/),
+      /** 32-byte encryption public key the user is registering, hex. */
+      encryptionKeyHex: z.string().regex(/^[0-9a-fA-F]{64}$/),
+      /** Present only when the registry call includes note_key_proof. */
+      noteKeyProofHex: z.string().regex(/^(?:[0-9a-fA-F]{2})+$/),
+      encryptionKeySignatureHex: z.string().regex(/^[0-9a-fA-F]{128}$/),
+      ownerSignatureHex: z.string().regex(/^[0-9a-fA-F]{128}$/),
     }),
     response: z.object({
       txHash: z.string().nullable(),
       rpcRoutedViaNym: z.literal(true),
-      confirmation: z.enum(['confirmed', 'unknown']),
+      confirmation: z.enum(['submitted', 'confirmed', 'failed', 'unknown']),
     }),
   },
   SPP_ACCOUNT_SYNC: {

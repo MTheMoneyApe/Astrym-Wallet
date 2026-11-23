@@ -122,6 +122,7 @@ export class NymOffscreenRuntime {
   private _mod: MixFetchModule | null = null;
   private _allowlist: NymNetworkAllowlistConfig;
   private readonly _resolveAssetUrl: NymAssetUrlResolver | null;
+  private readonly inflightRequests = new Map<string, Promise<NymOffscreenFetchResult>>();
 
   constructor(
     allowlist: NymNetworkAllowlistConfig = DEFAULT_NYM_NETWORK_ALLOWLIST,
@@ -406,6 +407,7 @@ export class NymOffscreenRuntime {
       this.setDiagnostic(cause, 'RUNTIME_UNAVAILABLE');
     } finally {
       this._instance = null;
+      this.inflightRequests.clear();
       clearMixFetchGlobalSingleton();
       // Retryable — a later connect() may call createMixFetch again.
       this._state = 'disconnected';
@@ -417,6 +419,33 @@ export class NymOffscreenRuntime {
   }
 
   async performProtectedRequest(
+    url: string,
+    init?: NymOffscreenFetchInit,
+  ): Promise<NymOffscreenFetchResult> {
+    if (this._state !== 'connected' || !this._instance) {
+      throw Object.assign(
+        new Error('Nym mixnet not connected; refusing clearnet fallback'),
+        { code: 'NOT_CONNECTED' as const },
+      );
+    }
+
+    const method = (init?.method ?? 'GET').toUpperCase();
+    const requestKey = `${method}:${url}`;
+    const existing = this.inflightRequests.get(requestKey);
+    if (existing) {
+      return existing;
+    }
+
+    const requestPromise = this.executeProtectedRequest(url, init).finally(() => {
+      if (this.inflightRequests.get(requestKey) === requestPromise) {
+        this.inflightRequests.delete(requestKey);
+      }
+    });
+    this.inflightRequests.set(requestKey, requestPromise);
+    return requestPromise;
+  }
+
+  private async executeProtectedRequest(
     url: string,
     init?: NymOffscreenFetchInit,
   ): Promise<NymOffscreenFetchResult> {

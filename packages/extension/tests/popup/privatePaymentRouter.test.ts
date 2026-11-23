@@ -64,6 +64,45 @@ describe('routePrivatePayment', () => {
     expect(route.canSubmit).toBe(false);
   });
 
+  it('propagates SUBMISSION_UNKNOWN and multiple hashes as unknown', () => {
+    const unknown = routePrivatePayment({
+      ...base,
+      lastErrorCode: 'SUBMISSION_UNKNOWN',
+      lastErrorMessage: 'two hashes',
+    });
+    expect(unknown.status).toBe('unknown');
+    expect(unknown.canAuthorize).toBe(false);
+    expect(unknown.canSubmit).toBe(false);
+    const multi = routePrivatePayment({
+      ...base,
+      lastErrorCode: 'EXECUTION_FAILED',
+      lastTxHashes: ['hash-1', 'hash-2'],
+    });
+    expect(multi.status).toBe('unknown');
+    expect(multi.canAuthorize).toBe(false);
+  });
+
+  it('keeps a returned hash submitted until ledger confirmation', () => {
+    const submitted = routePrivatePayment({ ...base, lastTxHash: 'hash-1' });
+    expect(submitted.status).toBe('submitted');
+    expect(submitted.canAuthorize).toBe(false);
+    expect(submitted.canSubmit).toBe(false);
+    const confirmed = routePrivatePayment({
+      ...base,
+      lastTxHash: 'hash-1',
+      ledgerConfirmation: 'confirmed',
+    });
+    expect(confirmed.status).toBe('confirmed');
+    expect(confirmed.canAuthorize).toBe(false);
+    const failed = routePrivatePayment({
+      ...base,
+      lastTxHash: 'hash-1',
+      ledgerConfirmation: 'failed',
+    });
+    expect(failed.status).toBe('failed');
+    expect(failed.canAuthorize).toBe(false);
+  });
+
   it('blocks submit when proving keys or contract config are missing', () => {
     expect(
       routePrivatePayment({ ...base, preparePhase: 'missing_proving_keys' }).status,

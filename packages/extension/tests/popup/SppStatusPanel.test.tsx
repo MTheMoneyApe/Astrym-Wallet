@@ -4,7 +4,22 @@
 
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// The panel renders SppAccountPanel, which imports ipc.ts. That module
+// imports webextension-polyfill at load time, and the polyfill throws unless
+// chrome.runtime.id exists. This file renders markup only, so both the
+// browser API and the IPC client stay mocked.
+vi.mock('webextension-polyfill', () => ({
+  default: {
+    runtime: { sendMessage: vi.fn() },
+  },
+}));
+
+vi.mock('../../src/popup/ipc.js', () => ({
+  sendIpcMessage: vi.fn(async () => ({ success: false })),
+}));
+
 import { SppStatusPanel } from '../../src/popup/SppStatusPanel.js';
 import type { SppIntegrationSnapshot } from '@solanym/wallet-core/src/stellar/spp/SppIntegrationStatus.js';
 

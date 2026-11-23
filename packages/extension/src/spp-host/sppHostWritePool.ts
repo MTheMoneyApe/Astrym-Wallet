@@ -12,16 +12,16 @@
  * until that registration completes. WalletSigner IPC is remote via SW.
  */
 
+import { Networks } from '@stellar/stellar-sdk';
 import type {
   SppPrivateOperation,
   SppPrivatePool,
   SppPrivatePoolResult,
 } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import { assertSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
-import {
-  assertFeeWithinCeiling,
-  maxFeeStroopsForOperation,
-} from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import { assertSppPoolPaymentEconomicsBound } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import { runWithSppHostFeeScope } from './sppHostFeeScope.js';
 import {
   SppMultiAccountSequenceTracker,
   abortSppAccountOperation,
@@ -119,14 +119,19 @@ export function noteSppHostReadonlySessionReady(): void {
   publish('session_ready_readonly', 'RO session ready; write PrivatePool not bound yet');
 }
 
-function mapPoolResult(result: SppPrivatePoolResult): { txHash: string | null } {
-  return { txHash: result.txHash };
+function mapPoolResult(result: SppPrivatePoolResult): SppPrivatePoolResult {
+  const txHashes = hashesOf(result);
+  return {
+    txHash: txHashes.length === 1 ? (txHashes[0] ?? null) : null,
+    txHashes: [...txHashes],
+  };
 }
 
 function failureResult(
   id: string,
   code: Extract<SppHostExecuteResult, { ok: false }>['code'],
   message: string,
+  txHashes: readonly string[] = [],
 ): SppHostExecuteResult {
   return {
     channel: SPP_HOST_BRIDGE_CHANNEL,
@@ -135,7 +140,20 @@ function failureResult(
     ok: false,
     code,
     message: message.slice(0, 500),
+    ...(txHashes.length > 0 ? { txHashes: [...txHashes] } : {}),
   };
+}
+
+function hashesOf(result: SppPrivatePoolResult): readonly string[] {
+  if (result.txHashes) return result.txHashes;
+  return result.txHash ? [result.txHash] : [];
+}
+
+function hashesFromCause(cause: unknown): readonly string[] {
+  if (!cause || typeof cause !== 'object' || !('txHashes' in cause)) return [];
+  const value = (cause as { txHashes?: unknown }).txHashes;
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
 }
 
 function abortSequenceInFlight(begun: SequenceInFlight | null): void {
@@ -185,7 +203,8 @@ function beginSequenceTracking(
   return { ok: true, begun: { address: signingAccount, fingerprint } };
 }
 
-function confirmOrAbortSequence(
+/** Exported for tests. Production callers are unchanged. */
+export function confirmOrAbortSequence(
   begun: SequenceInFlight,
   txHash: string | null,
   nextFreshSequence: string | undefined,
@@ -244,17 +263,7 @@ export async function executeSppHostWritePool(
   const activePool = writePool;
   const amount = BigInt(payload.amountStroops);
   const operation: SppPrivateOperation = payload.operation;
-
   const maxFeeStroops = maxFeeStroopsForOperation(operation);
-  try {
-    assertFeeWithinCeiling(operation, maxFeeStroops);
-  } catch (cause) {
-    return failureResult(
-      id,
-      'INVALID_REQUEST',
-      cause instanceof Error ? cause.message : 'Fee ceiling violated',
-    );
-  }
 
   let sequenceBegun: SequenceInFlight | null = null;
 
@@ -296,6 +305,17 @@ export async function executeSppHostWritePool(
   }
 
   try {
+    assertSppPoolPaymentEconomicsBound(operation);
+  } catch (cause) {
+    abortSequenceInFlight(sequenceBegun);
+    return failureResult(
+      id,
+      'INVALID_REQUEST',
+      cause instanceof Error ? cause.message : 'SPP_POOL_ECONOMICS_NOT_VERIFIED',
+    );
+  }
+
+  try {
     const run = async (): Promise<SppPrivatePoolResult> => {
       switch (operation) {
         case 'deposit':
@@ -325,11 +345,34 @@ export async function executeSppHostWritePool(
     };
 
     // SDK RPC from this page must go through SW Nym fetch — no silent clearnet.
-    const result = await withSppHostNymFetchProxy(payload.rpcUrl, run);
+    // The fee scope makes the remote signer enforce tx.fee / minResourceFee
+    // with the same helper the service worker uses. There is no self-check
+    // of the ceiling against itself.
+    const result = await runWithSppHostFeeScope(
+      {
+        operation,
+        approvedMaxFeeStroops: maxFeeStroops,
+        minResourceFeeStroops: null,
+        allowedContractId: payload.poolContract,
+        networkPassphrase: Networks.TESTNET,
+      },
+      () => withSppHostNymFetchProxy(payload.rpcUrl, run),
+    );
     const mapped = mapPoolResult(result);
+    const hashes = hashesOf(mapped);
+    if (hashes.length !== 1) {
+      abortSequenceInFlight(sequenceBegun);
+      const ambiguous = hashes.length > 1;
+      return failureResult(
+        id,
+        ambiguous ? 'SUBMISSION_UNKNOWN' : 'EXECUTION_FAILED',
+        `SPP execute returned ${hashes.length} hash(es); not confirming one and not retrying. hashes=${hashes.join(',')}`,
+        hashes,
+      );
+    }
 
     if (sequenceBegun) {
-      confirmOrAbortSequence(sequenceBegun, mapped.txHash, payload.nextFreshSequence);
+      confirmOrAbortSequence(sequenceBegun, hashes[0] ?? null, payload.nextFreshSequence);
     }
 
     return {
@@ -338,7 +381,8 @@ export async function executeSppHostWritePool(
       id,
       ok: true,
       operation,
-      txHash: mapped.txHash,
+      txHash: hashes[0] ?? null,
+      txHashes: [...hashes],
       rpcRoutedViaNym: true,
     };
   } catch (cause) {
@@ -347,7 +391,14 @@ export async function executeSppHostWritePool(
       cause && typeof cause === 'object' && (cause as { code?: string }).code === 'INVALID_REQUEST'
         ? 'INVALID_REQUEST'
         : 'EXECUTION_FAILED';
+    const recovered = hashesFromCause(cause);
     const message = cause instanceof Error ? cause.message : 'WASM/private pool execution failed';
-    return failureResult(id, code, message);
+    const ambiguous = recovered.length > 0 && code !== 'INVALID_REQUEST';
+    return failureResult(
+      id,
+      ambiguous ? 'SUBMISSION_UNKNOWN' : code,
+      ambiguous ? `${message} completedHashes=${recovered.join(',')}` : message,
+      recovered,
+    );
   }
 }

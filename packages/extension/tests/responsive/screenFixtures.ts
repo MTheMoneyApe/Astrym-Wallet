@@ -102,7 +102,7 @@ const screens: Record<ScreenId, string> = {
         <label class="stack-gap">Importe (XLM)
           <input class="input-field" value="1.25" readonly />
         </label>
-        <p class="text-secondary" style="margin:0;font-size:0.8rem">Red: Stellar Testnet · Modo: Direct</p>
+        <p class="text-secondary" style="margin:0;font-size:0.8rem">Red: Stellar Testnet</p>
         <button class="btn-primary" type="button" style="width:100%">Continuar</button>
       </section>
     </div>`,

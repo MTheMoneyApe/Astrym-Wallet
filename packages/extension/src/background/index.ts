@@ -35,6 +35,7 @@ import {
   createNymStatusHandler,
 } from './handlers/nymHandlers.js';
 import { isNymOffscreenChannelMessage } from '../nym-offscreen/protocol.js';
+import { isNymRuntimeStatusMessage } from '../shared/nymRuntimeStatus.js';
 import {
   isSppHostBridgeMessage,
   parseSppHostLifecycleEvent,
@@ -42,6 +43,8 @@ import {
   parseSppHostSignRequest,
 } from '../shared/sppHostBridge.js';
 import { createSppPrivatePaymentHandler } from './handlers/sppPrivatePaymentHandler.js';
+import { createSppKeyDerivationApprovalHandler } from './handlers/sppKeyDerivationApprovalHandler.js';
+import { createSppStorageUnlockApprovalHandler } from './handlers/sppStorageUnlockApprovalHandler.js';
 import {
   createSppAccountSnapshotHandler,
   createSppAccountSyncHandler,
@@ -49,6 +52,9 @@ import {
   createSppRegisterPublicKeysHandler,
 } from './handlers/sppAccountHandlers.js';
 import { noteSppHostLifecycle } from './spp/sppPrivatePoolRegistry.js';
+import { installSppPrepareGenerationGuard } from './spp/sppAutoPrepare.js';
+import { installChromeUnresolvedSubmissionStore } from './spp/sppSubmissionReconcile.js';
+import { isSppHostDocumentSender } from './trustedWalletOrigin.js';
 import {
   handleSppHostNymFetchRequest,
   handleSppHostSignRequest,
@@ -72,6 +78,7 @@ import {
   createGetAccountsHandler, 
   createGetActiveAccountHandler,
   createGetStellarBalanceHandler,
+  createGetStellarRecentPaymentsHandler,
   createFundStellarTestnetHandler,
   createAddAccountHandler,
   createSetActiveAccountHandler,
@@ -89,6 +96,8 @@ import {
 } from './handlers/transactionHandlers.js';
 
 function initBackgroundSynchronous() {
+  installChromeUnresolvedSubmissionStore();
+  installSppPrepareGenerationGuard();
   // 1. Initialize Chrome Adapters synchronously
   const alarmService = new ChromeAlarmService((lock) => stateCoordinator.runLockOperation(lock));
   const persistentStorage = new ChromePersistentStorage(browser.storage.local);
@@ -106,9 +115,11 @@ function initBackgroundSynchronous() {
   (globalThis as any).nymRuntime = nymRuntime;
 
   // Stellar Horizon/Friendbot → FailClosedTransportRouter via MixFetch-aware adapter.
-  // Logical Horizon base = SDF testnet. Default mode=direct (Horizon without Nym).
+  // Logical Horizon base = SDF testnet. Wallet fetch waits for the persisted privacy
+  // choice and does not use clearnet while that read is in flight, when no explicit
+  // Direct choice is stored, or while Nym is selected and MixFetch is down.
   // In mode=nym, getStellarFetch() remaps to the validated MixFetch-effective base
-  // (see stellarHorizonNymConfig.ts) with fail-closed routing (no silent clearnet).
+  // (see stellarHorizonNymConfig.ts).
   const stellarFetch = nymRuntime.getStellarFetch();
   const stellarReadClient = new StellarReadClient(
     STELLAR_TESTNET_HORIZON_URL,
@@ -150,6 +161,7 @@ function initBackgroundSynchronous() {
   router.registerHandler('GET_ACCOUNTS', createGetAccountsHandler(accountService));
   router.registerHandler('GET_ACTIVE_ACCOUNT', createGetActiveAccountHandler(accountService));
   router.registerHandler('GET_STELLAR_BALANCE', createGetStellarBalanceHandler(stellarReadClient));
+  router.registerHandler('GET_STELLAR_RECENT_PAYMENTS', createGetStellarRecentPaymentsHandler(stellarReadClient));
   router.registerHandler('FUND_STELLAR_TESTNET_ACCOUNT', createFundStellarTestnetHandler(stellarReadClient));
   router.registerHandler('ADD_ACCOUNT', createAddAccountHandler(keyManager));
   router.registerHandler('SET_ACTIVE_ACCOUNT', createSetActiveAccountHandler(accountService));
@@ -186,10 +198,12 @@ function initBackgroundSynchronous() {
   router.registerHandler('SEND_STELLAR_TRANSFER', createSendStellarTransferHandler(stellarTxClient, stellarTransferConfirmationTracker) as any);
   router.registerHandler('CONFIRM_STELLAR_TRANSFER', createConfirmStellarTransferHandler(stellarTransferConfirmationTracker) as any);
 
-  router.registerHandler('SPP_PRIVATE_PAYMENT', createSppPrivatePaymentHandler());
+  router.registerHandler('SPP_PRIVATE_PAYMENT', createSppPrivatePaymentHandler({ keyManager }));
+  router.registerHandler('SPP_AUTHORIZE_KEY_DERIVATION', createSppKeyDerivationApprovalHandler({ keyManager }));
+  router.registerHandler('SPP_AUTHORIZE_STORAGE_UNLOCK', createSppStorageUnlockApprovalHandler({ keyManager }));
   router.registerHandler('SPP_ACCOUNT_SNAPSHOT', createSppAccountSnapshotHandler());
   router.registerHandler('SPP_RECIPIENT_LOOKUP', createSppRecipientLookupHandler());
-  router.registerHandler('SPP_REGISTER_PUBLIC_KEYS', createSppRegisterPublicKeysHandler());
+  router.registerHandler('SPP_REGISTER_PUBLIC_KEYS', createSppRegisterPublicKeysHandler({ keyManager }));
   router.registerHandler('SPP_ACCOUNT_SYNC', createSppAccountSyncHandler());
   router.registerHandler('NYM_CONNECT', createNymConnectHandler());
   router.registerHandler('NYM_DISCONNECT', createNymDisconnectHandler());
@@ -251,9 +265,37 @@ function initBackgroundSynchronous() {
     if (isNymOffscreenChannelMessage(message)) {
       return;
     }
+    // Status push for open views. Not a command and not a clearnet grant.
+    if (isNymRuntimeStatusMessage(message)) {
+      return;
+    }
     // spp-host ↔ SW bridge: lifecycle events update the registry; sign + Nym
     // fetch are answered here; execute requests are answered by the host page.
     if (isSppHostBridgeMessage(message)) {
+      if (!isSppHostDocumentSender(sender)) {
+        const requestId = message && typeof message === 'object' && 'id' in message
+          && typeof (message as { id?: unknown }).id === 'string'
+          ? (message as { id: string }).id
+          : 'UNKNOWN';
+        const requestType = message && typeof message === 'object' && 'type' in message
+          ? (message as { type?: unknown }).type
+          : undefined;
+        if (requestType === 'SPP_HOST_NYM_FETCH') {
+          return Promise.resolve({
+            channel: 'astrym-spp-host-bridge',
+            type: 'SPP_HOST_NYM_FETCH_RESULT',
+            id: requestId,
+            ok: false,
+            code: 'UNAUTHORIZED',
+            message: 'SPP host bridge messages are accepted only from the extension spp-host document.',
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          code: 'UNAUTHORIZED',
+          message: 'SPP host bridge messages are accepted only from the extension spp-host document.',
+        });
+      }
       const lifecycle = parseSppHostLifecycleEvent(message);
       if (lifecycle) {
         noteSppHostLifecycle({
@@ -264,6 +306,16 @@ function initBackgroundSynchronous() {
       }
       const signRequest = parseSppHostSignRequest(message);
       if (signRequest) {
+        if (!isSppHostDocumentSender(sender)) {
+          return Promise.resolve({
+            channel: signRequest.channel,
+            type: 'SPP_HOST_SIGN_RESULT',
+            id: signRequest.id,
+            ok: false,
+            code: 'UNAUTHORIZED',
+            message: 'SPP signatures are accepted only from the extension spp-host document.',
+          });
+        }
         return (async () => {
           try {
             await initPromise;
@@ -281,12 +333,12 @@ function initBackgroundSynchronous() {
             signer,
             keyManager,
             networkPassphrase: Networks.TESTNET,
-          });
+          }, sender);
         })();
       }
       const nymFetchRequest = parseSppHostNymFetchRequest(message);
       if (nymFetchRequest) {
-        return handleSppHostNymFetchRequest(nymFetchRequest);
+        return handleSppHostNymFetchRequest(nymFetchRequest, sender);
       }
       // Execute requests: do not claim; host page owns replies.
       return;

@@ -59,4 +59,37 @@ describe('NymTransportPanel', () => {
     expect(markup).toContain('data-nym-connected="false"');
     expect(markup).not.toMatch(/Ready \(Mixnet\)/);
   });
+
+  it('keeps only the 2-option privacy selector on the main card and moves Connect/Disconnect + diagnostics into the accordion', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(NymTransportPanel, {
+        snapshot: {
+          state: 'disconnected',
+          lastError: null,
+          connected: false,
+          implementation: 'mix-fetch-offscreen',
+          mode: 'direct',
+          documentReady: false,
+        },
+        onSetMode: () => undefined,
+        onConnect: () => undefined,
+        onDisconnect: () => undefined,
+        onStellarHorizonProbe: () => undefined,
+        advancedChildren: React.createElement('div', { 'data-testid': 'spp-slot' }, 'SPP'),
+      }),
+    );
+    expect(markup).toContain('Bloqueo automático de protección');
+    expect(markup).toContain('<details class="advanced-accordion" data-testid="nym-advanced-diagnostics">');
+    expect(markup).toContain('Opciones avanzadas y diagnóstico');
+    expect(markup).toContain('data-testid="nym-stellar-horizon-panel"');
+    expect(markup).toContain('data-testid="spp-slot"');
+
+    const [mainCard, advancedSection] = markup.split('data-testid="nym-advanced-diagnostics"');
+    expect(mainCard).toContain('data-testid="nym-mode-direct"');
+    expect(mainCard).toContain('data-testid="nym-mode-nym"');
+    expect(mainCard).not.toContain('data-testid="nym-connect"');
+    expect(mainCard).not.toContain('data-testid="nym-disconnect"');
+    expect(advancedSection).toContain('data-testid="nym-connect"');
+    expect(advancedSection).toContain('data-testid="nym-disconnect"');
+  });
 });

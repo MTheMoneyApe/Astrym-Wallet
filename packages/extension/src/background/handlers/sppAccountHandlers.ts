@@ -3,10 +3,26 @@
  * Proxies to spp-host over the bridge; never invents success.
  */
 
+import browser from 'webextension-polyfill';
+import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import {
+  bindSppRegistrationBeforeMint,
+  mintSppSignApproval,
+  revokeSppSignApprovals,
+  sppKeyDerivationMessage,
+  sppRegistrationDigest,
+} from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { isSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
+import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
+import { STELLAR_SOROBAN_TESTNET_RPC } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
+import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import type { ValidatedRequestPayload, ValidatedResponsePayload } from '../../shared/ipcTypes.js';
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
 import { getSppHostLifecycle } from '../spp/sppPrivatePoolRegistry.js';
 import { querySppHostAccount } from '../spp/sppHostAccountProxy.js';
+import { isTrustedWalletPageUrl } from '../trustedWalletOrigin.js';
+import { resolveActiveStellarAddress } from '../spp/sppBoundAccount.js';
+import { confirmationFromAllowlistedGetTransaction } from '../spp/sppSubmissionReconcile.js';
 
 function requireNymAndWritePool(): { nymMode: 'direct' | 'nym'; nymConnected: boolean } {
   const snap = getNymRuntimeController().getSnapshot();
@@ -27,8 +43,102 @@ function requireNymAndWritePool(): { nymMode: 'direct' | 'nym'; nymConnected: bo
   return { nymMode: snap.mode, nymConnected: snap.connected };
 }
 
+function requiredKeyManager(keyManager: KeyManager | undefined): KeyManager {
+  if (!keyManager) {
+    throw Object.assign(new Error('Registration signer is not configured'), { name: 'UNAUTHORIZED' });
+  }
+  return keyManager;
+}
+
 function mapHostFailure(result: { ok: false; code: string; message: string }): never {
   throw Object.assign(new Error(result.message), { name: result.code });
+}
+
+function digestHex(message: string): string {
+  const digest = sppRegistrationDigest(message);
+  let hex = '';
+  for (let i = 0; i < digest.length; i += 1) {
+    hex += digest[i]!.toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+/**
+ * Transport fields for a register request built from the Derivation v3 message.
+ * They are the digest of that public message, not note keys, proofs, or signatures.
+ */
+export function sppDerivationV3RegisterFields(kdfDomain: string): {
+  noteKeyHex: string;
+  encryptionKeyHex: string;
+  noteKeyProofHex: string;
+  encryptionKeySignatureHex: string;
+  ownerSignatureHex: string;
+} {
+  const commitment = digestHex(sppKeyDerivationMessage(kdfDomain));
+  const signatureSlot = commitment + commitment;
+  return {
+    noteKeyHex: commitment,
+    encryptionKeyHex: commitment,
+    noteKeyProofHex: commitment,
+    encryptionKeySignatureHex: signatureSlot,
+    ownerSignatureHex: signatureSlot,
+  };
+}
+
+function isSppDerivationV3Register(
+  payload: {
+    noteKeyHex: string;
+    encryptionKeyHex: string;
+    noteKeyProofHex: string;
+    encryptionKeySignatureHex: string;
+    ownerSignatureHex: string;
+  },
+  kdfDomain: string,
+): boolean {
+  const fields = sppDerivationV3RegisterFields(kdfDomain);
+  return payload.noteKeyHex.toLowerCase() === fields.noteKeyHex
+    && payload.encryptionKeyHex.toLowerCase() === fields.encryptionKeyHex
+    && payload.noteKeyProofHex.toLowerCase() === fields.noteKeyProofHex
+    && payload.encryptionKeySignatureHex.toLowerCase() === fields.encryptionKeySignatureHex
+    && payload.ownerSignatureHex.toLowerCase() === fields.ownerSignatureHex;
+}
+
+const HELD_REGISTRATION_NOTE = 'Registro retenido: aún no hay firma Registration v1';
+
+function heldAtSign(): never {
+  throw Object.assign(new Error(HELD_REGISTRATION_NOTE), {
+    name: 'UNAUTHORIZED',
+    code: 'BROADCAST_AWAITING_APPROVAL',
+  });
+}
+
+/**
+ * Bind the Derivation v3 registration before mint. Broadcast OFF makes bind
+ * throw before an intent exists. This never mints and never signs.
+ */
+function refuseSppDerivationV3RegisterAtSign(
+  address: string,
+  registryContractId: string,
+  kdfDomain: string,
+): never {
+  const fields = sppDerivationV3RegisterFields(kdfDomain);
+  if (!isSppTestnetBroadcastAuthorized()) {
+    revokeSppSignApprovals(address);
+    try {
+      bindSppRegistrationBeforeMint({
+        account: address,
+        registryContractId,
+        ...fields,
+        maxFeeStroops: maxFeeStroopsForOperation('register_public_keys'),
+      });
+      revokeSppSignApprovals(address);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : '';
+      if (!message.includes('SPP_BROADCAST_AWAITING_APPROVAL')) throw cause;
+    }
+    heldAtSign();
+  }
+  heldAtSign();
 }
 
 export function createSppAccountSnapshotHandler() {
@@ -73,18 +183,80 @@ export function createSppRecipientLookupHandler() {
   };
 }
 
-export function createSppRegisterPublicKeysHandler() {
+export function createSppRegisterPublicKeysHandler(deps: {
+  keyManager?: KeyManager;
+  resolveAccount?: () => Promise<string>;
+}) {
   return async (
-    _payload: ValidatedRequestPayload<'SPP_REGISTER_PUBLIC_KEYS'>,
+    payload: ValidatedRequestPayload<'SPP_REGISTER_PUBLIC_KEYS'>,
+    sender?: browser.Runtime.MessageSender,
   ): Promise<ValidatedResponsePayload<'SPP_REGISTER_PUBLIC_KEYS'>> => {
-    const nym = requireNymAndWritePool();
-    const result = await querySppHostAccount({ ...nym, action: 'register_public_keys' });
-    if (!result.ok) mapHostFailure(result);
-    return {
-      txHash: result.registerTxHash ?? null,
-      rpcRoutedViaNym: true as const,
-      confirmation: result.registerTxHash ? ('confirmed' as const) : ('unknown' as const),
-    };
+    if (payload.acknowledgeBroadcast !== true) {
+      throw Object.assign(
+        new Error('Registration requires an explicit broadcast acknowledgement'),
+        { name: 'UNAUTHORIZED' },
+      );
+    }
+    if (!sender || sender.id !== browser.runtime.id || !isTrustedWalletPageUrl(sender.url)) {
+      throw Object.assign(
+        new Error('Registration must originate from trusted wallet UI'),
+        { name: 'UNAUTHORIZED' },
+      );
+    }
+    const address = deps.resolveAccount
+      ? await deps.resolveAccount()
+      : (await resolveActiveStellarAddress(requiredKeyManager(deps.keyManager))).address;
+    const config = getNethermindPublicTestnetContractConfig();
+    if (isSppDerivationV3Register(payload, config.kdf_domain)) {
+      refuseSppDerivationV3RegisterAtSign(address, config.public_key_registry, config.kdf_domain);
+    }
+    if (!isSppTestnetBroadcastAuthorized()) {
+      revokeSppSignApprovals(address);
+      throw Object.assign(
+        new Error('SPP_BROADCAST_AWAITING_APPROVAL: registration is disabled. No approval was minted.'),
+        { name: 'UNAUTHORIZED', code: 'BROADCAST_AWAITING_APPROVAL' },
+      );
+    }
+    let minted = false;
+    try {
+      const intent = bindSppRegistrationBeforeMint({
+        account: address,
+        registryContractId: config.public_key_registry,
+        noteKeyHex: payload.noteKeyHex,
+        encryptionKeyHex: payload.encryptionKeyHex,
+        noteKeyProofHex: payload.noteKeyProofHex,
+        encryptionKeySignatureHex: payload.encryptionKeySignatureHex,
+        ownerSignatureHex: payload.ownerSignatureHex,
+        maxFeeStroops: maxFeeStroopsForOperation('register_public_keys'),
+      });
+      mintSppSignApproval(intent);
+      minted = true;
+      const nym = requireNymAndWritePool();
+      const result = await querySppHostAccount({ ...nym, action: 'register_public_keys' });
+      if (!result.ok) mapHostFailure(result);
+      let confirmation: 'confirmed' | 'submitted' | 'failed' | 'unknown' = result.registerTxHash
+        ? 'submitted'
+        : 'unknown';
+      if (result.registerTxHash) {
+        try {
+          confirmation = await confirmationFromAllowlistedGetTransaction(
+            result.registerTxHash,
+            getNymRuntimeController().getStellarFetch(),
+            STELLAR_SOROBAN_TESTNET_RPC,
+          );
+        } catch {
+          confirmation = 'submitted';
+        }
+      }
+      return {
+        txHash: result.registerTxHash ?? null,
+        rpcRoutedViaNym: true as const,
+        confirmation,
+      };
+    } catch (cause) {
+      if (minted) revokeSppSignApprovals(address);
+      throw cause;
+    }
   };
 }
 

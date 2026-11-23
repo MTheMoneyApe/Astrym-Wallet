@@ -65,6 +65,7 @@ export const SppHostExecuteSuccessSchema = z.object({
   ok: z.literal(true),
   operation: z.enum(['deposit', 'transfer', 'withdraw']),
   txHash: z.string().nullable(),
+  txHashes: z.array(z.string().min(1)).optional(),
   rpcRoutedViaNym: z.literal(true),
 });
 
@@ -80,10 +81,12 @@ export const SppHostExecuteFailureSchema = z.object({
     'SESSION_NOT_READY',
     'RPC_FAILED',
     'EXECUTION_FAILED',
+    'SUBMISSION_UNKNOWN',
     'HOST_UNAVAILABLE',
     'UNAUTHORIZED',
   ]),
   message: z.string().min(1).max(500),
+  txHashes: z.array(z.string().min(1)).optional(),
 });
 
 export const SppHostExecuteResultSchema = z.union([
@@ -103,6 +106,9 @@ export const SppHostSignRequestSchema = z.object({
     input: z.string().min(1).max(200_000),
     address: z.string().min(56).max(56).optional(),
     networkPassphrase: z.string().min(1).max(200).optional(),
+    prepareGeneration: z.number().int().positive(),
+    authorization: z.enum(['standard', 'storage_unlock']).optional(),
+    storageUnlockApprovalToken: z.string().uuid().optional(),
   }),
 });
 
@@ -175,7 +181,7 @@ export const SppHostNymFetchFailureSchema = z.object({
   type: z.literal('SPP_HOST_NYM_FETCH_RESULT'),
   id: z.string().min(1),
   ok: z.literal(false),
-  code: z.enum(['NYM_REQUIRED', 'ORIGIN_BLOCKED', 'RPC_FAILED', 'INVALID_REQUEST']),
+  code: z.enum(['NYM_REQUIRED', 'ORIGIN_BLOCKED', 'RPC_FAILED', 'INVALID_REQUEST', 'UNAUTHORIZED']),
   message: z.string().min(1).max(500),
 });
 
