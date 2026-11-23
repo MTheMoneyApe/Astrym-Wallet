@@ -28,10 +28,19 @@ import {
 import {
   mintSppSignApproval,
   resetSppSignApprovalsForTests,
-  setSppPaymentIdentityChecksForTests,
   sppSignApprovalCount,
   type SppSignIntent,
 } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { setSppPaymentIdentityChecksForTests } from '@solanym/wallet-core/tests/stellar/spp/seams/sppPaymentIdentityChecks.js';
+
+// vi.mock is hoisted above imports. The dynamic import loads the test seam
+// without a static import cycle while sppPaymentIdentityChecks.js is mocked.
+vi.mock('@solanym/wallet-core/src/stellar/spp/sppPaymentIdentityChecks.js', async () => {
+  const seam = await import('@solanym/wallet-core/tests/stellar/spp/seams/sppPaymentIdentityChecks.js');
+  return {
+    sppPaymentIdentityChecksEnabled: () => seam.sppPaymentIdentityChecks.enabled,
+  };
+});
 
 vi.mock('webextension-polyfill', () => ({
   default: {
