@@ -2,7 +2,7 @@
  * Attack cases for the SPP sign gate. No network, no secrets.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   Account,
   Address,
@@ -27,7 +27,6 @@ import {
   bindSppRegistrationBeforeMint,
   mintSppSignApproval,
   resetSppSignApprovalsForTests,
-  setSppPaymentIdentityChecksForTests,
   signDigestWithSppGate,
   sppSignApprovalCount,
   sppKeyDerivationMessage,
@@ -46,6 +45,16 @@ import {
   resetSppBroadcastGateForTests,
   setSppTestnetBroadcastAuthorized,
 } from '../../../src/stellar/spp/sppBroadcastGate.js';
+import { setSppPaymentIdentityChecksForTests } from './seams/sppPaymentIdentityChecks.js';
+
+// vi.mock is hoisted above imports. The dynamic import loads the test seam
+// without a static import cycle while sppPaymentIdentityChecks.js is mocked.
+vi.mock('../../../src/stellar/spp/sppPaymentIdentityChecks.js', async () => {
+  const seam = await import('./seams/sppPaymentIdentityChecks.js');
+  return {
+    sppPaymentIdentityChecksEnabled: () => seam.sppPaymentIdentityChecks.enabled,
+  };
+});
 
 const ACCOUNT = 'GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6';
 const OTHER = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
@@ -610,6 +619,9 @@ describe('SPP sign gate attack cases', () => {
     resetSppBroadcastGateForTests();
     setSppTestnetBroadcastAuthorized(true);
     setSppPaymentIdentityChecksForTests(true);
+  });
+  afterEach(() => {
+    setSppPaymentIdentityChecksForTests(false);
   });
 
   it('binds Registration v1 before mint and refuses it while the gate is off', () => {

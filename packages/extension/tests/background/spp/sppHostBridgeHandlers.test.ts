@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Networks } from '@stellar/stellar-sdk';
 import {
   isSppTestnetBroadcastAuthorized,
@@ -9,10 +9,19 @@ import { STELLAR_SOROBAN_TESTNET_RPC } from '@solanym/wallet-core/src/stellar/sp
 import {
   mintSppSignApproval,
   resetSppSignApprovalsForTests,
-  setSppPaymentIdentityChecksForTests,
   sppSignApprovalCount,
   type SppSignIntent,
 } from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { setSppPaymentIdentityChecksForTests } from '../../../../wallet-core/tests/stellar/spp/seams/sppPaymentIdentityChecks.js';
+
+// vi.mock is hoisted above imports. The dynamic import loads the test seam
+// without a static import cycle while sppPaymentIdentityChecks.js is mocked.
+vi.mock('@solanym/wallet-core/src/stellar/spp/sppPaymentIdentityChecks.js', async () => {
+  const seam = await import('../../../../wallet-core/tests/stellar/spp/seams/sppPaymentIdentityChecks.js');
+  return {
+    sppPaymentIdentityChecksEnabled: () => seam.sppPaymentIdentityChecks.enabled,
+  };
+});
 
 vi.mock('webextension-polyfill', () => ({
   default: {
@@ -82,6 +91,9 @@ describe('handleSppHostNymFetchRequest', () => {
     resetSppSignApprovalsForTests();
     setSppPaymentIdentityChecksForTests(true);
     setSppTestnetBroadcastAuthorized(false);
+  });
+  afterEach(() => {
+    setSppPaymentIdentityChecksForTests(false);
   });
 
   it('proxies same-origin Soroban requests when Nym is connected', async () => {
