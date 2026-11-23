@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Reproduce the SPP web runtime from Nethermind source commit e6ce95c2.
 # Does not use the npm stellar-private-payments@0.2.1 tarball.
+# GitHub Actions compiles with the manifest-approved Ubuntu toolchain.
+# Every other build installs vendor/spp-canonical/<wasm pin> and fails closed
+# when that artifact is missing or its sha256 pins do not match. It does not compile.
 # jq 1.7.1 is the official release binary, checked by SHA-256, on this build's PATH only.
 # rustup is installed from the pinned 1.29.3 installer when absent.
 # A toolchain already present on a developer machine is not assumed.
@@ -36,6 +39,68 @@ MANIFEST="$REPO_ROOT/packages/wallet-core/src/stellar/spp/nethermind/spp-runtime
 
 log() { printf '%s\n' "$*"; }
 die() { printf 'prepare-spp-runtime: %s\n' "$*" >&2; exit 1; }
+
+canonical_wasm_pin() {
+  python3 - "$MANIFEST" <<'PY'
+import json, sys
+from pathlib import Path
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+pin = manifest["files"]["dist/stellar_private_payments_web_bg.wasm"]["sha256"]
+if len(pin) != 64 or any(ch not in "0123456789abcdef" for ch in pin):
+    raise SystemExit("wasm pin is not a lowercase sha256")
+print(pin)
+PY
+}
+
+require_canonical_spp_artifact() {
+  local pin artifact
+  pin="$(canonical_wasm_pin)" || die "wasm pin is not a sha256; refusing to compile"
+  artifact="$REPO_ROOT/vendor/spp-canonical/$pin"
+  CANONICAL_ARTIFACT="$artifact"
+  if [ ! -d "$artifact" ]; then
+    die "canonical SPP artifact is missing: $artifact; refusing to compile"
+  fi
+  node "$REPO_ROOT/scripts/verify-spp-canonical-artifact.mjs" \
+    --artifact "$artifact" \
+    --manifest "$MANIFEST" \
+    || die "canonical SPP artifact failed pin verification; refusing to compile"
+}
+
+install_pinned_canonical_artifact() {
+  require_canonical_spp_artifact
+  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$SRC/target}"
+  mkdir -p "$BUILD_ROOT/date-bin" "$SRC/sdk/web"
+  SOURCE_DATE_EPOCH="$(git -C "$SRC" log -1 --format=%ct)"
+  export SOURCE_DATE_EPOCH
+  cat > "$BUILD_ROOT/date-bin/date" <<'EOF'
+#!/bin/sh
+# Upstream stamps NOTICE.txt with `date -u +%Y-%m-%dT%H:%M:%SZ`.
+# Honor SOURCE_DATE_EPOCH so two machines emit the same notice.
+if [ -n "${SOURCE_DATE_EPOCH:-}" ] && [ "$1" = "-u" ] && [ "$2" = "+%Y-%m-%dT%H:%M:%SZ" ]; then
+  exec /usr/bin/date -u -d "@${SOURCE_DATE_EPOCH}" "+%Y-%m-%dT%H:%M:%SZ"
+fi
+exec /usr/bin/date "$@"
+EOF
+  chmod 755 "$BUILD_ROOT/date-bin/date"
+  python3 - "$CANONICAL_ARTIFACT" "$SRC/sdk/web" <<'PY'
+import json, shutil, sys
+from pathlib import Path
+artifact, web = Path(sys.argv[1]), Path(sys.argv[2])
+index = json.loads((artifact / "canonical-artifact.json").read_text(encoding="utf-8"))
+for rel, name in index["files"].items():
+    if not isinstance(name, str) or "/" in name or "\\" in name or ".." in name or name in ("", ".", ".."):
+        raise SystemExit(f"invalid canonical artifact name for {rel}")
+    if rel.startswith("/") or ".." in rel.split("/"):
+        raise SystemExit(f"invalid canonical artifact path {rel}")
+    dest = web.joinpath(*rel.split("/"))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(artifact / name, dest)
+print(f"installed {len(index['files'])} canonical files into {web}")
+PY
+  log "COMMAND: stage circuits from the pinned release without compiling wasm"
+  ( cd "$SRC" && PATH="$BUILD_ROOT/date-bin:$PATH" bash sdk/web/scripts/stage-circuits-dist.sh )
+  log "prepare-spp-runtime: installed canonical artifact $(basename "$CANONICAL_ARTIFACT") without compiling wasm"
+}
 
 command -v git >/dev/null 2>&1 || die "git is required"
 command -v curl >/dev/null 2>&1 || die "curl is required"
@@ -188,7 +253,17 @@ ensure_wasm_c_compiler() {
   log "TOOL wasm-target-ranlib $llvm_ranlib ($ranlib_version)"
   log "TOOL wasm-target-clang-resource $("$candidate" -print-resource-dir)"
 }
-ensure_wasm_c_compiler
+# Vercel and other non-GHA images must not recompile wasm. The Ubuntu
+# workflow is the only path allowed to compile, and only with the
+# manifest-approved Clang and Cargo homes.
+CONSUME_CANONICAL_ARTIFACT=0
+if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
+  CONSUME_CANONICAL_ARTIFACT=1
+  export SPP_CONSUME_CANONICAL_ARTIFACT=1
+  require_canonical_spp_artifact
+else
+  ensure_wasm_c_compiler
+fi
 
 if [ "$SPP_CANONICAL_GHA_PROFILE" = "1" ]; then
   # Match the exact CARGO_HOME/RUSTUP_HOME and path mappings from the approved
@@ -212,6 +287,7 @@ curl_https() {
   curl --proto '=https' -fsSL -o "$dest.partial" "$url"
 }
 
+if [ "$CONSUME_CANONICAL_ARTIFACT" != "1" ]; then
 if ! command -v rustup >/dev/null 2>&1; then
   triple=""
   expect=""
@@ -261,6 +337,7 @@ if [ "$(bindgen_version)" != "$WASM_BINDGEN_VERSION" ]; then
   cargo "+$RUST_CHANNEL" install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
 fi
 [ "$(bindgen_version)" = "$WASM_BINDGEN_VERSION" ] || die "wasm-bindgen $(bindgen_version) is not $WASM_BINDGEN_VERSION"
+fi
 
 mkdir -p "$BUILD_ROOT"
 if [ ! -d "$SRC/.git" ]; then
@@ -393,6 +470,7 @@ if [ -n "$circomlib_dirty" ]; then
   die "circomlib worktree is not clean; refusing to build or reuse it"
 fi
 
+if [ "$CONSUME_CANONICAL_ARTIFACT" != "1" ]; then
 # CARGO_ENCODED_RUSTFLAGS replaces .cargo/config.toml rustflags entirely.
 # Keep the upstream wasm32 memory link-args and append the path remaps.
 if [ -n "${RUSTFLAGS:-}${CARGO_ENCODED_RUSTFLAGS:-}" ]; then
@@ -439,7 +517,10 @@ required = [
 missing = [item for item in required if item not in upstream]
 if missing:
     raise SystemExit("upstream wasm32 rustflags lost: " + ", ".join(missing))
-canonical = os.environ.get("SPP_CANONICAL_GHA_PROFILE") == "1"
+canonical = (
+    os.environ.get("SPP_CANONICAL_GHA_PROFILE") == "1"
+    or os.environ.get("SPP_CONSUME_CANONICAL_ARTIFACT") == "1"
+)
 tokens = {
     "src": "/spp-src",
     "cargo": "/cargo",
@@ -968,6 +1049,10 @@ PY
 else
   log "COMMAND: leave approved Ubuntu sysroot bytes unchanged"
 fi
+fi
+if [ "$CONSUME_CANONICAL_ARTIFACT" = "1" ]; then
+  install_pinned_canonical_artifact
+fi
 
 log "COMMAND: scan shipped files for host paths and wasm memory limits"
 python3 - "$SRC/sdk/web" "$SRC" "$CARGO_HOME" "$RUSTUP_HOME" "$BUILD_ROOT" \
@@ -1105,7 +1190,10 @@ web, manifest_path, commit = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 manifest = json.loads(manifest_path.read_text())
 if manifest["sourceCommit"] != commit:
     raise SystemExit("manifest sourceCommit drifted")
-canonical = os.environ.get("SPP_CANONICAL_GHA_PROFILE") == "1"
+canonical = (
+    os.environ.get("SPP_CANONICAL_GHA_PROFILE") == "1"
+    or os.environ.get("SPP_CONSUME_CANONICAL_ARTIFACT") == "1"
+)
 # The approved Ubuntu build emits the versioned upstream bytes directly.
 # Non-canonical images reverse only their explicitly recorded path normalizations.
 reverse_replacements = () if canonical else (
