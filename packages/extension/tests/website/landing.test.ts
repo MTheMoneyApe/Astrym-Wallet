@@ -37,7 +37,7 @@ describe('Astrym landing page', () => {
     expect(i18n).toContain('does not claim cryptographic anonymity');
   });
 
-  it('uses the Astrym palette and self-hosted fonts', () => {
+  it('uses the Astrym palette and local font fallbacks', () => {
     expect(css).toContain('#191a1c');
     expect(css).toContain('#141416');
     expect(css).toContain('#3ce894');
