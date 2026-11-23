@@ -9,6 +9,7 @@ import type {
 } from '@solanym/wallet-core/src/nym/NymMixFetchBridge.js';
 import {
   NYM_OFFSCREEN_CHANNEL,
+  NYM_OFFSCREEN_LIFELINE,
   NYM_OFFSCREEN_TARGET,
   isNymOffscreenChannelMessage,
   type NymOffscreenFetchResult,
@@ -264,6 +265,25 @@ export class OffscreenMixFetchBridge implements NymMixFetchBridge {
       /* IPC loss → still mark disconnected */
     }
     await this._docs.closeDocument();
+  }
+
+  /**
+   * Fires when the offscreen document's lifeline port closes.
+   * That is the prompt signal that MixFetch is gone; it does not open clearnet.
+   */
+  watchConnection(onLost: () => void): () => void {
+    if (typeof chrome === 'undefined' || !chrome.runtime?.onConnect) return () => {};
+    const listener = (port: chrome.runtime.Port) => {
+      if (port.name !== NYM_OFFSCREEN_LIFELINE) return;
+      const onDisconnect = () => {
+        onLost();
+      };
+      port.onDisconnect.addListener(onDisconnect);
+    };
+    chrome.runtime.onConnect.addListener(listener);
+    return () => {
+      chrome.runtime.onConnect.removeListener(listener);
+    };
   }
 
   async queryStatus(): Promise<NymOffscreenStatusPayload | null> {

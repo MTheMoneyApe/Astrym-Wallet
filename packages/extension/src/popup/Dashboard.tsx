@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { toDataURL } from 'qrcode';
 import { sendIpcMessage } from './ipc.js';
 import { Send } from './Send.js';
 import { SppStatusPanel } from './SppStatusPanel.js';
@@ -35,6 +36,18 @@ import type {
   NymStellarHorizonUiResult,
   NymUiSnapshot,
 } from './NymTransportPanel.js';
+import { PrivacyModeIndicator } from './privacyIndicator.js';
+import { NYM_PRIVACY_PREFERENCE_STORAGE_KEY } from '../shared/nymPrivacyPreference.js';
+import {
+  TX_TRANSPORT_HISTORY_STORAGE_KEY,
+  parseTxTransportHistory,
+  readTxTransportHistory,
+  recordTxTransport,
+  stellarExpertTxUrl,
+  type TxTransportHistoryMap,
+  type TxTransportKind,
+} from '../shared/txTransportHistory.js';
+import { bindNymRuntimeStatus } from '../shared/nymRuntimeStatus.js';
 import { beginGatewayPermissionRequestFromUserGesture } from './nymPermissionGesture.js';
 import { NYM_LIVE_SMOKE_EXECUTION_AUTHORIZED } from '../nym-offscreen/liveSmokeAuth.js';
 import { NYM_VERIFIED_GATEWAY } from '../nym-offscreen/verifiedGateway.js';
@@ -46,6 +59,10 @@ function coerceNymUiSnapshot(snap: {
   implementation: string;
   selfAddress?: string | null | undefined;
   mode: NymTransportMode;
+  preferenceHydrated?: boolean;
+  egressBlocked?: boolean;
+  privacyPreference?: 'direct' | 'nym' | null;
+  preferenceDurable?: boolean;
   documentReady: boolean;
   diagnosticCode?: string | undefined;
   diagnosticStage?: string | null | undefined;
@@ -64,6 +81,10 @@ function coerceNymUiSnapshot(snap: {
     mode: snap.mode,
     documentReady: snap.documentReady,
   };
+  if (snap.preferenceHydrated !== undefined) out.preferenceHydrated = snap.preferenceHydrated;
+  if (snap.egressBlocked !== undefined) out.egressBlocked = snap.egressBlocked;
+  if (snap.privacyPreference !== undefined) out.privacyPreference = snap.privacyPreference;
+  if (snap.preferenceDurable !== undefined) out.preferenceDurable = snap.preferenceDurable;
   if (snap.selfAddress !== undefined) out.selfAddress = snap.selfAddress;
   if (snap.diagnosticCode !== undefined) out.diagnosticCode = snap.diagnosticCode;
   if (snap.diagnosticStage !== undefined) out.diagnosticStage = snap.diagnosticStage;
@@ -157,7 +178,17 @@ export async function copyPublicAddress(
   return '¡Dirección copiada!';
 }
 
-function CopyAddressButton({ address, label, menuItem = false }: { address: string; label: string; menuItem?: boolean }) {
+function CopyAddressButton({
+  address,
+  label,
+  menuItem = false,
+  compact = false,
+}: {
+  address: string;
+  label: string;
+  menuItem?: boolean;
+  compact?: boolean;
+}) {
   const [copyStatus, setCopyStatus] = useState('');
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -175,6 +206,27 @@ function CopyAddressButton({ address, label, menuItem = false }: { address: stri
     if (statusTimer.current !== null) clearTimeout(statusTimer.current);
     statusTimer.current = setTimeout(() => setCopyStatus(''), 2200);
   };
+
+  if (compact) {
+    return (
+      <div style={{ minWidth: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <button
+          type="button"
+          role={menuItem ? 'menuitem' : undefined}
+          onClick={handleCopy}
+          aria-label={`Copy full public address for ${label}`}
+          title={copyStatus || 'Copy full public address'}
+          className="account-copy-inline"
+        >
+          <span>{copyStatus === '¡Dirección copiada!' ? 'Copiada ✓' : formatPublicAddress(address)}</span>
+          <span aria-hidden="true" style={{ position: 'relative', flex: '0 0 12px', width: 12, height: 12 }}>
+            <span style={{ position: 'absolute', top: 0, left: 3, width: 7, height: 8, border: '1px solid currentColor', borderRadius: 1.5 }} />
+            <span style={{ position: 'absolute', top: 3, left: 0, width: 7, height: 8, border: '1px solid currentColor', borderRadius: 1.5, background: 'var(--bg-color)' }} />
+          </span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minWidth: 0 }}>
@@ -336,14 +388,19 @@ export function AccountMenu({
           aria-busy={loading || busy}
         >
           {loading ? (
-            <p className="text-secondary" style={{ margin: 0, padding: '10px 8px', fontSize: '0.82rem' }}>Loading accounts...</p>
+            <p className="text-secondary" style={{ margin: 0, padding: '8px 6px', fontSize: '0.8rem' }}>Loading accounts...</p>
           ) : accounts.length === 0 ? (
-            <p className="text-secondary" style={{ margin: 0, padding: '10px 8px', fontSize: '0.82rem' }}>No accounts yet.</p>
+            <p className="text-secondary" style={{ margin: 0, padding: '8px 6px', fontSize: '0.8rem' }}>No accounts yet.</p>
           ) : accounts.map((accountItem) => {
             const isActive = activeIndex === accountItem.index;
             const isEditing = editingIndex === accountItem.index;
             return (
-              <div key={accountItem.index} role="group" aria-label={accountItem.label} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: 4, borderRadius: 8, background: isActive ? 'rgba(143,232,208,0.08)' : 'transparent' }}>
+              <div
+                key={accountItem.index}
+                role="group"
+                aria-label={accountItem.label}
+                className={`account-menu-row ${isActive ? 'account-menu-row--active' : ''}`}
+              >
                 {isEditing ? (
                   <form onSubmit={handleRename} style={{ display: 'flex', gap: 6, flex: 1, minWidth: 0 }}>
                     <input
@@ -353,33 +410,35 @@ export function AccountMenu({
                       maxLength={40}
                       onChange={(event) => setEditingLabel(event.target.value)}
                       disabled={actionsDisabled}
-                      style={{ minWidth: 0, flex: 1, padding: '7px 8px', border: '1px solid var(--border-dark)', borderRadius: 6, background: 'var(--bg-color)', color: 'var(--text-main)' }}
+                      style={{ minWidth: 0, flex: 1, padding: '5px 8px', border: '1px solid var(--border-dark)', borderRadius: 6, background: 'var(--bg-color)', color: 'var(--text-main)', fontSize: '0.8rem' }}
                     />
-                    <button type="submit" className="btn-outline" disabled={actionsDisabled || !editingLabel.trim()} aria-label={`Save name for ${accountItem.label}`}>Save</button>
-                    <button type="button" className="btn-outline" disabled={actionsDisabled} onClick={() => setEditingIndex(null)} aria-label="Cancel rename">Cancel</button>
+                    <button type="submit" className="btn-outline" disabled={actionsDisabled || !editingLabel.trim()} aria-label={`Save name for ${accountItem.label}`} style={{ padding: '4px 8px', fontSize: '0.72rem' }}>Save</button>
+                    <button type="button" className="btn-outline" disabled={actionsDisabled} onClick={() => setEditingIndex(null)} aria-label="Cancel rename" style={{ padding: '4px 8px', fontSize: '0.72rem' }}>Cancel</button>
                   </form>
                 ) : (
                   <>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={async () => {
-                          await selectMenuAccount(accountItem.index, onSelect, onClose, () => triggerRef.current?.focus());
-                        }}
-                        disabled={actionsDisabled}
-                        aria-current={isActive ? 'true' : undefined}
-                        aria-label={`${isActive ? 'Active account' : 'Select account'}: ${accountItem.label}`}
-                        style={{ display: 'flex', alignItems: 'center', gap: 9, flex: 1, minWidth: 0, padding: '8px 7px', border: 0, borderRadius: 6, background: 'transparent', color: 'var(--text-main)', textAlign: 'left', cursor: busy ? 'wait' : 'pointer' }}
-                      >
-                        <span aria-hidden="true" style={{ display: 'grid', placeItems: 'center', flex: '0 0 28px', width: 28, height: 28, borderRadius: '50%', border: `1px solid ${isActive ? 'var(--accent-color)' : 'var(--border-dark)'}`, color: isActive ? 'var(--accent-color)' : 'var(--text-sec)', fontSize: '0.75rem', fontWeight: 700 }}>
-                          {accountItem.label.trim().slice(0, 1).toUpperCase() || '?'}
-                        </span>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1, fontSize: '0.84rem', fontWeight: 600 }}>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{accountItem.label}</span>
-                          {isActive && <span style={{ flex: '0 0 auto', color: 'var(--accent-color)', fontSize: '0.68rem' }}>Active</span>}
-                        </span>
-                      </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="account-menu-row__select"
+                      onClick={async () => {
+                        await selectMenuAccount(accountItem.index, onSelect, onClose, () => triggerRef.current?.focus());
+                      }}
+                      disabled={actionsDisabled}
+                      aria-current={isActive ? 'true' : undefined}
+                      aria-label={`${isActive ? 'Active account' : 'Select account'}: ${accountItem.label}`}
+                      style={{ cursor: busy ? 'wait' : 'pointer' }}
+                    >
+                      <span aria-hidden="true" style={{ display: 'grid', placeItems: 'center', flex: '0 0 22px', width: 22, height: 22, borderRadius: '50%', border: `1px solid ${isActive ? 'var(--accent-color)' : 'var(--border-dark)'}`, color: isActive ? 'var(--accent-color)' : 'var(--text-sec)', fontSize: '0.7rem', fontWeight: 700 }}>
+                        {accountItem.label.trim().slice(0, 1).toUpperCase() || '?'}
+                      </span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flex: 1, fontSize: '0.8rem', fontWeight: 600 }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{accountItem.label}</span>
+                        {isActive && <span style={{ flex: '0 0 auto', color: 'var(--accent-color)', fontSize: '0.65rem' }}>Active</span>}
+                      </span>
+                    </button>
+                    <div className="account-menu-row__actions">
+                      <CopyAddressButton address={accountItem.publicKey} label={accountItem.label} menuItem compact />
                       <button
                         type="button"
                         role="menuitem"
@@ -391,28 +450,29 @@ export function AccountMenu({
                           setEditingIndex(accountItem.index);
                           setEditingLabel(accountItem.label);
                         }}
-                        style={{ padding: '6px 8px', fontSize: '0.72rem' }}
+                        style={{ padding: '4px 6px', fontSize: '0.69rem', minBlockSize: 26 }}
                       >
                         Rename
                       </button>
                     </div>
-                    <CopyAddressButton address={accountItem.publicKey} label={accountItem.label} menuItem />
                   </>
                 )}
               </div>
             );
           })}
 
-          <div style={{ height: 1, margin: '6px 4px', background: 'var(--border-dark)' }} />
-          <button type="button" role="menuitem" className="btn-outline" onClick={() => void onCreate()} disabled={actionsDisabled} style={{ width: '100%', textAlign: 'left', padding: '9px 10px' }}>
-            {busy ? 'Working...' : '+  Create account'}
-          </button>
-          <button type="button" role="menuitem" className="btn-outline" disabled title="Account import is not available yet." style={{ width: '100%', marginTop: 6, textAlign: 'left', padding: '9px 10px', opacity: 0.5, cursor: 'not-allowed' }}>
-            Import account
-          </button>
-          <p className="text-secondary" style={{ margin: '4px 4px 2px', fontSize: '0.68rem' }}>Account import is not available yet.</p>
-          {error && <p role="alert" className="error-text" style={{ margin: '8px 4px 2px', fontSize: '0.78rem' }}>{error}</p>}
-          {notice && <p role="status" className="text-secondary" style={{ margin: '8px 4px 2px', fontSize: '0.78rem' }}>{notice}</p>}
+          <div style={{ height: 1, margin: '5px 4px', background: 'var(--border-color)' }} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 6 }}>
+            <button type="button" role="menuitem" className="btn-outline" onClick={() => void onCreate()} disabled={actionsDisabled} style={{ width: '100%', textAlign: 'center', padding: '6px 8px', fontSize: '0.76rem' }}>
+              {busy ? 'Working...' : '+ Create account'}
+            </button>
+            <button type="button" role="menuitem" className="btn-outline" disabled title="Account import is not available yet." style={{ width: '100%', textAlign: 'center', padding: '6px 8px', fontSize: '0.76rem', opacity: 0.5, cursor: 'not-allowed' }}>
+              Import account
+            </button>
+          </div>
+          <p className="text-secondary" style={{ margin: '4px 4px 0', fontSize: '0.66rem' }}>Account import is not available yet.</p>
+          {error && <p role="alert" className="error-text" style={{ margin: '6px 4px 2px', fontSize: '0.76rem' }}>{error}</p>}
+          {notice && <p role="status" className="text-secondary" style={{ margin: '6px 4px 2px', fontSize: '0.76rem' }}>{notice}</p>}
         </div>
       )}
     </div>
@@ -422,6 +482,25 @@ export function AccountMenu({
 function ReceiveAddressView({ account, onBack }: { account: { address: string; label: string; index: number } | null; onBack: () => void }) {
   const [qrError, setQrError] = useState('');
   const [copyStatus, setCopyStatus] = useState('');
+  const [qrUrl, setQrUrl] = useState('');
+  const address = account?.address ?? '';
+
+  useEffect(() => {
+    if (!address) return;
+    let cancelled = false;
+    setQrUrl('');
+    setQrError('');
+    void toDataURL(address, { width: 240, margin: 1, errorCorrectionLevel: 'M' })
+      .then((url) => {
+        if (!cancelled) setQrUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrError('Unable to load QR. Please copy the address below.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [address]);
 
   if (!account) {
     return (
@@ -437,8 +516,6 @@ function ReceiveAddressView({ account, onBack }: { account: { address: string; l
       </div>
     );
   }
-
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(account.address)}`;
 
   const handleCopy = async () => {
     try {
@@ -458,13 +535,14 @@ function ReceiveAddressView({ account, onBack }: { account: { address: string; l
 
       <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
         <div style={{ background: 'var(--surface-color)', padding: 15, borderRadius: 16, border: '1px solid var(--border-dark)', display: 'grid', placeItems: 'center' }}>
-          <img
-            src={qrUrl}
-            alt={`Receive address QR for ${account.address}`}
-            className="receive-qr"
-            style={{ width: 200, height: 200, display: 'block', background: '#fff', borderRadius: 12, border: '1px solid var(--border-dark)' }}
-            onError={() => setQrError('Unable to load QR. Please copy the address below.')}
-          />
+          {qrUrl ? (
+            <img
+              src={qrUrl}
+              alt={`Receive address QR for ${account.address}`}
+              className="receive-qr"
+              style={{ width: 200, height: 200, display: 'block', background: '#fff', borderRadius: 12, border: '1px solid var(--border-dark)' }}
+            />
+          ) : null}
         </div>
 
         {qrError ? <p className="error-text" style={{ margin: 0 }}>{qrError}</p> : null}
@@ -485,6 +563,353 @@ function ReceiveAddressView({ account, onBack }: { account: { address: string; l
         <p className="text-secondary" style={{ margin: 0, fontSize: '0.76rem', textAlign: 'center' }}>
           This is your public address for receiving {account.address.startsWith('G') ? 'XLM on Stellar Testnet' : 'SOL on Devnet'}.
         </p>
+      </div>
+    </div>
+  );
+}
+
+export const FRIENDBOT_NYM_NOTICE =
+  'Connect Nym Mixnet or switch to Direct mode to fund this Testnet account with Friendbot.';
+
+export const FRIENDBOT_MODE_CHECKING_NOTICE = 'Checking routing mode...';
+
+const FRIENDBOT_FUND_NOTICE_ID = 'friendbot-fund-notice';
+
+export type FriendbotModeGate = {
+  mode: NymTransportMode;
+  modeKnown: boolean;
+  nymConnected: boolean;
+};
+
+export const FRIENDBOT_MODE_GATE_INITIAL: FriendbotModeGate = {
+  mode: 'direct',
+  modeKnown: false,
+  nymConnected: false,
+};
+
+export function applyFriendbotModeStatus(
+  result:
+    | { ok: true; mode: NymTransportMode; connected?: boolean; preferenceHydrated?: boolean }
+    | { ok: false },
+): FriendbotModeGate {
+  if (!result.ok || result.preferenceHydrated === false) return FRIENDBOT_MODE_GATE_INITIAL;
+  return {
+    mode: result.mode,
+    modeKnown: true,
+    nymConnected: result.connected === true,
+  };
+}
+
+export function friendbotFundBlocked(
+  mode: NymTransportMode,
+  modeKnown: boolean,
+  nymConnected = false,
+): boolean {
+  if (!modeKnown) return true;
+  if (mode === 'direct') return false;
+  if (mode === 'nym') return !nymConnected;
+  const _exhaustive: never = mode;
+  return _exhaustive;
+}
+
+function friendbotFundNotice(
+  mode: NymTransportMode,
+  modeKnown: boolean,
+  nymConnected = false,
+): string | null {
+  if (!modeKnown) return FRIENDBOT_MODE_CHECKING_NOTICE;
+  switch (mode) {
+    case 'nym':
+      return nymConnected ? null : FRIENDBOT_NYM_NOTICE;
+    case 'direct':
+      return null;
+    default: {
+      const _exhaustive: never = mode;
+      return _exhaustive;
+    }
+  }
+}
+
+export function FriendbotFundButton({
+  mode,
+  modeKnown,
+  nymConnected = false,
+  fundingLoading,
+  onFund,
+}: {
+  mode: NymTransportMode;
+  modeKnown: boolean;
+  nymConnected?: boolean;
+  fundingLoading: boolean;
+  onFund: () => void;
+}) {
+  const blocked = friendbotFundBlocked(mode, modeKnown, nymConnected);
+  const notice = friendbotFundNotice(mode, modeKnown, nymConnected);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onFund}
+        disabled={fundingLoading || blocked}
+        aria-describedby={notice ? FRIENDBOT_FUND_NOTICE_ID : undefined}
+        className="btn-secondary"
+        style={{
+          width: '100%',
+          padding: '9px 12px',
+          fontSize: '0.84rem',
+          fontWeight: 600,
+          cursor: blocked ? 'not-allowed' : 'pointer',
+          opacity: blocked ? 0.55 : 1,
+        }}
+      >
+        {fundingLoading ? 'Fondeando en Testnet…' : 'Fondear Testnet (10,000 XLM)'}
+      </button>
+      {notice ? (
+        <p id={FRIENDBOT_FUND_NOTICE_ID} role="status" style={{ margin: '8px 0 0', fontSize: '0.76rem', lineHeight: 1.4, color: 'var(--text-sec)' }}>
+          {notice}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * 1-click privacy switch orchestration without breaking fail-closed semantics:
+ * - `'nym'` persists Nym mode first and immediately connects MixFetch.
+ *   If connect fails, mode stays `'nym'` (fail-closed; never reverts to Direct).
+ * - `'direct'` persists Direct mode explicitly and tears down Nym if active.
+ */
+export async function executeOneClickPrivacyMode(
+  targetMode: NymTransportMode,
+  deps: {
+    isNymActive: boolean;
+    setMode: (mode: NymTransportMode) => Promise<void>;
+    connect: () => Promise<void>;
+    disconnect: () => Promise<void>;
+  },
+): Promise<void> {
+  if (targetMode === 'nym') {
+    await deps.setMode('nym');
+    await deps.connect();
+    return;
+  }
+  await deps.setMode('direct');
+  if (deps.isNymActive) {
+    try {
+      await deps.disconnect();
+    } catch {
+      /* explicit Direct choice is already persisted; ignore teardown error */
+    }
+  }
+}
+
+export type DashboardRecentTx = {
+  id: string;
+  txHash: string;
+  direction: 'sent' | 'received';
+  amountXlm: string;
+  createdAt: string;
+  transport?: TxTransportKind | undefined;
+};
+
+export function formatShortTxHash(txHash: string): string {
+  if (txHash.length <= 12) return txHash;
+  return `${txHash.slice(0, 6)}…${txHash.slice(-4)}`;
+}
+
+export function formatShortTxDate(iso: string): string {
+  const parsed = Date.parse(iso);
+  if (Number.isNaN(parsed)) return iso;
+  try {
+    return new Date(parsed).toLocaleString('es-ES', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return new Date(parsed).toISOString().slice(0, 16).replace('T', ' ');
+  }
+}
+
+export function formatXlmAmount(raw: string): string {
+  const num = Number(raw);
+  if (Number.isNaN(num)) return raw;
+  return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+}
+
+export function mergeRecentTransactions(
+  horizonPayments: readonly DashboardRecentTx[],
+  sessionTxs: readonly DashboardRecentTx[],
+  transportMap: TxTransportHistoryMap,
+  limit = 5,
+): DashboardRecentTx[] {
+  const byHash = new Map<string, DashboardRecentTx>();
+  for (const tx of sessionTxs) {
+    if (!tx.txHash) continue;
+    const mappedTransport = transportMap[tx.txHash] ?? tx.transport;
+    byHash.set(tx.txHash, {
+      ...tx,
+      ...(mappedTransport ? { transport: mappedTransport } : {}),
+    });
+  }
+  for (const tx of horizonPayments) {
+    if (!tx.txHash) continue;
+    const existing = byHash.get(tx.txHash);
+    const mappedTransport = transportMap[tx.txHash] ?? existing?.transport ?? tx.transport;
+    byHash.set(tx.txHash, {
+      ...tx,
+      ...(mappedTransport ? { transport: mappedTransport } : {}),
+    });
+  }
+  return [...byHash.values()]
+    .sort((a, b) => {
+      const timeA = Date.parse(a.createdAt);
+      const timeB = Date.parse(b.createdAt);
+      const validA = Number.isNaN(timeA) ? 0 : timeA;
+      const validB = Number.isNaN(timeB) ? 0 : timeB;
+      return validB - validA;
+    })
+    .slice(0, Math.max(1, limit));
+}
+
+export function RecentActivityCard({
+  items,
+  loading = false,
+  blockedByNym = false,
+  error = '',
+}: {
+  items: readonly DashboardRecentTx[];
+  loading?: boolean;
+  blockedByNym?: boolean;
+  error?: string;
+}) {
+  return (
+    <section className="card activity-card" data-testid="dashboard-recent-activity">
+      <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600 }}>Historial reciente</h3>
+      {loading && items.length === 0 ? (
+        <p className="text-secondary" style={{ margin: 0, fontSize: '0.8rem', lineHeight: 1.4 }}>
+          Cargando historial…
+        </p>
+      ) : items.length > 0 ? (
+        <ul className="activity-list">
+          {items.map((item) => {
+            const isSent = item.direction === 'sent';
+            return (
+              <li key={item.id || item.txHash} className="activity-item" data-testid="recent-tx-row">
+                <div className="activity-item__main">
+                  <div className="activity-item__top">
+                    <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>
+                      {isSent ? 'Enviado' : 'Recibido'}
+                    </span>
+                    {item.transport === 'nym' ? (
+                      <span className="tx-badge tx-badge--nym" data-testid="tx-transport-badge">
+                        Nym
+                      </span>
+                    ) : item.transport === 'direct' ? (
+                      <span className="tx-badge tx-badge--direct" data-testid="tx-transport-badge">
+                        Directo
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="activity-item__meta">
+                    <span>{formatShortTxDate(item.createdAt)}</span>
+                    <a
+                      href={stellarExpertTxUrl(item.txHash)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="tx-explorer-link"
+                      data-testid="tx-explorer-link"
+                      title={item.txHash}
+                    >
+                      {formatShortTxHash(item.txHash)} ↗
+                    </a>
+                  </div>
+                </div>
+                <span
+                  style={{
+                    fontWeight: 700,
+                    fontVariantNumeric: 'tabular-nums',
+                    whiteSpace: 'nowrap',
+                    color: isSent ? 'var(--text-main)' : 'var(--accent-color)',
+                  }}
+                >
+                  {isSent ? '-' : '+'}
+                  {formatXlmAmount(item.amountXlm)} XLM
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : blockedByNym ? (
+        <p className="text-secondary" style={{ margin: 0, fontSize: '0.8rem', lineHeight: 1.4 }}>
+          Conecta Nym para cargar el historial desde Horizon.
+        </p>
+      ) : error ? (
+        <p className="text-secondary" style={{ margin: 0, fontSize: '0.8rem', lineHeight: 1.4 }}>
+          No se pudo cargar el historial reciente.
+        </p>
+      ) : (
+        <p className="text-secondary" style={{ margin: 0, fontSize: '0.8rem', lineHeight: 1.4 }}>
+          Aún no hay movimientos recientes en esta cuenta.
+        </p>
+      )}
+    </section>
+  );
+}
+
+export function PrivacyModeSelector({
+  snapshot,
+  busy,
+  onSelectDirect,
+  onSelectNym,
+}: {
+  snapshot: NymUiSnapshot;
+  busy: boolean;
+  onSelectDirect: () => void;
+  onSelectNym: () => void;
+}) {
+  const hydrated = snapshot.preferenceHydrated === true;
+  const isDirect = hydrated && snapshot.mode === 'direct' && snapshot.egressBlocked !== true;
+  const isNym = hydrated && snapshot.mode === 'nym';
+  const connecting = snapshot.state === 'connecting';
+
+  return (
+    <div className="card privacy-card" data-testid="dashboard-privacy-selector">
+      <div className="privacy-switcher" role="group" aria-label="Modo de privacidad">
+        <button
+          type="button"
+          className="privacy-switcher__btn"
+          data-testid="dashboard-mode-direct"
+          aria-pressed={isDirect}
+          disabled={busy || isDirect}
+          onClick={onSelectDirect}
+        >
+          <span className={`privacy-dot ${isDirect ? 'privacy-dot--direct' : ''}`} aria-hidden="true" />
+          Modo Normal
+        </button>
+        <button
+          type="button"
+          className="privacy-switcher__btn"
+          data-testid="dashboard-mode-nym"
+          aria-pressed={isNym}
+          disabled={busy || (isNym && snapshot.connected)}
+          onClick={onSelectNym}
+        >
+          <span
+            className={`privacy-dot ${isNym ? (snapshot.connected ? 'privacy-dot--nym' : 'privacy-dot--blocked') : ''}`}
+            aria-hidden="true"
+          />
+          {connecting ? 'Conectando Nym…' : 'Modo Privado Nym'}
+        </button>
+      </div>
+      <div className="row-between" style={{ flexWrap: 'wrap' }}>
+        <PrivacyModeIndicator snapshot={snapshot} />
+        {isNym && !snapshot.connected && !connecting ? (
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-sec)' }}>
+            Red bloqueada por seguridad
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -511,6 +936,11 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   const [isUnfunded, setIsUnfunded] = useState(false);
   const [fundingLoading, setFundingLoading] = useState(false);
   const [fundingMessage, setFundingMessage] = useState('');
+  const [txTransportHistory, setTxTransportHistory] = useState<TxTransportHistoryMap>({});
+  const [horizonPayments, setHorizonPayments] = useState<DashboardRecentTx[]>([]);
+  const [sessionTxs, setSessionTxs] = useState<DashboardRecentTx[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
   const [view, setView] = useState<'dashboard' | 'send' | 'receive' | 'settings'>('dashboard');
   const latestBalanceRequest = useRef(0);
   const selectedIndexRef = useRef<number | null>(null);
@@ -529,22 +959,40 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   const [autoLockSaved, setAutoLockSaved] = useState(false);
 
   // Theme State
-  const [themePreset, setThemePreset] = useState<string>(
-    typeof document !== 'undefined' && document.documentElement.classList.contains('astrym-webapp')
-      ? 'astrym'
-      : 'midnight',
-  );
+  const [themePreset, setThemePreset] = useState<string>('astrym');
   const [customColors, setCustomColors] = useState<ThemePalette>({
-    '--bg-color': '#11151B',
-    '--surface-color': '#1B222B',
-    '--accent-color': '#8FE8D0',
-    '--text-main': '#F4F7F8',
-    '--text-sec': '#A4ADBA'
+    '--bg-color': '#191A1C',
+    '--surface-color': '#141416',
+    '--accent-color': '#3CE894',
+    '--text-main': '#FFFFFF',
+    '--text-sec': '#D0D5DD'
   });
 
   useEffect(() => {
     selectedIndexRef.current = selectedIndex;
   }, [selectedIndex]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void readTxTransportHistory().then((map) => {
+      if (!cancelled) setTxTransportHistory(map);
+    });
+    if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return () => { cancelled = true; };
+    const onChanged = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ) => {
+      if (area !== 'local' || !changes[TX_TRANSPORT_HISTORY_STORAGE_KEY]) return;
+      setTxTransportHistory(
+        parseTxTransportHistory(changes[TX_TRANSPORT_HISTORY_STORAGE_KEY].newValue),
+      );
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => {
+      cancelled = true;
+      chrome.storage.onChanged.removeListener(onChanged);
+    };
+  }, []);
 
   useEffect(() => {
     if (view === 'dashboard') {
@@ -664,6 +1112,40 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     }
   };
 
+  const fetchRecentPayments = async (
+    address: string,
+    requestId: number,
+    accountIndex?: number,
+  ) => {
+    setHistoryLoading(true);
+    setHistoryError('');
+    try {
+      const res = await sendIpcMessage('GET_STELLAR_RECENT_PAYMENTS', { address, limit: 5 });
+      if (!isCurrentBalanceResponse(requestId, latestBalanceRequest.current, accountIndex, selectedIndexRef.current)) {
+        return;
+      }
+      setHorizonPayments(
+        res.payments.map((p) => ({
+          id: p.id,
+          txHash: p.txHash,
+          direction: p.direction,
+          amountXlm: p.amountXlm,
+          createdAt: p.createdAt,
+        })),
+      );
+    } catch (err: unknown) {
+      if (!isCurrentBalanceResponse(requestId, latestBalanceRequest.current, accountIndex, selectedIndexRef.current)) {
+        return;
+      }
+      setHorizonPayments([]);
+      setHistoryError(err instanceof Error ? err.message : 'Failed to load recent payments');
+    } finally {
+      if (latestBalanceRequest.current === requestId) {
+        setHistoryLoading(false);
+      }
+    }
+  };
+
   const fetchBalance = async (address: string, accountIndex?: number) => {
     const requestId = ++latestBalanceRequest.current;
     setBalanceLoading(true);
@@ -683,10 +1165,13 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         if (!bal.exists) {
           setIsUnfunded(true);
           setBalance('0.0000');
+          setHorizonPayments([]);
+          setHistoryLoading(false);
         } else {
           setIsUnfunded(false);
           const num = Number(bal.balance);
           setBalance(isNaN(num) ? bal.balance : num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }));
+          void fetchRecentPayments(address, requestId, accountIndex);
         }
         setRpcStatus('connected');
       } else {
@@ -726,7 +1211,22 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     try {
       const res = await sendIpcMessage('FUND_STELLAR_TESTNET_ACCOUNT', { address: targetAddress });
       if (res.success) {
-        setFundingMessage('Account funded with 10,000 Testnet XLM! Refreshing...');
+        setFundingMessage('Cuenta fondeada con 10,000 XLM de Testnet. Actualizando saldo…');
+        if (res.txHash) {
+          const transport: TxTransportKind = nymSnapshot.mode === 'nym' ? 'nym' : 'direct';
+          void recordTxTransport(res.txHash, transport).then((map) => setTxTransportHistory(map));
+          setSessionTxs((prev) => [
+            {
+              id: res.txHash!,
+              txHash: res.txHash!,
+              direction: 'received',
+              amountXlm: '10000',
+              createdAt: new Date().toISOString(),
+              transport,
+            },
+            ...prev.filter((item) => item.txHash !== res.txHash),
+          ].slice(0, 5));
+        }
         await fetchBalance(targetAddress, account?.index);
       } else {
         setFundingMessage(res.message);
@@ -760,6 +1260,8 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
       setConfirmedActiveIndex(index);
       setAccount({ address: nextAccount.publicKey, label: nextAccount.label, index: nextAccount.index });
       setAccountError('');
+      setHorizonPayments([]);
+      setSessionTxs([]);
       void fetchBalance(nextAccount.publicKey, nextAccount.index);
       return true;
     } catch (err: any) {
@@ -949,9 +1451,14 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     lastError: null,
     connected: false,
     implementation: 'mix-fetch-offscreen',
-    mode: 'direct',
+    // Fail closed until NYM_STATUS returns the runtime snapshot. Do not paint Direct.
+    mode: 'nym',
     documentReady: false,
+    preferenceHydrated: false,
+    egressBlocked: true,
+    privacyPreference: null,
   });
+  const [friendbotGate, setFriendbotGate] = useState<FriendbotModeGate>(FRIENDBOT_MODE_GATE_INITIAL);
   const nymReadyForSpp = nymSnapshot.mode === 'nym' && nymSnapshot.connected;
   const sppStatusSnapshot: SppIntegrationSnapshot = useMemo(
     () =>
@@ -966,38 +1473,17 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     [sppFacadePackaged, sppSessionHandle, sppSelected, nymReadyForSpp],
   );
 
+  const mergedRecentTxs = useMemo(
+    () => mergeRecentTransactions(horizonPayments, sessionTxs, txTransportHistory, 5),
+    [horizonPayments, sessionTxs, txTransportHistory],
+  );
+
   useEffect(() => {
     if (!nymReadyForSpp && (sppSelected || sendKind === 'private')) {
       setSppSelected(false);
       setSendKind('clear');
     }
   }, [nymReadyForSpp, sppSelected, sendKind]);
-
-  // Auto-enable SPP option when Nym connects (user can still turn it off).
-  useEffect(() => {
-    if (nymReadyForSpp) setSppSelected(true);
-  }, [nymReadyForSpp]);
-
-  // Re-arm SPP auto-prepare when Nym is already connected (reload / Settings)
-  // without inventing readiness — host must still emit write_pool_ready.
-  useEffect(() => {
-    if (!nymReadyForSpp) return;
-    if (isSppWriteReady(sppPrepareStatus)) return;
-    let cancelled = false;
-    void ensureSppAutoPrepareIfNeeded({
-      nymConnected: true,
-      nymMode: 'nym',
-    })
-      .then((status) => {
-        if (!cancelled && status) setSppPrepareStatus(status);
-      })
-      .catch(() => {
-        /* prepare status publisher records failure */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [nymReadyForSpp, sppPrepareStatus?.phase, sppPrepareStatus?.updatedAt]);
 
   useEffect(() => {
     if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) return;
@@ -1071,9 +1557,8 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     useState<NymStellarHorizonUiResult | null>(null);
 
   useEffect(() => {
-    if (view !== 'settings') return;
     let cancelled = false;
-    (async () => {
+    const pull = async () => {
       try {
         const snap = await sendIpcMessage('NYM_STATUS', {});
         if (!cancelled) setNymSnapshot(coerceNymUiSnapshot(snap));
@@ -1088,83 +1573,180 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           }));
         }
       }
-    })();
+    };
+    void pull();
+    const onChanged = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ) => {
+      if (area !== 'local' || !changes[NYM_PRIVACY_PREFERENCE_STORAGE_KEY]) return;
+      void pull();
+    };
+    if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.addListener(onChanged);
+    }
+    const unbindStatus = bindNymRuntimeStatus(
+      typeof chrome !== 'undefined' ? chrome.runtime?.onMessage : undefined,
+      (snapshot) => {
+        if (!cancelled) {
+          setNymSnapshot(coerceNymUiSnapshot(snapshot));
+          setFriendbotGate(
+            applyFriendbotModeStatus({
+              ok: true,
+              mode: snapshot.mode,
+              connected: snapshot.connected === true,
+              ...(snapshot.preferenceHydrated !== undefined
+                ? { preferenceHydrated: snapshot.preferenceHydrated }
+                : {}),
+            }),
+          );
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+      unbindStatus();
+      if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+        chrome.storage.onChanged.removeListener(onChanged);
+      }
+    };
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== 'dashboard') return;
+    let cancelled = false;
+    setFriendbotGate(FRIENDBOT_MODE_GATE_INITIAL);
+    void sendIpcMessage('NYM_STATUS', {})
+      .then((snap) => {
+        if (cancelled) return;
+        const gate = applyFriendbotModeStatus({
+          ok: true,
+          mode: snap.mode,
+          connected: snap.connected === true,
+          ...(snap.preferenceHydrated !== undefined
+            ? { preferenceHydrated: snap.preferenceHydrated }
+            : {}),
+        });
+        setFriendbotGate(gate);
+        setNymSnapshot((prev) =>
+          prev.mode === gate.mode && prev.connected === gate.nymConnected
+            ? prev
+            : { ...prev, mode: gate.mode, connected: gate.nymConnected },
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setFriendbotGate(applyFriendbotModeStatus({ ok: false }));
+      });
     return () => {
       cancelled = true;
     };
   }, [view]);
 
-  const handleNymConnect = () => {
+  const syncGateFromSnapshot = (snap: {
+    mode: NymTransportMode;
+    connected: boolean;
+    preferenceHydrated?: boolean;
+  }) => {
+    setFriendbotGate(
+      applyFriendbotModeStatus({
+        ok: true,
+        mode: snap.mode,
+        connected: snap.connected === true,
+        ...(snap.preferenceHydrated !== undefined
+          ? { preferenceHydrated: snap.preferenceHydrated }
+          : {}),
+      }),
+    );
+  };
+
+  const startGatewayPermissionGesture = (): ReturnType<
+    typeof beginGatewayPermissionRequestFromUserGesture
+  > | null => {
     const origin = nymSnapshot.selectedGateway || NYM_VERIFIED_GATEWAY.wssOrigin;
     const permissionsApi = typeof chrome !== 'undefined' ? chrome.permissions : undefined;
-    let permissionPending: ReturnType<typeof beginGatewayPermissionRequestFromUserGesture> | null =
-      null;
-    if (permissionsApi && typeof permissionsApi.request === 'function') {
-      try {
-        permissionPending = beginGatewayPermissionRequestFromUserGesture(origin);
-      } catch (err: unknown) {
-        setNymSnapshot((prev) => ({
-          ...prev,
-          state: 'error',
-          connected: false,
-          documentReady: false,
-          lastError: err instanceof Error ? err.message : 'Host permission request failed to start',
-          diagnosticCode:
-            err && typeof err === 'object' && 'code' in err
-              ? String((err as { code: unknown }).code)
-              : 'PERMISSION_REQUEST_FAILED',
-          gatewayHostPermissionGranted: false,
-        }));
-        return;
-      }
+    if (!permissionsApi || typeof permissionsApi.request !== 'function') return null;
+    try {
+      return beginGatewayPermissionRequestFromUserGesture(origin);
+    } catch (err: unknown) {
+      setNymSnapshot((prev) => ({
+        ...prev,
+        state: 'error',
+        connected: false,
+        documentReady: false,
+        lastError: err instanceof Error ? err.message : 'Host permission request failed to start',
+        diagnosticCode:
+          err && typeof err === 'object' && 'code' in err
+            ? String((err as { code: unknown }).code)
+            : 'PERMISSION_REQUEST_FAILED',
+        gatewayHostPermissionGranted: false,
+      }));
+      return null;
     }
+  };
 
-    setNymBusy(true);
+  const runNymConnect = async (
+    permissionPending: ReturnType<typeof beginGatewayPermissionRequestFromUserGesture> | null,
+  ): Promise<void> => {
     setNymSnapshot((prev) => ({
       ...prev,
       state: 'connecting',
       connected: false,
       lastError: null,
     }));
-    void (async () => {
-      try {
-        if (permissionPending) {
-          const gesture = await permissionPending;
-          if (!gesture.granted) {
-            setNymSnapshot((prev) => ({
-              ...prev,
-              state: 'error',
-              connected: false,
-              documentReady: false,
-              lastError:
-                'Host permission not granted. Grant the gateway, then Connect. Permission ≠ Mixnet Ready.',
-              diagnosticCode: 'PERMISSION_DENIED',
-              gatewayHostPermissionGranted: false,
-            }));
-            return;
-          }
+    try {
+      if (permissionPending) {
+        const gesture = await permissionPending;
+        if (!gesture.granted) {
+          setNymSnapshot((prev) => ({
+            ...prev,
+            state: 'error',
+            connected: false,
+            documentReady: false,
+            lastError:
+              'Host permission not granted. Grant the gateway, then Connect. Permission ≠ Mixnet Ready.',
+            diagnosticCode: 'PERMISSION_DENIED',
+            gatewayHostPermissionGranted: false,
+          }));
+          return;
         }
-        const snap = await sendIpcMessage('NYM_CONNECT', {});
-        setNymSnapshot(coerceNymUiSnapshot(snap));
-      } catch (err: unknown) {
-        setNymSnapshot((prev) => ({
-          ...prev,
-          state: 'error',
-          connected: false,
-          documentReady: false,
-          lastError: err instanceof Error ? err.message : 'NYM_CONNECT failed',
-        }));
-      } finally {
-        setNymBusy(false);
       }
-    })();
+      const snap = await sendIpcMessage('NYM_CONNECT', {});
+      const coerced = coerceNymUiSnapshot(snap);
+      setNymSnapshot(coerced);
+      syncGateFromSnapshot(coerced);
+    } catch (err: unknown) {
+      setNymSnapshot((prev) => ({
+        ...prev,
+        state: 'error',
+        connected: false,
+        documentReady: false,
+        lastError: err instanceof Error ? err.message : 'NYM_CONNECT failed',
+      }));
+    }
+  };
+
+  const handleNymConnect = () => {
+    const permissionPending = startGatewayPermissionGesture();
+    if (
+      typeof chrome !== 'undefined' &&
+      typeof chrome.permissions?.request === 'function' &&
+      permissionPending === null
+    ) {
+      return;
+    }
+    setNymBusy(true);
+    void runNymConnect(permissionPending).finally(() => {
+      setNymBusy(false);
+    });
   };
 
   const handleNymDisconnect = async () => {
     setNymBusy(true);
     try {
       const snap = await sendIpcMessage('NYM_DISCONNECT', {});
-      setNymSnapshot(coerceNymUiSnapshot(snap));
+      const coerced = coerceNymUiSnapshot(snap);
+      setNymSnapshot(coerced);
+      syncGateFromSnapshot(coerced);
     } catch (err: unknown) {
       setNymSnapshot((prev) => ({
         ...prev,
@@ -1177,19 +1759,51 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
     }
   };
 
-  const handleNymSetMode = async (mode: NymTransportMode) => {
+  const handleNymSetMode = async (mode: NymTransportMode): Promise<void> => {
+    const snap = await sendIpcMessage('NYM_SET_MODE', { mode });
+    const coerced = coerceNymUiSnapshot(snap);
+    setNymSnapshot(coerced);
+    syncGateFromSnapshot(coerced);
+  };
+
+  const handleOneClickPrivacyMode = (targetMode: NymTransportMode) => {
+    // Capture MV3 optional host permission synchronously on the user click stack before awaiting IPC.
+    const permissionPending = targetMode === 'nym' ? startGatewayPermissionGesture() : null;
+    const isNymActive =
+      nymSnapshot.connected ||
+      nymSnapshot.state === 'connected' ||
+      nymSnapshot.state === 'connecting';
+
     setNymBusy(true);
-    try {
-      const snap = await sendIpcMessage('NYM_SET_MODE', { mode });
-      setNymSnapshot(coerceNymUiSnapshot(snap));
-    } catch (err: unknown) {
-      setNymSnapshot((prev) => ({
-        ...prev,
-        lastError: err instanceof Error ? err.message : 'NYM_SET_MODE failed',
-      }));
-    } finally {
-      setNymBusy(false);
-    }
+    void executeOneClickPrivacyMode(targetMode, {
+      isNymActive,
+      setMode: handleNymSetMode,
+      connect: async () => {
+        if (
+          typeof chrome !== 'undefined' &&
+          typeof chrome.permissions?.request === 'function' &&
+          permissionPending === null
+        ) {
+          return;
+        }
+        await runNymConnect(permissionPending);
+      },
+      disconnect: async () => {
+        const snap = await sendIpcMessage('NYM_DISCONNECT', {});
+        const coerced = coerceNymUiSnapshot(snap);
+        setNymSnapshot(coerced);
+        syncGateFromSnapshot(coerced);
+      },
+    })
+      .catch((err: unknown) => {
+        setNymSnapshot((prev) => ({
+          ...prev,
+          lastError: err instanceof Error ? err.message : 'Failed to switch privacy mode',
+        }));
+      })
+      .finally(() => {
+        setNymBusy(false);
+      });
   };
 
   const handleNymConfigureGateway = async (origin: string, identityKey?: string) => {
@@ -1369,7 +1983,6 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         message: res.message,
         transportFetchInvoked: res.transportFetchInvoked,
       });
-      setNymSnapshot((prev) => ({ ...prev, mode: res.transport }));
     } catch (err: unknown) {
       setNymStellarHorizonResult({
         state: 'error',
@@ -1429,7 +2042,6 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         message: res.message,
         transportFetchInvoked: res.transportFetchInvoked,
       });
-      setNymSnapshot((prev) => ({ ...prev, mode: res.transport }));
     } catch (err: unknown) {
       setNymPublicDataResult({
         state: 'error',
@@ -1549,98 +2161,161 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   };
 
   if (view === 'receive') {
-    return <ReceiveAddressView account={account} onBack={() => setView('dashboard')} />;
+    return (
+      <div className="view-container">
+        <PrivacyModeIndicator snapshot={nymSnapshot} />
+        <ReceiveAddressView account={account} onBack={() => setView('dashboard')} />
+      </div>
+    );
   }
 
   if (view === 'send' && account) {
     return (
-      <Send
-        onBack={() => setView('dashboard')}
-        accountIndex={account.index}
-        accountAddress={account.address}
-        onComplete={() => setView('dashboard')}
-        privatePaymentsEnabled={sppSelected && nymReadyForSpp}
-        privatePreparePhase={sppPrepareStatus?.phase ?? 'idle'}
-        privatePoolContract={sppPoolContract}
-        paymentMode={sendKind}
-        onPaymentModeChange={setSendKind}
-      />
+      <>
+        <PrivacyModeIndicator snapshot={nymSnapshot} />
+        <Send
+          onBack={() => setView('dashboard')}
+          accountIndex={account.index}
+          accountAddress={account.address}
+          onComplete={() => {
+            setView('dashboard');
+          }}
+          transportMode={nymSnapshot.mode === 'nym' ? 'nym' : 'direct'}
+          onStellarSent={(tx) => {
+            setTxTransportHistory((prev) => ({ ...prev, [tx.txHash]: tx.transport }));
+            setSessionTxs((prev) => [
+              {
+                id: tx.txHash,
+                txHash: tx.txHash,
+                direction: 'sent',
+                amountXlm: tx.amountXlm,
+                createdAt: tx.createdAt,
+                transport: tx.transport,
+              },
+              ...prev.filter((item) => item.txHash !== tx.txHash),
+            ].slice(0, 5));
+          }}
+          privatePaymentsEnabled={sppSelected && nymReadyForSpp}
+          privatePreparePhase={sppPrepareStatus?.phase ?? 'idle'}
+          privatePoolContract={sppPoolContract}
+          paymentMode={sendKind}
+          onPaymentModeChange={(nextMode) => {
+            setSendKind(nextMode);
+            if (nextMode === 'private' && nymReadyForSpp && !isSppWriteReady(sppPrepareStatus)) {
+              void ensureSppAutoPrepareIfNeeded({
+                nymConnected: true,
+                nymMode: 'nym',
+              })
+                .then((status) => {
+                  if (status) setSppPrepareStatus(status);
+                })
+                .catch(() => {
+                  /* prepare status publisher records failure */
+                });
+            }
+          }}
+        />
+      </>
     );
   }
 
   if (view === 'settings') {
+    const sppPanel = (
+      <SppStatusPanel
+        snapshot={sppStatusSnapshot}
+        probing={!sppProbeDone}
+        sessionGeneration={sppSessionGeneration}
+        nymMode={
+          nymSnapshot.preferenceHydrated === true &&
+          nymSnapshot.mode === 'direct' &&
+          nymSnapshot.egressBlocked !== true
+            ? 'direct'
+            : 'nym'
+        }
+        nymConnected={nymSnapshot.connected}
+        sppSelected={sppSelected}
+        prepareStatus={sppPrepareStatus ?? null}
+        poolContract={sppPoolContract}
+        contractConfigJson={sppContractConfigJson}
+        bootnodeUrl={sppBootnodeUrl}
+        onToggleSpp={(next) => {
+          if (!nymReadyForSpp) return;
+          setSppSelected(next);
+          if (next) {
+            if (!isSppWriteReady(sppPrepareStatus)) {
+              void ensureSppAutoPrepareIfNeeded({
+                nymConnected: true,
+                nymMode: 'nym',
+              })
+                .then((status) => {
+                  if (status) setSppPrepareStatus(status);
+                })
+                .catch(() => {
+                  /* prepare status publisher records failure */
+                });
+            }
+          } else {
+            setSendKind('clear');
+          }
+        }}
+        onPoolContractChange={(contract) => {
+          setSppPoolContract(contract);
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            void chrome.storage.local.set({ [SPP_POOL_CONTRACT_KEY]: contract });
+          }
+        }}
+        onContractConfigJsonChange={(json) => {
+          setSppContractConfigJson(json);
+          if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+          const trimmed = json.trim();
+          if (!trimmed) {
+            void chrome.storage.local.remove(SPP_CONTRACT_CONFIG_KEY);
+            return;
+          }
+          try {
+            const parsed = parseSppContractConfig(JSON.parse(trimmed) as unknown);
+            void chrome.storage.local.set({ [SPP_CONTRACT_CONFIG_KEY]: parsed });
+          } catch {
+            // Keep textarea text; do not persist invalid JSON as ready config.
+          }
+        }}
+        onBootnodeUrlChange={(url) => {
+          setSppBootnodeUrl(url);
+          if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+          if (!url) {
+            void chrome.storage.local.remove(SPP_BOOTNODE_URL_KEY);
+            return;
+          }
+          void chrome.storage.local.set({ [SPP_BOOTNODE_URL_KEY]: url });
+        }}
+        onUseNethermindPublic={() => {
+          const pinned = getNethermindPublicTestnetContractConfig();
+          setSppPoolContract(NETHERMIND_PUBLIC_XLM_POOL_CONTRACT);
+          setSppContractConfigJson(JSON.stringify(pinned, null, 2));
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            void chrome.storage.local.set({
+              [SPP_CONTRACT_CONFIG_KEY]: pinned,
+              [SPP_POOL_CONTRACT_KEY]: NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
+            });
+          }
+        }}
+      />
+    );
+
     return (
       <div className="view-container" style={{ overflowY: 'auto' }}>
         <div className="header">
-          <button onClick={() => setView('dashboard')} className="btn-icon">&larr; Back</button>
-          <h2>Settings</h2>
-          <div style={{ width: 45 }}></div>
+          <button onClick={() => setView('dashboard')} className="btn-icon">&larr; Volver</button>
+          <h2>Ajustes</h2>
+          <div style={{ width: 52 }}></div>
         </div>
 
-        <SppStatusPanel
-          snapshot={sppStatusSnapshot}
-          probing={!sppProbeDone}
-          sessionGeneration={sppSessionGeneration}
-          nymMode={nymSnapshot.mode === 'nym' ? 'nym' : 'direct'}
-          nymConnected={nymSnapshot.connected}
-          sppSelected={sppSelected}
-          prepareStatus={sppPrepareStatus ?? null}
-          poolContract={sppPoolContract}
-          contractConfigJson={sppContractConfigJson}
-          bootnodeUrl={sppBootnodeUrl}
-          onToggleSpp={(next) => {
-            if (!nymReadyForSpp) return;
-            setSppSelected(next);
-            if (!next) setSendKind('clear');
-          }}
-          onPoolContractChange={(contract) => {
-            setSppPoolContract(contract);
-            if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-              void chrome.storage.local.set({ [SPP_POOL_CONTRACT_KEY]: contract });
-            }
-          }}
-          onContractConfigJsonChange={(json) => {
-            setSppContractConfigJson(json);
-            if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
-            const trimmed = json.trim();
-            if (!trimmed) {
-              void chrome.storage.local.remove(SPP_CONTRACT_CONFIG_KEY);
-              return;
-            }
-            try {
-              const parsed = parseSppContractConfig(JSON.parse(trimmed) as unknown);
-              void chrome.storage.local.set({ [SPP_CONTRACT_CONFIG_KEY]: parsed });
-            } catch {
-              // Keep textarea text; do not persist invalid JSON as ready config.
-            }
-          }}
-          onBootnodeUrlChange={(url) => {
-            setSppBootnodeUrl(url);
-            if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
-            if (!url) {
-              void chrome.storage.local.remove(SPP_BOOTNODE_URL_KEY);
-              return;
-            }
-            void chrome.storage.local.set({ [SPP_BOOTNODE_URL_KEY]: url });
-          }}
-          onUseNethermindPublic={() => {
-            const pinned = getNethermindPublicTestnetContractConfig();
-            setSppPoolContract(NETHERMIND_PUBLIC_XLM_POOL_CONTRACT);
-            setSppContractConfigJson(JSON.stringify(pinned, null, 2));
-            if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-              void chrome.storage.local.set({
-                [SPP_CONTRACT_CONFIG_KEY]: pinned,
-                [SPP_POOL_CONTRACT_KEY]: NETHERMIND_PUBLIC_XLM_POOL_CONTRACT,
-              });
-            }
-          }}
-        />
         <NymTransportPanel
           snapshot={nymSnapshot}
           busy={nymBusy}
           onConnect={handleNymConnect}
           onDisconnect={handleNymDisconnect}
-          onSetMode={handleNymSetMode}
+          onSetMode={handleOneClickPrivacyMode}
           onConfigureGateway={handleNymConfigureGateway}
           onRequestGatewayPermission={handleNymRequestPermission}
           onLiveSmokeDryRun={handleNymLiveSmokeDryRun}
@@ -1652,21 +2327,22 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           publicDataResult={nymPublicDataResult}
           onStellarHorizonProbe={handleNymStellarHorizonProbe}
           stellarHorizonResult={nymStellarHorizonResult}
+          advancedChildren={sppPanel}
         />
 
-        <div className="card" style={{ marginBottom: 20 }}>
-          <h3 style={{ margin: '0 0 10px 0' }}>Theme</h3>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: '0 0 10px 0', fontSize: '0.96rem' }}>Apariencia</h3>
           <select 
             value={themePreset} 
             onChange={e => handleThemeChange(e.target.value)}
             className="input-field"
-            style={{ width: '100%', marginBottom: 15 }}
+            style={{ width: '100%', marginBottom: themePreset === 'custom' ? 14 : 0 }}
           >
-            <option value="astrym">Astrym</option>
+            <option value="astrym">Astrym (Oscuro)</option>
             <option value="midnight">Midnight Green</option>
             <option value="lightmint">Light Mint</option>
             <option value="forest">Forest</option>
-            <option value="custom">Custom Colors</option>
+            <option value="custom">Colores personalizados</option>
           </select>
           
           {themePreset === 'custom' && (
@@ -1687,11 +2363,11 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
         </div>
 
         <div className="card" style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: '0 0 6px' }}>Auto-lock</h3>
-          <p className="text-secondary" style={{ margin: '0 0 12px', fontSize: '0.78rem', lineHeight: 1.4 }}>
-            Lock after this period without activity in the wallet. A real interaction resets the timer; service-worker restarts do not.
+          <h3 style={{ margin: '0 0 6px', fontSize: '0.96rem' }}>Bloqueo automático</h3>
+          <p className="text-secondary" style={{ margin: '0 0 12px', fontSize: '0.8rem', lineHeight: 1.45 }}>
+            Bloquea la wallet tras este tiempo sin actividad para proteger tus fondos.
           </p>
-          <label htmlFor="auto-lock-timeout" className="text-secondary" style={{ display: 'block', marginBottom: 6, fontSize: '0.76rem' }}>Inactivity period</label>
+          <label htmlFor="auto-lock-timeout" className="text-secondary" style={{ display: 'block', marginBottom: 6, fontSize: '0.78rem' }}>Tiempo de inactividad</label>
           <select
             id="auto-lock-timeout"
             className="input-field"
@@ -1703,21 +2379,21 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
             }}
             style={{ width: '100%' }}
           >
-            {LOCK_TIMEOUT_OPTIONS_MINUTES.map((minutes) => <option key={minutes} value={minutes}>{minutes} minute{minutes === 1 ? '' : 's'}</option>)}
+            {LOCK_TIMEOUT_OPTIONS_MINUTES.map((minutes) => <option key={minutes} value={minutes}>{minutes} minuto{minutes === 1 ? '' : 's'}</option>)}
           </select>
-          {autoLockError && <p role="alert" className="error-text" style={{ margin: '8px 0 0', fontSize: '0.75rem' }}>{autoLockError}</p>}
-          {autoLockSaved && <p role="status" className="text-accent" style={{ margin: '8px 0 0', fontSize: '0.75rem' }}>Auto-lock setting saved.</p>}
+          {autoLockError && <p role="alert" className="error-text" style={{ margin: '8px 0 0', fontSize: '0.76rem' }}>{autoLockError}</p>}
+          {autoLockSaved && <p role="status" className="text-accent" style={{ margin: '8px 0 0', fontSize: '0.76rem' }}>Ajuste guardado.</p>}
         </div>
 
         <div className="card">
-          <h3 style={{ margin: '0 0 10px 0' }}>Wallet Backup</h3>
-          <p className="text-secondary" style={{ marginBottom: 20, fontSize: '0.9em' }}>
-            Your recovery phrase is the only way to restore your wallet. Never share it with anyone.
+          <h3 style={{ margin: '0 0 8px 0', fontSize: '0.96rem' }}>Copia de seguridad</h3>
+          <p className="text-secondary" style={{ margin: '0 0 16px', fontSize: '0.82rem', lineHeight: 1.45 }}>
+            Tu frase de recuperación es la única forma de restaurar tu wallet. Nunca la compartas con nadie.
           </p>
 
           {recoveryPhrase ? (
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
                 {recoveryPhrase.map((word, i) => (
                   <div key={i} className="phrase-word">
                     <span className="text-secondary" style={{ userSelect: 'none' }}>{i + 1}.</span>
@@ -1727,15 +2403,15 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
               </div>
               <div style={{ display: 'flex', gap: 10 }}>
                 <button onClick={handleCopyPhrase} className="btn-secondary" style={{ flex: 1 }}>
-                  {copySuccess ? 'Copied \u2713' : 'Copy'}
+                  {copySuccess ? 'Copiada \u2713' : 'Copiar'}
                 </button>
-                <button onClick={() => setRecoveryPhrase(null)} className="btn-secondary" style={{ flex: 1 }}>
-                  Hide
+                <button onClick={() => setRecoveryPhrase(null)} className="btn-outline" style={{ flex: 1 }}>
+                  Ocultar
                 </button>
               </div>
               {copySuccess && (
-                <p className="text-secondary" style={{ fontSize: '0.8em', marginTop: 10, textAlign: 'center' }}>
-                  Clipboard contents may be accessible to other apps. Clear your clipboard after secure offline storage.
+                <p className="text-secondary" style={{ fontSize: '0.76rem', marginTop: 10, textAlign: 'center', lineHeight: 1.4 }}>
+                  Recuerda vaciar el portapapeles después de guardar tu frase en un lugar seguro.
                 </p>
               )}
             </div>
@@ -1743,14 +2419,14 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
             <form onSubmit={handleRevealMnemonic} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <input 
                 type="password" 
-                placeholder="Enter password to reveal"
+                placeholder="Introduce tu contraseña"
                 value={settingsPassword}
                 onChange={e => setSettingsPassword(e.target.value)}
                 className="input-field"
               />
-              {settingsError && <p className="error-text">{settingsError}</p>}
+              {settingsError && <p className="error-text" style={{ margin: 0, fontSize: '0.8rem' }}>{settingsError}</p>}
               <button type="submit" disabled={settingsLoading || !settingsPassword} className="btn-primary">
-                {settingsLoading ? 'Verifying...' : 'Reveal Recovery Phrase'}
+                {settingsLoading ? 'Verificando…' : 'Mostrar frase de recuperación'}
               </button>
             </form>
           )}
@@ -1760,9 +2436,9 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
   }
 
   return (
-    <div className="view-container">
-      <div className="header" style={{ position: 'relative', gap: 8 }}>
-        <h2 className="text-accent" style={{ margin: 0, fontSize: '1.2rem' }}>Stellar Privacy</h2>
+    <div className="view-container dashboard">
+      <div className="header" style={{ position: 'relative', gap: 8, marginBottom: 14 }}>
+        <h2 className="text-accent" style={{ margin: 0, fontSize: '1.15rem', letterSpacing: '0.02em' }}>Astrym</h2>
         <AccountMenu
           accounts={accounts}
           activeIndex={confirmedActiveIndex}
@@ -1779,81 +2455,91 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           onRename={handleRenameAccount}
         />
         <div style={{ display: 'flex', gap: 6, flex: '0 0 auto' }}>
-          <button onClick={() => setView('settings')} className="btn-outline" style={{ padding: '6px 8px', fontSize: '0.82rem' }}>Settings</button>
-          <button onClick={handleLock} className="btn-outline" style={{ padding: '6px 8px', fontSize: '0.82rem' }}>Lock</button>
+          <button onClick={() => setView('settings')} className="btn-outline" style={{ padding: '6px 9px', fontSize: '0.8rem' }}>Ajustes</button>
+          <button onClick={handleLock} className="btn-outline" style={{ padding: '6px 9px', fontSize: '0.8rem' }}>Bloquear</button>
         </div>
       </div>
       
       {accountError && (
         <div className="error-card">
-          <span style={{ fontSize: '0.9em' }}>{accountError}</span>
-          <button onClick={loadAccounts} className="btn-error">Retry</button>
+          <span style={{ fontSize: '0.86rem' }}>{accountError}</span>
+          <button onClick={loadAccounts} className="btn-error">Reintentar</button>
         </div>
       )}
       
       {loadingAccounts ? (
         <div className="center-content">
-          <p className="text-secondary">Loading account...</p>
+          <p className="text-secondary">Cargando cuenta…</p>
         </div>
       ) : account ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div className="card balance-card" style={{ padding: 25, border: '1px solid var(--border-color)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <PrivacyModeSelector
+            snapshot={nymSnapshot}
+            busy={nymBusy}
+            onSelectDirect={() => handleOneClickPrivacyMode('direct')}
+            onSelectNym={() => handleOneClickPrivacyMode('nym')}
+          />
+
+          <div className="card balance-card">
             <div className="balance-indicator" data-status={rpcStatus}></div>
             
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+            <div className="row-between" style={{ alignItems: 'flex-start', marginBottom: 14 }}>
               <div>
-                <h3 style={{ margin: '0 0 4px 0', fontSize: '1rem', fontWeight: '500' }}>{account.label}</h3>
+                <h3 style={{ margin: '0 0 4px 0', fontSize: '0.95rem', fontWeight: 600 }}>{account.label}</h3>
                 <CopyAddressButton address={account.address} label={account.label} />
               </div>
-              
-              <div className="horizon-status" data-horizon-status={rpcStatus}>
-                {rpcStatus === 'connecting' && <span className="text-secondary">Horizon pending</span>}
-                {rpcStatus === 'connected' && <span className="text-accent">Horizon OK</span>}
-                {rpcStatus === 'unavailable' && <span className="error-text">Horizon failed</span>}
-              </div>
+              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-sec)', padding: '3px 8px', borderRadius: 999, background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}>
+                Stellar Testnet
+              </span>
             </div>
             
-            <h1 style={{ margin: '0', fontSize: '2.8rem', fontWeight: '700' }}>
-              {balanceLoading ? <span className="text-secondary" style={{ fontSize: '2rem' }}>...</span> : balance} 
-              <span className="text-secondary" style={{ fontSize: '1.2rem', fontWeight: 'normal', marginLeft: 8 }}>{currency}</span>
+            <p className="text-secondary" style={{ margin: '0 0 4px 0', fontSize: '0.78rem' }}>Saldo disponible</p>
+            <h1 className="balance-amount">
+              {balanceLoading ? <span className="text-secondary" style={{ fontSize: '1.8rem' }}>…</span> : balance} 
+              <span className="text-secondary" style={{ fontSize: '1.1rem', fontWeight: 500, marginLeft: 8 }}>{currency}</span>
             </h1>
 
             {isUnfunded && (
-              <div style={{ marginTop: 15, padding: '12px 14px', background: 'rgba(255, 193, 7, 0.12)', border: '1px solid rgba(255, 193, 7, 0.3)', borderRadius: 8 }}>
-                <p style={{ margin: '0 0 8px 0', fontSize: '0.82rem', color: 'var(--text-main)' }}>
-                  This account is unfunded on Stellar Testnet. You can request free Testnet XLM to fund it.
+              <div style={{ marginTop: 14, padding: '12px', background: 'rgba(60, 232, 148, 0.08)', border: '1px solid rgba(60, 232, 148, 0.25)', borderRadius: 10 }}>
+                <p style={{ margin: '0 0 8px 0', fontSize: '0.8rem', lineHeight: 1.4, color: 'var(--text-main)' }}>
+                  Esta cuenta aún no tiene saldo en Testnet. Puedes solicitar XLM de prueba gratis.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => handleFundTestnet(account.address)}
-                  disabled={fundingLoading}
-                  className="btn-outline"
-                  style={{ width: '100%', padding: '8px 12px', fontSize: '0.82rem', fontWeight: 600, color: 'var(--accent-color)', borderColor: 'var(--accent-color)', cursor: 'pointer' }}
-                >
-                  {fundingLoading ? 'Funding from Friendbot...' : 'Fund with Friendbot (10,000 Testnet XLM)'}
-                </button>
+                <FriendbotFundButton
+                  mode={friendbotGate.mode}
+                  modeKnown={friendbotGate.modeKnown}
+                  nymConnected={friendbotGate.nymConnected}
+                  fundingLoading={fundingLoading}
+                  onFund={() => handleFundTestnet(account.address)}
+                />
                 {fundingMessage && (
-                  <p style={{ margin: '8px 0 0', fontSize: '0.78rem', color: 'var(--accent-color)' }}>{fundingMessage}</p>
+                  <p style={{ margin: '8px 0 0', fontSize: '0.76rem', color: 'var(--accent-color)' }}>{fundingMessage}</p>
                 )}
               </div>
             )}
 
             {balanceError && (
-              <div style={{ marginTop: 15, padding: 10, background: 'rgba(255, 107, 107, 0.1)', borderRadius: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="error-text" style={{ fontSize: '0.85em' }}>{balanceError}</span>
-                <button onClick={() => fetchBalance(account.address, account.index)} disabled={balanceLoading} className="btn-error">Retry</button>
+              <div style={{ marginTop: 14, padding: 10, background: 'rgba(255, 107, 107, 0.1)', border: '1px solid rgba(255, 107, 107, 0.3)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <span className="error-text" style={{ fontSize: '0.8rem' }}>{balanceError}</span>
+                <button onClick={() => fetchBalance(account.address, account.index)} disabled={balanceLoading} className="btn-error">Reintentar</button>
               </div>
             )}
           </div>
 
           <div className="action-grid">
-            <button onClick={() => setView('send')} className="btn-primary" style={{ padding: 14 }}>Send</button>
-            <button onClick={() => setView('receive')} className="btn-secondary" style={{ padding: 14 }}>Receive</button>
+            <button onClick={() => setView('receive')} className="btn-secondary">Recibir</button>
+            <button onClick={() => setView('send')} className="btn-primary">Enviar</button>
           </div>
+
+          <RecentActivityCard
+            items={mergedRecentTxs}
+            loading={historyLoading}
+            blockedByNym={nymSnapshot.mode === 'nym' && !nymSnapshot.connected}
+            error={historyError}
+          />
         </div>
       ) : (
         <div className="center-content">
-          <p className="text-secondary">{accounts.length > 0 ? 'Choose an account from the wallet menu.' : 'No accounts are available. Open the wallet menu to create one.'}</p>
+          <p className="text-secondary">{accounts.length > 0 ? 'Selecciona una cuenta desde el menú superior.' : 'No hay cuentas disponibles. Abre el menú superior para crear una.'}</p>
         </div>
       )}
     </div>

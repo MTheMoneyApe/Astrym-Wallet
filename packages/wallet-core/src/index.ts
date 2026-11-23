@@ -132,8 +132,8 @@ export type {
   StellarHttpOperation,
   FailClosedTransportRouterOptions,
 } from './nym/NymTransportPolicy.js';
-// Note: createPermissiveSignatureGate was removed. Use createContextualSignatureGate
-// (default require-prior-approval). Tests may use approvalMode 'bind-on-authorize'
-// via direct import from signatureGate — not a production authorization path.
+// Note: createPermissiveSignatureGate was removed. Production SPP signing uses
+// sppSignGate.authorizeSppSignature (Testnet allowlist, single-use intent, real fee).
+// signatureGate's bind-on-authorize mode is not a production authorization path.
 // SppSession is RO-only; wire createSppSdkRuntime from an extension page host (Fase 3).
 // SppIntegrationStatus is a UI/status contract only — does not initialize the SDK.

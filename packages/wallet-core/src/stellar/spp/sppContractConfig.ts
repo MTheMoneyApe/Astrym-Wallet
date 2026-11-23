@@ -226,6 +226,25 @@ export function parseSppContractConfig(raw: unknown): SppContractConfigInput {
   return out;
 }
 
+/**
+ * Token contract configured for an enabled pool. Refuses unknown pools
+ * instead of substituting another asset contract.
+ */
+export function tokenContractIdForEnabledPool(
+  config: SppContractConfigInput,
+  poolContractId: string,
+): string {
+  const match = config.pools.find(
+    (pool) => pool.enabled && pool.poolContractId === poolContractId,
+  );
+  if (!match) {
+    throw new SppContractConfigError(
+      `No enabled pool ${poolContractId} in the contract config`,
+    );
+  }
+  return match.tokenContractId;
+}
+
 export function findEnabledPoolContract(
   config: SppContractConfigInput,
   preferredPoolContract?: string | null,

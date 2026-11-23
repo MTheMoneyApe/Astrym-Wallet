@@ -1,6 +1,24 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { installAndroidChromeShim } from '../../src/webapp/installChromeShim.js';
+import { NymRuntimeController } from '../../src/background/nym/NymRuntimeController.js';
+import { NymGatewayConfigService } from '../../src/background/nym/NymGatewayConfigService.js';
+import { NymHostPermissionService } from '../../src/background/nym/NymHostPermissionService.js';
+import type { NymSessionBridge } from '../../src/background/nym/NymRuntimeController.js';
+
+function installOnPath(pathname: string): { runtime: { sendMessage: (...args: unknown[]) => Promise<unknown>; onMessage: { addListener: (fn: (...args: unknown[]) => unknown) => void } } } {
+  delete (globalThis as { chrome?: unknown }).chrome;
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: {
+      protocol: 'http:',
+      pathname,
+      origin: 'http://127.0.0.1:5173',
+    },
+  });
+  installAndroidChromeShim();
+  return (globalThis as { chrome: { runtime: { sendMessage: (...args: unknown[]) => Promise<unknown>; onMessage: { addListener: (fn: (...args: unknown[]) => unknown) => void } } } }).chrome;
+}
 
 describe('Android chrome shim', () => {
   it('satisfies webextension-polyfill storage and alarms', async () => {
@@ -16,5 +34,146 @@ describe('Android chrome shim', () => {
     await browser.alarms.create('astrym-probe', { when: Date.now() + 60_000 });
     const clearedAlarm = await browser.alarms.clear('astrym-probe');
     expect(clearedAlarm).toBe(true);
+  });
+
+  it('stamps the sender with the current document, not a fixed webapp url', async () => {
+    const host = installOnPath('/spp-host.html');
+    let sppSender = '';
+    host.runtime.onMessage.addListener((_message: unknown, sender: unknown) => {
+      sppSender = (sender as { url?: string }).url ?? '';
+      return Promise.resolve({ ok: true });
+    });
+    await host.runtime.sendMessage({ ping: true });
+    expect(sppSender).toBe('/spp-host.html');
+
+    const webapp = installOnPath('/webapp.html');
+    let webSender = '';
+    webapp.runtime.onMessage.addListener((_message: unknown, sender: unknown) => {
+      webSender = (sender as { url?: string }).url ?? '';
+      return Promise.resolve({ ok: true });
+    });
+    await webapp.runtime.sendMessage({ ping: true });
+    expect(webSender).toBe('/webapp.html');
+  });
+});
+
+describe('Android chrome shim storage failures', () => {
+  afterEach(() => {
+    delete (globalThis as { chrome?: unknown }).chrome;
+  });
+
+  function throwingStorage(name: 'QuotaExceededError' | 'SecurityError') {
+    const data = new Map<string, string>();
+    let fail = true;
+    const storage = {
+      getItem: (key: string) => (data.has(key) ? data.get(key)! : null),
+      setItem: (key: string, value: string) => {
+        if (fail) {
+          const error = new Error(name);
+          error.name = name;
+          throw error;
+        }
+        data.set(key, value);
+      },
+      removeItem: (key: string) => {
+        data.delete(key);
+      },
+      allow() {
+        fail = false;
+      },
+    };
+    return storage;
+  }
+
+  function stubBridge(): NymSessionBridge {
+    return {
+      setup: async () => {},
+      disconnect: async () => {},
+      mixFetch: async () => new Response('ok'),
+      queryStatus: async () => null,
+    };
+  }
+
+  it('rejects a promise set and still completes a later set after quota and security errors', async () => {
+    for (const name of ['QuotaExceededError', 'SecurityError'] as const) {
+      delete (globalThis as { chrome?: unknown }).chrome;
+      const storage = throwingStorage(name);
+      installAndroidChromeShim({ localStorage: storage, storageEvents: null });
+      const chromeApi = (globalThis as unknown as {
+        chrome: {
+          storage: {
+            local: {
+              get: (keys?: string | null) => Promise<Record<string, unknown>>;
+              set: (items: Record<string, unknown>) => Promise<void>;
+            };
+          };
+        };
+      }).chrome;
+
+      await expect(chromeApi.storage.local.set({ choice: 'direct' })).rejects.toThrow(
+        new RegExp(name),
+      );
+      expect(storage.getItem('astrym.chrome.storage.local.v1')).toBeNull();
+
+      storage.allow();
+      await chromeApi.storage.local.set({ choice: 'nym' });
+      const stored = await chromeApi.storage.local.get('choice');
+      expect(stored['choice']).toBe('nym');
+      delete (globalThis as { chrome?: unknown }).chrome;
+    }
+  });
+
+  it('reports callback lastError and does not grant Direct when the write fails', async () => {
+    const storage = throwingStorage('QuotaExceededError');
+    installAndroidChromeShim({ localStorage: storage, storageEvents: null });
+    const chromeApi = (globalThis as unknown as {
+      chrome: {
+        runtime: { lastError?: { message: string } };
+        storage: {
+          local: {
+            set: (items: Record<string, unknown>, callback?: () => void) => void;
+          };
+        };
+      };
+    }).chrome;
+
+    const message = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('storage set callback never ran')), 500);
+      chromeApi.storage.local.set({ choice: 'direct' }, () => {
+        clearTimeout(timer);
+        const err = chromeApi.runtime.lastError;
+        if (!err) {
+          reject(new Error('expected lastError'));
+          return;
+        }
+        resolve(err.message);
+      });
+    });
+    expect(message).toMatch(/QuotaExceededError/);
+    expect(storage.getItem('astrym.chrome.storage.local.v1')).toBeNull();
+
+    const ctrl = new NymRuntimeController({
+      bridge: stubBridge(),
+      gatewayConfig: new NymGatewayConfigService({
+        get: async () => ({}),
+        set: async () => {},
+      }),
+      hostPermissions: new NymHostPermissionService({
+        contains: async () => false,
+        request: async () => false,
+        remove: async () => true,
+      }),
+    });
+    await ctrl.whenPrivacyReady();
+    await expect(ctrl.setMode('direct')).rejects.toThrow(/QuotaExceededError/);
+    expect(ctrl.mode).not.toBe('direct');
+    expect(ctrl.getSnapshot().privacyPreference).not.toBe('direct');
+    expect(ctrl.getSnapshot().egressBlocked).toBe(true);
+    expect(ctrl.getSnapshot().diagnosticCode).toBe('PRIVACY_PREFERENCE_PERSIST_FAILED');
+
+    storage.allow();
+    await ctrl.setMode('nym');
+    expect(ctrl.getSnapshot().privacyPreference).toBe('nym');
+    expect(ctrl.getSnapshot().diagnosticCode).not.toBe('PRIVACY_PREFERENCE_PERSIST_FAILED');
   });
 });

@@ -1,7 +1,14 @@
 {
+  "git": {
+    "deploymentEnabled": {
+      "*": false,
+      "**": false,
+      "master": true
+    }
+  },
   "framework": null,
   "installCommand": "pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm build:webapp:vercel",
+  "buildCommand": "pnpm build:webapp",
   "outputDirectory": "packages/extension/dist-webapp",
   "cleanUrls": false,
   "trailingSlash": false,
@@ -42,6 +49,36 @@
       ]
     },
     {
+      "source": "/downloads/(.*)\\.zip",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/zip"
+        },
+        {
+          "key": "Content-Disposition",
+          "value": "attachment"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600"
+        }
+      ]
+    },
+    {
+      "source": "/downloads/(.*)\\.json",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600"
+        }
+      ]
+    },
+    {
       "source": "/webapp-sw.js",
       "headers": [
         {
@@ -49,6 +86,45 @@
           "value": "public, max-age=0, must-revalidate"
         }
       ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https://horizon-testnet.stellar.org https://rpc.ankr.com https://friendbot.stellar.org https://soroban-testnet.stellar.org https://validator.nymtech.net https://mainnet-node-status-api.nymtech.cc https://rpc.nymtech.net wss://rpc.nymtech.net wss://nym-node-cli.devrel.nymte.ch:9001; worker-src 'self' blob:; img-src 'self' data:; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=63072000; includeSubDomains"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/downloads/astrym-wallet-mv3.zip",
+      "destination": "https://github.com/MTheMoneyApe/Astrym-Wallet/releases/download/astrym-extension-downloads/astrym-wallet-mv3.zip"
     }
   ]
 }

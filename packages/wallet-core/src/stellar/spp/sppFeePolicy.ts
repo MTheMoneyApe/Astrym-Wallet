@@ -47,17 +47,18 @@ export const SPP_PREVIOUS_MAX_FEE_STROOPS: Record<SppFeeOperation, number> = {
 };
 
 /**
- * Proposed ceilings after preflight + fee-sim evidence (numbers unchanged).
+ * Payment tx.fee caps after M's 2026-11-10 decision. Register is unchanged.
  * register: defensive cap well above registry reads (~6.4k) and below prior 20M;
  *   real KeyOwnershipProof success fee unknown.
- * mutators: below prior 15M; above pool read outlier (~4.2M resource fee) with
- *   headroom for ZK verify + writes; NOT successful deposit/transfer/withdraw sims.
+ * mutators: M set the total tx.fee cap to 15_000_000 stroops (1.5 XLM) on
+ *   2026-11-10. A Testnet deposit envelope used tx.fee 13_418_332. register
+ *   stays 5_000_000. This is not a change to pool-fee economics.
  */
 export const SPP_PROPOSED_MAX_FEE_STROOPS: Record<SppFeeOperation, number> = {
   register_public_keys: 5_000_000,
-  deposit: 8_000_000,
-  transfer: 8_000_000,
-  withdraw: 8_000_000,
+  deposit: 15_000_000,
+  transfer: 15_000_000,
+  withdraw: 15_000_000,
 };
 
 export function maxFeeStroopsForOperation(operation: SppFeeOperation): string {

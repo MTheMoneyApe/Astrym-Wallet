@@ -13,7 +13,10 @@ const notificationCreate = vi.hoisted(() => vi.fn());
 
 vi.mock('webextension-polyfill', () => ({
   default: {
-    runtime: { id: 'test', getURL: (path: string) => `chrome-extension://test/${path}` },
+    runtime: {
+      id: 'test',
+      getURL: (path: string) => `chrome-extension://test${path.startsWith('/') ? path : `/${path}`}`,
+    },
     notifications: { create: notificationCreate },
     storage: { local: { get: vi.fn(), set: vi.fn(), remove: vi.fn() } },
   },

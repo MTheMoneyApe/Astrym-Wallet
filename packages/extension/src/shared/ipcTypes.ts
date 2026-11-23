@@ -22,6 +22,8 @@ import type {
   GetBalanceResponseSchema,
   GetStellarBalanceRequestSchema,
   GetStellarBalanceResponseSchema,
+  GetStellarRecentPaymentsRequestSchema,
+  GetStellarRecentPaymentsResponseSchema,
   FundStellarTestnetRequestSchema,
   FundStellarTestnetResponseSchema,
   MessageSchemas,
@@ -45,6 +47,8 @@ export type GetBalanceResponse = z.infer<typeof GetBalanceResponseSchema>;
 
 export type GetStellarBalanceRequest = z.infer<typeof GetStellarBalanceRequestSchema>;
 export type GetStellarBalanceResponse = z.infer<typeof GetStellarBalanceResponseSchema>;
+export type GetStellarRecentPaymentsRequest = z.infer<typeof GetStellarRecentPaymentsRequestSchema>;
+export type GetStellarRecentPaymentsResponse = z.infer<typeof GetStellarRecentPaymentsResponseSchema>;
 
 export type FundStellarTestnetRequest = z.infer<typeof FundStellarTestnetRequestSchema>;
 export type FundStellarTestnetResponse = z.infer<typeof FundStellarTestnetResponseSchema>;

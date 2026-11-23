@@ -99,7 +99,11 @@ describe('Extension Security — Static Invariants', () => {
         'background/nym/PublicDataClient.ts',
         'background/nym/StellarHorizonProbe.ts',
         'background/nym/stellarTransportFetch.ts',
+        // Offscreen MixFetch hang bound (95s). Not vault lock and not clearnet.
+        'nym-offscreen/runtime.ts',
         'spp-host/storageLabPrep.ts',
+        // Storage-unlock dialog TTL backstop beside chrome.alarms. Not vault lock.
+        'spp-host/sppStorageKeyProvider.ts',
       ].map((rel) => path.normalize(rel)),
     );
 
@@ -113,6 +117,21 @@ describe('Extension Security — Static Invariants', () => {
       }
       expect(content).not.toMatch(/\WsetTimeout\s*\(/);
     }
+
+    // The scanner still flags timer misuse. runtime.ts is listed only because its
+    // one setTimeout bounds a hung MixFetch promise and refuses clearnet first.
+    expect(/\WsetTimeout\s*\(/.test(' setTimeout(() => lockVault(), 1000); ')).toBe(true);
+    expect(/\WsetInterval\s*\(/.test(' setInterval(() => lockVault(), 1000); ')).toBe(true);
+    expect(setTimeoutAllowlist.has(path.normalize('background/alarms/ChromeAlarmService.ts'))).toBe(
+      false,
+    );
+    const runtimeSrc = fs.readFileSync(
+      path.resolve(SRC_DIR, 'nym-offscreen/runtime.ts'),
+      'utf8',
+    );
+    expect(runtimeSrc).toContain('refusing clearnet fallback');
+    expect(runtimeSrc).toContain('not clearnet');
+    expect(runtimeSrc).toContain('REQUEST_HARD_TIMEOUT_MS');
   });
 
   it('no secret-bearing properties in IPC response schemas', () => {

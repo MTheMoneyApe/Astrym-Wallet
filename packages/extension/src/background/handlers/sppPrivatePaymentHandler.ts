@@ -1,20 +1,77 @@
+import { Networks } from '@stellar/stellar-sdk';
+import browser from 'webextension-polyfill';
 import {
   STELLAR_SOROBAN_TESTNET_RPC,
   executeSppPrivatePayment,
 } from '@solanym/wallet-core/src/stellar/spp/sppNymOption.js';
 import { maxFeeStroopsForOperation } from '@solanym/wallet-core/src/stellar/spp/sppFeePolicy.js';
+import {
+  assertSppPoolPaymentEconomicsBound,
+  mintSppSignApproval,
+  revokeSppSignApprovals,
+} from '@solanym/wallet-core/src/stellar/spp/sppSignGate.js';
+import { isSppTestnetBroadcastAuthorized } from '@solanym/wallet-core/src/stellar/spp/sppBroadcastGate.js';
+import { tokenContractIdForEnabledPool } from '@solanym/wallet-core/src/stellar/spp/sppContractConfig.js';
+import { getNethermindPublicTestnetContractConfig } from '@solanym/wallet-core/src/stellar/spp/nethermind/nethermindPublicTestnet.js';
+import type { KeyManager } from '@solanym/wallet-core/src/keyManager/KeyManager.js';
 import type { ValidatedRequestPayload, ValidatedResponsePayload } from '../../shared/ipcTypes.js';
 import { getNymRuntimeController } from '../nym/NymRuntimeController.js';
+import { isTrustedWalletPageUrl } from '../trustedWalletOrigin.js';
+import { resolveActiveStellarAddress } from '../spp/sppBoundAccount.js';
 import {
   createChromeRuntimeSppHostSender,
   createSppHostPoolProxy,
 } from '../spp/sppHostPoolProxy.js';
 import { getSppPrivatePool, getSppHostLifecycle } from '../spp/sppPrivatePoolRegistry.js';
+import { readAllowlistedGetTransactionStatus } from '../spp/sppSubmissionReconcile.js';
 
-export function createSppPrivatePaymentHandler() {
+export function createSppPrivatePaymentHandler(deps: { keyManager: KeyManager }) {
   return async (
     payload: ValidatedRequestPayload<'SPP_PRIVATE_PAYMENT'>,
+    sender?: browser.Runtime.MessageSender,
   ): Promise<ValidatedResponsePayload<'SPP_PRIVATE_PAYMENT'>> => {
+    if (!sender || sender.id !== browser.runtime.id || !isTrustedWalletPageUrl(sender.url)) {
+      throw Object.assign(
+        new Error('SPP payment approval must originate from trusted wallet UI'),
+        { name: 'UNAUTHORIZED' },
+      );
+    }
+    const { address } = await resolveActiveStellarAddress(deps.keyManager);
+    if (!isSppTestnetBroadcastAuthorized()) {
+      revokeSppSignApprovals(address);
+      throw Object.assign(
+        new Error(
+          'SPP_BROADCAST_AWAITING_APPROVAL: private payment is disabled. No approval was minted.',
+        ),
+        { name: 'BROADCAST_AWAITING_APPROVAL', code: 'BROADCAST_AWAITING_APPROVAL' },
+      );
+    }
+    // BLOCKED: this throws for deposit, transfer, and withdraw. The mint below
+    // is not a payment authorization and does not run while the throw stands.
+    assertSppPoolPaymentEconomicsBound(payload.operation);
+    const maxFeeStroops = payload.maxFeeStroops ?? maxFeeStroopsForOperation(payload.operation);
+    const tokenContractId = tokenContractIdForEnabledPool(
+      getNethermindPublicTestnetContractConfig(),
+      payload.poolContract,
+    );
+    mintSppSignApproval({
+      operation: payload.operation,
+      amountStroops: payload.amountStroops,
+      recipient: payload.operation === 'deposit' ? null : (payload.recipient ?? null),
+      networkPassphrase: Networks.TESTNET,
+      poolContractId: payload.poolContract,
+      registryContractId: null,
+      tokenContractId,
+      registerNoteKeyHex: null,
+      registerEncryptionKeyHex: null,
+      registerNoteKeyProofHex: null,
+      registerEncryptionKeySignatureHex: null,
+      registerOwnerSignatureHex: null,
+      maxFeeStroops,
+      minResourceFeeStroops: null,
+      account: address,
+      exactMessage: null,
+    });
     const ctrl = getNymRuntimeController();
     const snap = ctrl.getSnapshot();
     const rpcUrl = payload.rpcUrl ?? STELLAR_SOROBAN_TESTNET_RPC;
@@ -58,7 +115,7 @@ export function createSppPrivatePaymentHandler() {
       }
     }
 
-    return executeSppPrivatePayment({
+    const payment = await executeSppPrivatePayment({
       gate,
       request,
       rpcUrl,
@@ -66,7 +123,16 @@ export function createSppPrivatePaymentHandler() {
       pool,
       preferInjectedTransport: true,
       authorizationFingerprint: payload.authorizationFingerprint,
-      maxFeeStroops: payload.maxFeeStroops ?? maxFeeStroopsForOperation(payload.operation),
+      maxFeeStroops,
+      confirmTransaction: (hash) =>
+        readAllowlistedGetTransactionStatus(hash, ctrl.getStellarFetch(), rpcUrl),
     });
+    return {
+      operation: payment.operation,
+      txHash: payment.txHash,
+      txHashes: [...payment.txHashes],
+      rpcRoutedViaNym: payment.rpcRoutedViaNym,
+      confirmation: payment.confirmation,
+    };
   };
 }

@@ -328,6 +328,27 @@ describe('FailClosedTransportRouter', () => {
     expect(bridge.mixFetch).not.toHaveBeenCalled();
   });
 
+  it('a stale setMode(direct) does not clearnet when the policy refuses', async () => {
+    const bridge = mockBridge();
+    const nym = new MixFetchNymTransport(bridge);
+    await nym.connect();
+    const directFetch = vi.fn(async () => new Response('clearnet'));
+    const router = createFailClosedTransportRouter({
+      mode: 'nym',
+      nym,
+      directFetch: directFetch as typeof fetch,
+      directAuthorized: () => false,
+    });
+    const held = router;
+    held.setMode('direct');
+    expect(held.mode).toBe('direct');
+    await expect(held.fetch('https://horizon.example/x')).rejects.toMatchObject({
+      code: 'NOT_CONNECTED',
+    });
+    expect(directFetch).not.toHaveBeenCalled();
+    expect(bridge.mixFetch).not.toHaveBeenCalled();
+  });
+
   it('setMode never auto-flips on error', async () => {
     const bridge = mockBridge({
       mixFetch: vi.fn(async () => {

@@ -1,0 +1,455 @@
+Import[183]:
+ - func[0] sig=2 <./stellar_private_payments_web_bg.js.__wbg_new_typed_6f8b0d724fe26c07> <- ./stellar_private_payments_web_bg.js.__wbg_new_typed_6f8b0d724fe26c07
+ - func[1] sig=1 <./stellar_private_payments_web_bg.js.__wbindgen_object_drop_ref> <- ./stellar_private_payments_web_bg.js.__wbindgen_object_drop_ref
+ - func[2] sig=4 <./stellar_private_payments_web_bg.js.__wbindgen_object_clone_ref> <- ./stellar_private_payments_web_bg.js.__wbindgen_object_clone_ref
+ - func[3] sig=2 <./stellar_private_payments_web_bg.js.__wbg_get_unchecked_363572bdd397d473> <- ./stellar_private_payments_web_bg.js.__wbg_get_unchecked_363572bdd397d473
+ - func[4] sig=4 <./stellar_private_payments_web_bg.js.__wbg_length_4e1adc0d42e23620> <- ./stellar_private_payments_web_bg.js.__wbg_length_4e1adc0d42e23620
+ - func[5] sig=2 <./stellar_private_payments_web_bg.js.__wbg_push_bfdf956ba476f65b> <- ./stellar_private_payments_web_bg.js.__wbg_push_bfdf956ba476f65b
+ - func[6] sig=3 <./stellar_private_payments_web_bg.js.__wbg_set_13d25b81ab403f5e> <- ./stellar_private_payments_web_bg.js.__wbg_set_13d25b81ab403f5e
+ - func[7] sig=5 <./stellar_private_payments_web_bg.js.__wbg_apply_5d9aa7604c2490a8> <- ./stellar_private_payments_web_bg.js.__wbg_apply_5d9aa7604c2490a8
+ - func[8] sig=5 <./stellar_private_payments_web_bg.js.__wbg_call_6bcf8d3e20937e46> <- ./stellar_private_payments_web_bg.js.__wbg_call_6bcf8d3e20937e46
+ - func[9] sig=5 <./stellar_private_payments_web_bg.js.__wbg_set_bf6dde4923b9b059> <- ./stellar_private_payments_web_bg.js.__wbg_set_bf6dde4923b9b059
+ - func[10] sig=4 <./stellar_private_payments_web_bg.js.__wbg_toString_794a30e85c994f2a> <- ./stellar_private_payments_web_bg.js.__wbg_toString_794a30e85c994f2a
+ - func[11] sig=4 <./stellar_private_payments_web_bg.js.__wbg_contractsstatedata_new> <- ./stellar_private_payments_web_bg.js.__wbg_contractsstatedata_new
+ - func[12] sig=4 <./stellar_private_payments_web_bg.js.__wbg_disclosureverificationreport_new> <- ./stellar_private_payments_web_bg.js.__wbg_disclosureverificationreport_new
+ - func[13] sig=4 <./stellar_private_payments_web_bg.js.__wbg_poolinfo_new> <- ./stellar_private_payments_web_bg.js.__wbg_poolinfo_new
+ - func[14] sig=4 <./stellar_private_payments_web_bg.js.__wbg_gvkaudit_new> <- ./stellar_private_payments_web_bg.js.__wbg_gvkaudit_new
+ - func[15] sig=4 <./stellar_private_payments_web_bg.js.__wbg_privatepool_new> <- ./stellar_private_payments_web_bg.js.__wbg_privatepool_new
+ - func[16] sig=4 <./stellar_private_payments_web_bg.js.__wbg_account_new> <- ./stellar_private_payments_web_bg.js.__wbg_account_new
+ - func[17] sig=4 <./stellar_private_payments_web_bg.js.__wbg_poolestimate_new> <- ./stellar_private_payments_web_bg.js.__wbg_poolestimate_new
+ - func[18] sig=4 <./stellar_private_payments_web_bg.js.__wbg_portfoliobalance_new> <- ./stellar_private_payments_web_bg.js.__wbg_portfoliobalance_new
+ - func[19] sig=4 <./stellar_private_payments_web_bg.js.__wbg_client_new> <- ./stellar_private_payments_web_bg.js.__wbg_client_new
+ - func[20] sig=4 <./stellar_private_payments_web_bg.js.__wbg_usernotesummary_new> <- ./stellar_private_payments_web_bg.js.__wbg_usernotesummary_new
+ - func[21] sig=4 <./stellar_private_payments_web_bg.js.__wbg_poolexecuteresult_new> <- ./stellar_private_payments_web_bg.js.__wbg_poolexecuteresult_new
+ - func[22] sig=4 <./stellar_private_payments_web_bg.js.__wbg_poolconfigentry_new> <- ./stellar_private_payments_web_bg.js.__wbg_poolconfigentry_new
+ - func[23] sig=4 <./stellar_private_payments_web_bg.js.__wbg_operationalfeeditem_new> <- ./stellar_private_payments_web_bg.js.__wbg_operationalfeeditem_new
+ - func[24] sig=4 <./stellar_private_payments_web_bg.js.__wbg_disclosurereceipt_new> <- ./stellar_private_payments_web_bg.js.__wbg_disclosurereceipt_new
+ - func[25] sig=4 <./stellar_private_payments_web_bg.js.__wbg_instanceof_Map_1ff6a2b54c899f0d> <- ./stellar_private_payments_web_bg.js.__wbg_instanceof_Map_1ff6a2b54c899f0d
+ - func[26] sig=4 <./stellar_private_payments_web_bg.js.__wbg_instanceof_Promise_f6320f682f582ddf> <- ./stellar_private_payments_web_bg.js.__wbg_instanceof_Promise_f6320f682f582ddf
+ - func[27] sig=4 <./stellar_private_payments_web_bg.js.__wbg_storagehandle_new> <- ./stellar_private_payments_web_bg.js.__wbg_storagehandle_new
+ - func[28] sig=4 <./stellar_private_payments_web_bg.js.__wbg_userpublickeys_new> <- ./stellar_private_payments_web_bg.js.__wbg_userpublickeys_new
+ - func[29] sig=4 <./stellar_private_payments_web_bg.js.__wbg_verifierentry_new> <- ./stellar_private_payments_web_bg.js.__wbg_verifierentry_new
+ - func[30] sig=4 <./stellar_private_payments_web_bg.js.__wbg_recipientlookup_new> <- ./stellar_private_payments_web_bg.js.__wbg_recipientlookup_new
+ - func[31] sig=4 <./stellar_private_payments_web_bg.js.__wbg_storage_new> <- ./stellar_private_payments_web_bg.js.__wbg_storage_new
+ - func[32] sig=13 <./stellar_private_payments_web_bg.js.__wbg_new_227d7c05414eb861> <- ./stellar_private_payments_web_bg.js.__wbg_new_227d7c05414eb861
+ - func[33] sig=0 <./stellar_private_payments_web_bg.js.__wbg_stack_3b0d974bbf31e44f> <- ./stellar_private_payments_web_bg.js.__wbg_stack_3b0d974bbf31e44f
+ - func[34] sig=0 <./stellar_private_payments_web_bg.js.__wbg_error_757e9472f8410341> <- ./stellar_private_payments_web_bg.js.__wbg_error_757e9472f8410341
+ - func[35] sig=2 <./stellar_private_payments_web_bg.js.__wbg_get_b1f0ab13c737f856> <- ./stellar_private_payments_web_bg.js.__wbg_get_b1f0ab13c737f856
+ - func[36] sig=2 <./stellar_private_payments_web_bg.js.__wbg_get_with_ref_key_6412cf3094599694> <- ./stellar_private_payments_web_bg.js.__wbg_get_with_ref_key_6412cf3094599694
+ - func[37] sig=3 <./stellar_private_payments_web_bg.js.__wbg_set_6be42768c690e380> <- ./stellar_private_payments_web_bg.js.__wbg_set_6be42768c690e380
+ - func[38] sig=0 <./stellar_private_payments_web_bg.js.__wbg_String_8564e559799eccda> <- ./stellar_private_payments_web_bg.js.__wbg_String_8564e559799eccda
+ - func[39] sig=4 <./stellar_private_payments_web_bg.js.__wbg_next_f31ecb8646d2c605> <- ./stellar_private_payments_web_bg.js.__wbg_next_f31ecb8646d2c605
+ - func[40] sig=4 <./stellar_private_payments_web_bg.js.__wbg_done_cffed884d87aa22e> <- ./stellar_private_payments_web_bg.js.__wbg_done_cffed884d87aa22e
+ - func[41] sig=4 <./stellar_private_payments_web_bg.js.__wbg_value_c227f843d21da141> <- ./stellar_private_payments_web_bg.js.__wbg_value_c227f843d21da141
+ - func[42] sig=5 <./stellar_private_payments_web_bg.js.__wbg_then_7a850dae4493f353> <- ./stellar_private_payments_web_bg.js.__wbg_then_7a850dae4493f353
+ - func[43] sig=2 <./stellar_private_payments_web_bg.js.__wbg_setTimeout_b4a9096784635514> <- ./stellar_private_payments_web_bg.js.__wbg_setTimeout_b4a9096784635514
+ - func[44] sig=4 <./stellar_private_payments_web_bg.js.__wbg_clearTimeout_1daad5c6ee4fcd3b> <- ./stellar_private_payments_web_bg.js.__wbg_clearTimeout_1daad5c6ee4fcd3b
+ - func[45] sig=4 <./stellar_private_payments_web_bg.js.__wbg_fetch_7a37768ab67c5bd8> <- ./stellar_private_payments_web_bg.js.__wbg_fetch_7a37768ab67c5bd8
+ - func[46] sig=0 <./stellar_private_payments_web_bg.js.__wbg_set_mode_f7e56ed768d0ade0> <- ./stellar_private_payments_web_bg.js.__wbg_set_mode_f7e56ed768d0ade0
+ - func[47] sig=3 <./stellar_private_payments_web_bg.js.__wbg_set_referrer_13cf56bbccbb2ceb> <- ./stellar_private_payments_web_bg.js.__wbg_set_referrer_13cf56bbccbb2ceb
+ - func[48] sig=0 <./stellar_private_payments_web_bg.js.__wbg_set_referrer_policy_dac1caa6e937479a> <- ./stellar_private_payments_web_bg.js.__wbg_set_referrer_policy_dac1caa6e937479a
+ - func[49] sig=0 <./stellar_private_payments_web_bg.js.__wbg_set_signal_f4b32f40f19786f4> <- ./stellar_private_payments_web_bg.js.__wbg_set_signal_f4b32f40f19786f4
+ - func[50] sig=2 <./stellar_private_payments_web_bg.js.__wbg_fetch_920242d59bac2026> <- ./stellar_private_payments_web_bg.js.__wbg_fetch_920242d59bac2026
+ - func[51] sig=13 <./stellar_private_payments_web_bg.js.__wbg_new_0afe64b4dc16ab74> <- ./stellar_private_payments_web_bg.js.__wbg_new_0afe64b4dc16ab74
+ - func[52] sig=0 <./stellar_private_payments_web_bg.js.__wbg_href_de709e84ed5de5d2> <- ./stellar_private_payments_web_bg.js.__wbg_href_de709e84ed5de5d2
+ - func[53] sig=0 <./stellar_private_payments_web_bg.js.__wbg_url_f1948b0d7f881e02> <- ./stellar_private_payments_web_bg.js.__wbg_url_f1948b0d7f881e02
+ - func[54] sig=4 <./stellar_private_payments_web_bg.js.__wbg_signal_45367c6c2255877a> <- ./stellar_private_payments_web_bg.js.__wbg_signal_45367c6c2255877a
+ - func[55] sig=13 <./stellar_private_payments_web_bg.js.__wbg_new_baa0a0207935dd43> <- ./stellar_private_payments_web_bg.js.__wbg_new_baa0a0207935dd43
+ - func[56] sig=4 <./stellar_private_payments_web_bg.js.__wbg_status_88ccc72fe7bea621> <- ./stellar_private_payments_web_bg.js.__wbg_status_88ccc72fe7bea621
+ - func[57] sig=1 <./stellar_private_payments_web_bg.js.__wbg_abort_76dea11221098ae5> <- ./stellar_private_payments_web_bg.js.__wbg_abort_76dea11221098ae5
+ - func[58] sig=0 <./stellar_private_payments_web_bg.js.__wbg_set_body_f39cee72c74a5b02> <- ./stellar_private_payments_web_bg.js.__wbg_set_body_f39cee72c74a5b02
+ - func[59] sig=0 <./stellar_private_payments_web_bg.js.__wbg_abort_03f8c5804715cb9a> <- ./stellar_private_payments_web_bg.js.__wbg_abort_03f8c5804715cb9a
+ - func[60] sig=3 <./stellar_private_payments_web_bg.js.__wbg_set_type_69954a3c7c11a724> <- ./stellar_private_payments_web_bg.js.__wbg_set_type_69954a3c7c11a724
+ - func[61] sig=7 <./stellar_private_payments_web_bg.js.__wbg_append_8e87c13f0f08f8cd> <- ./stellar_private_payments_web_bg.js.__wbg_append_8e87c13f0f08f8cd
+ - func[62] sig=2 <./stellar_private_payments_web_bg.js.__wbg_dispatchEvent_67aab71ae1deb26a> <- ./stellar_private_payments_web_bg.js.__wbg_dispatchEvent_67aab71ae1deb26a
+ - func[63] sig=4 <./stellar_private_payments_web_bg.js.__wbg_headers_2594464ff62969f3> <- ./stellar_private_payments_web_bg.js.__wbg_headers_2594464ff62969f3
+ - func[64] sig=4 <./stellar_private_payments_web_bg.js.__wbg_data_aa7ba49b34c0d883> <- ./stellar_private_payments_web_bg.js.__wbg_data_aa7ba49b34c0d883
+ - func[65] sig=0 <./stellar_private_payments_web_bg.js.__wbg_set_onmessage_d7e69fe35723df1e> <- ./stellar_private_payments_web_bg.js.__wbg_set_onmessage_d7e69fe35723df1e
+ - func[66] sig=0 <./stellar_private_payments_web_bg.js.__wbg_set_type_f73a726d9729f489> <- ./stellar_private_payments_web_bg.js.__wbg_set_type_f73a726d9729f489
+ - func[67] sig=4 <./stellar_private_payments_web_bg.js.__wbg_location_382075cf6a393ad4> <- ./stellar_private_payments_web_bg.js.__wbg_location_382075cf6a393ad4
+ - func[68] sig=4 <./stellar_private_payments_web_bg.js.__wbg_entries_f9de04c09a57314e> <- ./stellar_private_payments_web_bg.js.__wbg_entries_f9de04c09a57314e
+ - func[69] sig=2 <./stellar_private_payments_web_bg.js.__wbg_new_a313bf260f9bdcc3> <- ./stellar_private_payments_web_bg.js.__wbg_new_a313bf260f9bdcc3
+ - func[70] sig=5 <./stellar_private_payments_web_bg.js.__wbg_new_with_options_695bfde16ea544ed> <- ./stellar_private_payments_web_bg.js.__wbg_new_with_options_695bfde16ea544ed
+ - func[71] sig=0 <./stellar_private_payments_web_bg.js.__wbg_set_cache_6e8c35a5ed76edb1> <- ./stellar_private_payments_web_bg.js.__wbg_set_cache_6e8c35a5ed76edb1
+ - func[72] sig=2 <./stellar_private_payments_web_bg.js.__wbg_new_with_str_sequence_and_options_01ed9e0eee2dee62> <- ./stellar_private_payments_web_bg.js.__wbg_new_with_str_sequence_and_options_01ed9e0eee2dee62
+ - func[73] sig=0 <./stellar_private_payments_web_bg.js.__wbg_postMessage_14c07434f6b7e150> <- ./stellar_private_payments_web_bg.js.__wbg_postMessage_14c07434f6b7e150
+ - func[74] sig=0 <./stellar_private_payments_web_bg.js.__wbg_set_credentials_bf1d3e014213a571> <- ./stellar_private_payments_web_bg.js.__wbg_set_credentials_bf1d3e014213a571
+ - func[75] sig=5 <./stellar_private_payments_web_bg.js.__wbg_new_with_str_and_init_2f31a77deda127fd> <- ./stellar_private_payments_web_bg.js.__wbg_new_with_str_and_init_2f31a77deda127fd
+ - func[76] sig=0 <./stellar_private_payments_web_bg.js.__wbg_set_headers_31d373f68f28bf76> <- ./stellar_private_payments_web_bg.js.__wbg_set_headers_31d373f68f28bf76
+ - func[77] sig=4 <./stellar_private_payments_web_bg.js.__wbg_arrayBuffer_06f3da76f071d37f> <- ./stellar_private_payments_web_bg.js.__wbg_arrayBuffer_06f3da76f071d37f
+ - func[78] sig=8 <./stellar_private_payments_web_bg.js.__wbg_new_with_base_15feba63f6973577> <- ./stellar_private_payments_web_bg.js.__wbg_new_with_base_15feba63f6973577
+ - func[79] sig=3 <./stellar_private_payments_web_bg.js.__wbg_set_method_82e6c3c083da0734> <- ./stellar_private_payments_web_bg.js.__wbg_set_method_82e6c3c083da0734
+ - func[80] sig=0 <./stellar_private_payments_web_bg.js.__wbg_createObjectURL_7dadebfd232e594a> <- ./stellar_private_payments_web_bg.js.__wbg_createObjectURL_7dadebfd232e594a
+ - func[81] sig=1 <./stellar_private_payments_web_bg.js.__wbg_info_f25c01bee103395d> <- ./stellar_private_payments_web_bg.js.__wbg_info_f25c01bee103395d
+ - func[82] sig=1 <./stellar_private_payments_web_bg.js.__wbg_warn_d3544c7814fab534> <- ./stellar_private_payments_web_bg.js.__wbg_warn_d3544c7814fab534
+ - func[83] sig=1 <./stellar_private_payments_web_bg.js.__wbg_debug_eb092a10b3338acb> <- ./stellar_private_payments_web_bg.js.__wbg_debug_eb092a10b3338acb
+ - func[84] sig=1 <./stellar_private_payments_web_bg.js.__wbg_error_756c5934221e6fee> <- ./stellar_private_payments_web_bg.js.__wbg_error_756c5934221e6fee
+ - func[85] sig=4 <./stellar_private_payments_web_bg.js.__wbg_instanceof_Window_a3b8566f0a9c5d1a> <- ./stellar_private_payments_web_bg.js.__wbg_instanceof_Window_a3b8566f0a9c5d1a
+ - func[86] sig=4 <./stellar_private_payments_web_bg.js.__wbg_instanceof_Response_6366a785e400039b> <- ./stellar_private_payments_web_bg.js.__wbg_instanceof_Response_6366a785e400039b
+ - func[87] sig=4 <./stellar_private_payments_web_bg.js.__wbg_instanceof_Event_a4e4dbe20b01838b> <- ./stellar_private_payments_web_bg.js.__wbg_instanceof_Event_a4e4dbe20b01838b
+ - func[88] sig=0 <./stellar_private_payments_web_bg.js.__wbg_getRandomValues_c44a50d8cfdaebeb> <- ./stellar_private_payments_web_bg.js.__wbg_getRandomValues_c44a50d8cfdaebeb
+ - func[89] sig=0 <./stellar_private_payments_web_bg.js.__wbg_randomFillSync_6c25eac9869eb53c> <- ./stellar_private_payments_web_bg.js.__wbg_randomFillSync_6c25eac9869eb53c
+ - func[90] sig=4 <./stellar_private_payments_web_bg.js.__wbg_crypto_38df2bab126b63dc> <- ./stellar_private_payments_web_bg.js.__wbg_crypto_38df2bab126b63dc
+ - func[91] sig=4 <./stellar_private_payments_web_bg.js.__wbg_process_44c7a14e11e9f69e> <- ./stellar_private_payments_web_bg.js.__wbg_process_44c7a14e11e9f69e
+ - func[92] sig=4 <./stellar_private_payments_web_bg.js.__wbg_versions_276b2795b1c6a219> <- ./stellar_private_payments_web_bg.js.__wbg_versions_276b2795b1c6a219
+ - func[93] sig=4 <./stellar_private_payments_web_bg.js.__wbg_node_84ea875411254db1> <- ./stellar_private_payments_web_bg.js.__wbg_node_84ea875411254db1
+ - func[94] sig=13 <./stellar_private_payments_web_bg.js.__wbg_require_b4edbdcf3e2a1ef0> <- ./stellar_private_payments_web_bg.js.__wbg_require_b4edbdcf3e2a1ef0
+ - func[95] sig=4 <./stellar_private_payments_web_bg.js.__wbg_msCrypto_bd5a034af96bcba6> <- ./stellar_private_payments_web_bg.js.__wbg_msCrypto_bd5a034af96bcba6
+ - func[96] sig=2 <./stellar_private_payments_web_bg.js.__wbg_construct_69525de4bcbd615c> <- ./stellar_private_payments_web_bg.js.__wbg_construct_69525de4bcbd615c
+ - func[97] sig=1 <./stellar_private_payments_web_bg.js.__wbg_getRandomValues_980c94215a82aa89> <- ./stellar_private_payments_web_bg.js.__wbg_getRandomValues_980c94215a82aa89
+ - func[98] sig=2 <./stellar_private_payments_web_bg.js.__wbg_setTimeout_56bcdccbad22fd44> <- ./stellar_private_payments_web_bg.js.__wbg_setTimeout_56bcdccbad22fd44
+ - func[99] sig=4 <./stellar_private_payments_web_bg.js.__wbg_clearTimeout_3629d6209dfcc46e> <- ./stellar_private_payments_web_bg.js.__wbg_clearTimeout_3629d6209dfcc46e
+ - func[100] sig=2 <./stellar_private_payments_web_bg.js.__wbg_then_b830475380919203> <- ./stellar_private_payments_web_bg.js.__wbg_then_b830475380919203
+ - func[101] sig=4 <./stellar_private_payments_web_bg.js.__wbg_resolve_35ec7e0c6af4c82c> <- ./stellar_private_payments_web_bg.js.__wbg_resolve_35ec7e0c6af4c82c
+ - func[102] sig=2 <./stellar_private_payments_web_bg.js.__wbg_get_6cf5a4d4d8ad3c5a> <- ./stellar_private_payments_web_bg.js.__wbg_get_6cf5a4d4d8ad3c5a
+ - func[103] sig=4 <./stellar_private_payments_web_bg.js.__wbg_queueMicrotask_85c90f6987555d65> <- ./stellar_private_payments_web_bg.js.__wbg_queueMicrotask_85c90f6987555d65
+ - func[104] sig=4 <./stellar_private_payments_web_bg.js.__wbg_next_95053e306b1c3aed> <- ./stellar_private_payments_web_bg.js.__wbg_next_95053e306b1c3aed
+ - func[105] sig=13 <./stellar_private_payments_web_bg.js.__wbg_new_ffa92086ea89f79c> <- ./stellar_private_payments_web_bg.js.__wbg_new_ffa92086ea89f79c
+ - func[106] sig=4 <./stellar_private_payments_web_bg.js.__wbg_isArray_5674713bb7b79043> <- ./stellar_private_payments_web_bg.js.__wbg_isArray_5674713bb7b79043
+ - func[107] sig=4 <./stellar_private_payments_web_bg.js.__wbg_of_1a3f47170341cefe> <- ./stellar_private_payments_web_bg.js.__wbg_of_1a3f47170341cefe
+ - func[108] sig=4 <./stellar_private_payments_web_bg.js.__wbg_buffer_60eec204070b2802> <- ./stellar_private_payments_web_bg.js.__wbg_buffer_60eec204070b2802
+ - func[109] sig=1 <./stellar_private_payments_web_bg.js.__wbg_queueMicrotask_f6a1fa10b81d1fc0> <- ./stellar_private_payments_web_bg.js.__wbg_queueMicrotask_f6a1fa10b81d1fc0
+ - func[110] sig=4 <./stellar_private_payments_web_bg.js.__wbg_message_1cbc5bc03dcf1dee> <- ./stellar_private_payments_web_bg.js.__wbg_message_1cbc5bc03dcf1dee
+ - func[111] sig=2 <./stellar_private_payments_web_bg.js.__wbg_call_269c5566fbede3eb> <- ./stellar_private_payments_web_bg.js.__wbg_call_269c5566fbede3eb
+ - func[112] sig=13 <./stellar_private_payments_web_bg.js.__wbg_new_8d36e20aa758e411> <- ./stellar_private_payments_web_bg.js.__wbg_new_8d36e20aa758e411
+ - func[113] sig=4 <./stellar_private_payments_web_bg.js.__wbg_isSafeInteger_8f51c743827d1ec5> <- ./stellar_private_payments_web_bg.js.__wbg_isSafeInteger_8f51c743827d1ec5
+ - func[114] sig=4 <./stellar_private_payments_web_bg.js.__wbg_getHours_a9938d9b8972574f> <- ./stellar_private_payments_web_bg.js.__wbg_getHours_a9938d9b8972574f
+ - func[115] sig=4 <./stellar_private_payments_web_bg.js.__wbg_getMinutes_1fabf71af7d9c8e2> <- ./stellar_private_payments_web_bg.js.__wbg_getMinutes_1fabf71af7d9c8e2
+ - func[116] sig=4 <./stellar_private_payments_web_bg.js.__wbg_getMonth_01ce17d889ed7e5e> <- ./stellar_private_payments_web_bg.js.__wbg_getMonth_01ce17d889ed7e5e
+ - func[117] sig=4 <./stellar_private_payments_web_bg.js.__wbg_getSeconds_44cc4c4b366119da> <- ./stellar_private_payments_web_bg.js.__wbg_getSeconds_44cc4c4b366119da
+ - func[118] sig=24 <./stellar_private_payments_web_bg.js.__wbg_getTime_65922ba0b59d55a7> <- ./stellar_private_payments_web_bg.js.__wbg_getTime_65922ba0b59d55a7
+ - func[119] sig=24 <./stellar_private_payments_web_bg.js.__wbg_getTimezoneOffset_6e4850ad528ac37d> <- ./stellar_private_payments_web_bg.js.__wbg_getTimezoneOffset_6e4850ad528ac37d
+ - func[120] sig=4 <./stellar_private_payments_web_bg.js.__wbg_new_180f1022bb6ee517> <- ./stellar_private_payments_web_bg.js.__wbg_new_180f1022bb6ee517
+ - func[121] sig=13 <./stellar_private_payments_web_bg.js.__wbg_new_0_35540e542ba689d2> <- ./stellar_private_payments_web_bg.js.__wbg_new_0_35540e542ba689d2
+ - func[122] sig=5 <./stellar_private_payments_web_bg.js.__wbg_new_with_year_month_day_1111ae617c8e9c90> <- ./stellar_private_payments_web_bg.js.__wbg_new_with_year_month_day_1111ae617c8e9c90
+ - func[123] sig=4 <./stellar_private_payments_web_bg.js.__wbg_getDate_8e7807f062ade36a> <- ./stellar_private_payments_web_bg.js.__wbg_getDate_8e7807f062ade36a
+ - func[124] sig=4 <./stellar_private_payments_web_bg.js.__wbg_getDay_4806d3f91116db40> <- ./stellar_private_payments_web_bg.js.__wbg_getDay_4806d3f91116db40
+ - func[125] sig=4 <./stellar_private_payments_web_bg.js.__wbg_getFullYear_0cfd5a75cf3d5856> <- ./stellar_private_payments_web_bg.js.__wbg_getFullYear_0cfd5a75cf3d5856
+ - func[126] sig=4 <./stellar_private_payments_web_bg.js.__wbg_toISOString_b10dc1c193a89c15> <- ./stellar_private_payments_web_bg.js.__wbg_toISOString_b10dc1c193a89c15
+ - func[127] sig=13 <./stellar_private_payments_web_bg.js.__wbg_new_bebc3f4757acf305> <- ./stellar_private_payments_web_bg.js.__wbg_new_bebc3f4757acf305
+ - func[128] sig=4 <./stellar_private_payments_web_bg.js.__wbg_entries_972a87586902cf87> <- ./stellar_private_payments_web_bg.js.__wbg_entries_972a87586902cf87
+ - func[129] sig=9 <./stellar_private_payments_web_bg.js.__wbg_replace_853433aa9358820c> <- ./stellar_private_payments_web_bg.js.__wbg_replace_853433aa9358820c
+ - func[130] sig=13 <./stellar_private_payments_web_bg.js.__wbg_iterator_22ddeb808cf55a6f> <- ./stellar_private_payments_web_bg.js.__wbg_iterator_22ddeb808cf55a6f
+ - func[131] sig=3 <./stellar_private_payments_web_bg.js.__wbg_prototypesetcall_ae9f5e7459250748> <- ./stellar_private_payments_web_bg.js.__wbg_prototypesetcall_ae9f5e7459250748
+ - func[132] sig=4 <./stellar_private_payments_web_bg.js.__wbg_new_0700aaf827082758> <- ./stellar_private_payments_web_bg.js.__wbg_new_0700aaf827082758
+ - func[133] sig=4 <./stellar_private_payments_web_bg.js.__wbg_new_1da3429bc3c4541c> <- ./stellar_private_payments_web_bg.js.__wbg_new_1da3429bc3c4541c
+ - func[134] sig=4 <./stellar_private_payments_web_bg.js.__wbg_new_with_length_5ffeddb9d9fbb96f> <- ./stellar_private_payments_web_bg.js.__wbg_new_with_length_5ffeddb9d9fbb96f
+ - func[135] sig=2 <./stellar_private_payments_web_bg.js.__wbg_new_from_slice_4ee02165f9de919e> <- ./stellar_private_payments_web_bg.js.__wbg_new_from_slice_4ee02165f9de919e
+ - func[136] sig=5 <./stellar_private_payments_web_bg.js.__wbg_subarray_1daff70dde20c145> <- ./stellar_private_payments_web_bg.js.__wbg_subarray_1daff70dde20c145
+ - func[137] sig=4 <./stellar_private_payments_web_bg.js.__wbg_length_31bdaf014f5fbde2> <- ./stellar_private_payments_web_bg.js.__wbg_length_31bdaf014f5fbde2
+ - func[138] sig=56 <./stellar_private_payments_web_bg.js.__wbg_random_7bce4e9e78e2e0d0> <- ./stellar_private_payments_web_bg.js.__wbg_random_7bce4e9e78e2e0d0
+ - func[139] sig=57 <./stellar_private_payments_web_bg.js.__wbg_wait_31614a78c2a6b7c5> <- ./stellar_private_payments_web_bg.js.__wbg_wait_31614a78c2a6b7c5
+ - func[140] sig=2 <./stellar_private_payments_web_bg.js.__wbg_get_989d0a1309644f2b> <- ./stellar_private_payments_web_bg.js.__wbg_get_989d0a1309644f2b
+ - func[141] sig=2 <./stellar_private_payments_web_bg.js.__wbg_has_464f8b9416279d65> <- ./stellar_private_payments_web_bg.js.__wbg_has_464f8b9416279d65
+ - func[142] sig=5 <./stellar_private_payments_web_bg.js.__wbg_set_a377297433dfea63> <- ./stellar_private_payments_web_bg.js.__wbg_set_a377297433dfea63
+ - func[143] sig=13 <./stellar_private_payments_web_bg.js.__wbg_static_accessor_GLOBAL_THIS_1e7044f654e934db> <- ./stellar_private_payments_web_bg.js.__wbg_static_accessor_GLOBAL_THIS_1e7044f654e934db
+ - func[144] sig=13 <./stellar_private_payments_web_bg.js.__wbg_static_accessor_SELF_d8b50611246a6d92> <- ./stellar_private_payments_web_bg.js.__wbg_static_accessor_SELF_d8b50611246a6d92
+ - func[145] sig=13 <./stellar_private_payments_web_bg.js.__wbg_static_accessor_GLOBAL_8eb4cd83130a11a0> <- ./stellar_private_payments_web_bg.js.__wbg_static_accessor_GLOBAL_8eb4cd83130a11a0
+ - func[146] sig=13 <./stellar_private_payments_web_bg.js.__wbg_static_accessor_WINDOW_fd0bc376bf0f8b42> <- ./stellar_private_payments_web_bg.js.__wbg_static_accessor_WINDOW_fd0bc376bf0f8b42
+ - func[147] sig=4 <./stellar_private_payments_web_bg.js.__wbg_instanceof_ArrayBuffer_d4ff01f8247925ae> <- ./stellar_private_payments_web_bg.js.__wbg_instanceof_ArrayBuffer_d4ff01f8247925ae
+ - func[148] sig=4 <./stellar_private_payments_web_bg.js.__wbg_instanceof_Error_fe6fa771c78ee4cf> <- ./stellar_private_payments_web_bg.js.__wbg_instanceof_Error_fe6fa771c78ee4cf
+ - func[149] sig=4 <./stellar_private_payments_web_bg.js.__wbg_instanceof_Uint8Array_598adc0fef426aa8> <- ./stellar_private_payments_web_bg.js.__wbg_instanceof_Uint8Array_598adc0fef426aa8
+ - func[150] sig=2 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_in_50072d4d6e45c193> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_in_50072d4d6e45c193
+ - func[151] sig=2 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_shr_56cae1eadababcab> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_shr_56cae1eadababcab
+ - func[152] sig=0 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_throw_5d9e815e6fdf150f> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_throw_5d9e815e6fdf150f
+ - func[153] sig=4 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_is_null_5160b3e381865372> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_is_null_5160b3e381865372
+ - func[154] sig=2 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_jsval_eq_9fdcd3c0a860dd3b> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_jsval_eq_9fdcd3c0a860dd3b
+ - func[155] sig=24 <./stellar_private_payments_web_bg.js.__wbg_Number_c54e7112a3fa7e3e> <- ./stellar_private_payments_web_bg.js.__wbg_Number_c54e7112a3fa7e3e
+ - func[156] sig=2 <./stellar_private_payments_web_bg.js.__wbg_Error_67e7344beaa85059> <- ./stellar_private_payments_web_bg.js.__wbg_Error_67e7344beaa85059
+ - func[157] sig=4 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_is_bigint_60fc0336cb14f5d7> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_is_bigint_60fc0336cb14f5d7
+ - func[158] sig=4 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_is_object_edb6b15aa3afe12e> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_is_object_edb6b15aa3afe12e
+ - func[159] sig=4 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_is_string_c4f7cb494a2a21f1> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_is_string_c4f7cb494a2a21f1
+ - func[160] sig=0 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_number_get_1dc732b810cb937c> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_number_get_1dc732b810cb937c
+ - func[161] sig=0 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_string_get_92ab86bb19cbc12f> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_string_get_92ab86bb19cbc12f
+ - func[162] sig=4 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_boolean_get_7a12af2b3f899c5a> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_boolean_get_7a12af2b3f899c5a
+ - func[163] sig=4 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_is_function_fcda5e3902d732fe> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_is_function_fcda5e3902d732fe
+ - func[164] sig=4 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_is_undefined_8c687d0b90d5b524> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_is_undefined_8c687d0b90d5b524
+ - func[165] sig=2 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_jsval_loose_eq_3c30021c243b64cd> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_jsval_loose_eq_3c30021c243b64cd
+ - func[166] sig=0 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_bigint_get_as_i64_b482365c149396c8> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_bigint_get_as_i64_b482365c149396c8
+ - func[167] sig=13 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_memory_3f8442e22540244f> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_memory_3f8442e22540244f
+ - func[168] sig=1 <./stellar_private_payments_web_bg.js.__wbg__wbg_cb_unref_997e73d32238e655> <- ./stellar_private_payments_web_bg.js.__wbg__wbg_cb_unref_997e73d32238e655
+ - func[169] sig=0 <./stellar_private_payments_web_bg.js.__wbg___wbindgen_debug_string_0e68cf47c9cbd9b0> <- ./stellar_private_payments_web_bg.js.__wbg___wbindgen_debug_string_0e68cf47c9cbd9b0
+ - func[170] sig=2 <./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000001> <- ./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000001
+ - func[171] sig=2 <./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000002> <- ./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000002
+ - func[172] sig=2 <./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000003> <- ./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000003
+ - func[173] sig=2 <./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000004> <- ./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000004
+ - func[174] sig=58 <./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000005> <- ./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000005
+ - func[175] sig=26 <./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000006> <- ./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000006
+ - func[176] sig=2 <./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000007> <- ./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000007
+ - func[177] sig=2 <./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000008> <- ./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000008
+ - func[178] sig=59 <./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000009> <- ./stellar_private_payments_web_bg.js.__wbindgen_generic_0000000000000009
+ - func[179] sig=26 <./stellar_private_payments_web_bg.js.__wbindgen_generic_000000000000000a> <- ./stellar_private_payments_web_bg.js.__wbindgen_generic_000000000000000a
+ - func[180] sig=2 <./stellar_private_payments_web_bg.js.__wbindgen_generic_000000000000000b> <- ./stellar_private_payments_web_bg.js.__wbindgen_generic_000000000000000b
+ - func[181] sig=2 <./stellar_private_payments_web_bg.js.__wbindgen_generic_000000000000000c> <- ./stellar_private_payments_web_bg.js.__wbindgen_generic_000000000000000c
+ - func[182] sig=2 <./stellar_private_payments_web_bg.js.__wbindgen_generic_000000000000000d> <- ./stellar_private_payments_web_bg.js.__wbindgen_generic_000000000000000d
+Memory[1]:
+ - memory[0] pages: initial=1024 max=65536
+Export[268]:
+ - memory[0] -> "memory"
+ - func[3116] <__wbg_account_free> -> "__wbg_account_free"
+ - func[3510] <__wbg_aspmembership_free> -> "__wbg_aspmembership_free"
+ - func[3511] <__wbg_aspnonmembership_free> -> "__wbg_aspnonmembership_free"
+ - func[3048] <__wbg_assetdescriptor_free> -> "__wbg_assetdescriptor_free"
+ - func[3679] <__wbg_babyjubjubpoint_free> -> "__wbg_babyjubjubpoint_free"
+ - func[3049] <__wbg_client_free> -> "__wbg_client_free"
+ - func[3512] <__wbg_contractconfig_free> -> "__wbg_contractconfig_free"
+ - func[3513] <__wbg_contractsstatedata_free> -> "__wbg_contractsstatedata_free"
+ - func[3514] <__wbg_disclosurecircuitmetadata_free> -> "__wbg_disclosurecircuitmetadata_free"
+ - func[3515] <__wbg_disclosurecontext_free> -> "__wbg_disclosurecontext_free"
+ - func[3516] <__wbg_disclosurepublicinputs_free> -> "__wbg_disclosurepublicinputs_free"
+ - func[3517] <__wbg_disclosurereceipt_free> -> "__wbg_disclosurereceipt_free"
+ - func[3518] <__wbg_disclosurerequest_free> -> "__wbg_disclosurerequest_free"
+ - func[3519] <__wbg_disclosureverificationreport_free> -> "__wbg_disclosureverificationreport_free"
+ - func[3680] <__wbg_globalviewkeyciphertext_free> -> "__wbg_globalviewkeyciphertext_free"
+ - func[3050] <__wbg_gvkaudit_free> -> "__wbg_gvkaudit_free"
+ - func[3051] <__wbg_operationalfeeditem_free> -> "__wbg_operationalfeeditem_free"
+ - func[3052] <__wbg_poolconfigentry_free> -> "__wbg_poolconfigentry_free"
+ - func[3681] <__wbg_poolestimate_free> -> "__wbg_poolestimate_free"
+ - func[3053] <__wbg_poolexecuteresult_free> -> "__wbg_poolexecuteresult_free"
+ - func[3520] <__wbg_poolinfo_free> -> "__wbg_poolinfo_free"
+ - func[3054] <__wbg_pooloptions_free> -> "__wbg_pooloptions_free"
+ - func[3521] <__wbg_portfoliobalance_free> -> "__wbg_portfoliobalance_free"
+ - func[3522] <__wbg_privatepool_free> -> "__wbg_privatepool_free"
+ - func[3055] <__wbg_proverbridge_free> -> "__wbg_proverbridge_free"
+ - func[2969] <__wbg_storagehandle_free> -> "__wbg_proverhandle_free"
+ - func[3523] <__wbg_publickeyentry_free> -> "__wbg_publickeyentry_free"
+ - func[3056] <__wbg_recipientlookup_free> -> "__wbg_recipientlookup_free"
+ - func[2969] <__wbg_storagehandle_free> -> "__wbg_signerhandle_free"
+ - func[2584] <__wbg_sinkregistration_free> -> "__wbg_sinkregistration_free"
+ - func[3057] <__wbg_storage_free> -> "__wbg_storage_free"
+ - func[2969] <__wbg_storagehandle_free> -> "__wbg_storagehandle_free"
+ - func[3371] <__wbg_usernotesummary_free> -> "__wbg_usernotesummary_free"
+ - func[3058] <__wbg_verifierentry_free> -> "__wbg_userpublickeys_free"
+ - func[3058] <__wbg_verifierentry_free> -> "__wbg_verifierentry_free"
+ - func[2893] <__wbg_verifydisclosureoptions_free> -> "__wbg_verifydisclosureoptions_free"
+ - func[3059] <__wbg_walletsigner_free> -> "__wbg_walletsigner_free"
+ - func[4059] <account_aspSecret> -> "account_aspSecret"
+ - func[4246] <account_deriveAspUserLeaf> -> "account_deriveAspUserLeaf"
+ - func[4247] <account_derivePrivacyKeys> -> "account_derivePrivacyKeys"
+ - func[4248] <account_isRegistered> -> "account_isRegistered"
+ - func[3776] <account_pool> -> "account_pool"
+ - func[4249] <account_portfolio> -> "account_portfolio"
+ - func[4060] <account_privacyKeys> -> "account_privacyKeys"
+ - func[4250] <account_registerPublicKeys> -> "account_registerPublicKeys"
+ - func[3225] <account_signerAddress> -> "account_signerAddress"
+ - func[3226] <account_userAddress> -> "account_userAddress"
+ - func[3942] <account_userNotes> -> "account_userNotes"
+ - func[3227] <aspmembership_admin> -> "aspmembership_admin"
+ - func[6297] <aspmembership_capacity> -> "aspmembership_capacity"
+ - func[3228] <aspmembership_contractId> -> "aspmembership_contractId"
+ - func[3229] <aspmembership_contractType> -> "aspmembership_contractType"
+ - func[6192] <aspmembership_ledger> -> "aspmembership_ledger"
+ - func[6193] <aspmembership_levels> -> "aspmembership_levels"
+ - func[3230] <aspmembership_nextIndex> -> "aspmembership_nextIndex"
+ - func[3231] <aspmembership_root> -> "aspmembership_root"
+ - func[3232] <aspmembership_usedSlots> -> "aspmembership_usedSlots"
+ - func[3233] <aspnonmembership_admin> -> "aspnonmembership_admin"
+ - func[3234] <aspnonmembership_contractId> -> "aspnonmembership_contractId"
+ - func[3235] <aspnonmembership_contractType> -> "aspnonmembership_contractType"
+ - func[6194] <aspnonmembership_isEmpty> -> "aspnonmembership_isEmpty"
+ - func[6195] <aspnonmembership_ledger> -> "aspnonmembership_ledger"
+ - func[3236] <aspnonmembership_root> -> "aspnonmembership_root"
+ - func[3237] <assetdescriptor_code> -> "assetdescriptor_code"
+ - func[3238] <assetdescriptor_contractId> -> "assetdescriptor_contractId"
+ - func[3239] <assetdescriptor_issuer> -> "assetdescriptor_issuer"
+ - func[3240] <assetdescriptor_kind> -> "assetdescriptor_kind"
+ - func[3241] <assetdescriptor_symbol> -> "assetdescriptor_symbol"
+ - func[3242] <babyjubjubpoint_x> -> "babyjubjubpoint_x"
+ - func[3243] <babyjubjubpoint_y> -> "babyjubjubpoint_y"
+ - func[3434] <bootnodeRequired> -> "bootnodeRequired"
+ - func[3244] <client_account> -> "client_account"
+ - func[4061] <client_allContractsData> -> "client_allContractsData"
+ - func[4062] <client_aspState> -> "client_aspState"
+ - func[4063] <client_backgroundSync> -> "client_backgroundSync"
+ - func[4541] <client_contractConfig> -> "client_contractConfig"
+ - func[2894] <client_new> -> "client_new"
+ - func[3943] <client_operationalFeed> -> "client_operationalFeed"
+ - func[3682] <client_recipientLookup> -> "client_recipientLookup"
+ - func[6196] <client_stopBackgroundSync> -> "client_stopBackgroundSync"
+ - func[4251] <client_sync> -> "client_sync"
+ - func[3172] <client_verifySelectiveDisclosure> -> "client_verifySelectiveDisclosure"
+ - func[2285] <configureTelemetry> -> "configureTelemetry"
+ - func[3245] <contractconfig_admin> -> "contractconfig_admin"
+ - func[3246] <contractconfig_asp_membership> -> "contractconfig_asp_membership"
+ - func[3247] <contractconfig_asp_non_membership> -> "contractconfig_asp_non_membership"
+ - func[3248] <contractconfig_deployer> -> "contractconfig_deployer"
+ - func[3249] <contractconfig_kdf_domain> -> "contractconfig_kdf_domain"
+ - func[3251] <contractconfig_network> -> "contractconfig_network"
+ - func[3250] <contractconfig_networkPassphrase> -> "contractconfig_networkPassphrase"
+ - func[1776] <contractconfig_new> -> "contractconfig_new"
+ - func[2736] <contractconfig_pools> -> "contractconfig_pools"
+ - func[3252] <contractconfig_public_key_registry> -> "contractconfig_public_key_registry"
+ - func[3253] <contractconfig_rpcUrl> -> "contractconfig_rpcUrl"
+ - func[4252] <contractconfig_toJSON> -> "contractconfig_toJSON"
+ - func[2737] <contractconfig_verifiers> -> "contractconfig_verifiers"
+ - func[4542] <contractsstatedata_aspMembership> -> "contractsstatedata_aspMembership"
+ - func[4543] <contractsstatedata_aspNonMembership> -> "contractsstatedata_aspNonMembership"
+ - func[2738] <contractsstatedata_pools> -> "contractsstatedata_pools"
+ - func[6298] <debugLogsEnabled> -> "debugLogsEnabled"
+ - func[1285] <deriveAspUserLeaf> -> "deriveAspUserLeaf"
+ - func[6197] <disclosurecircuitmetadata_levels> -> "disclosurecircuitmetadata_levels"
+ - func[6198] <disclosurecircuitmetadata_nNotes> -> "disclosurecircuitmetadata_nNotes"
+ - func[3254] <disclosurecircuitmetadata_name> -> "disclosurecircuitmetadata_name"
+ - func[3255] <disclosurecircuitmetadata_vkHash> -> "disclosurecircuitmetadata_vkHash"
+ - func[3256] <disclosurecontext_authorityIdentityPayloadHex> -> "disclosurecontext_authorityIdentityPayloadHex"
+ - func[3257] <disclosurecontext_authorityLabel> -> "disclosurecontext_authorityLabel"
+ - func[3258] <disclosurecontext_contextNonce> -> "disclosurecontext_contextNonce"
+ - func[3259] <disclosurecontext_network> -> "disclosurecontext_network"
+ - func[3260] <disclosurecontext_poolAddress> -> "disclosurecontext_poolAddress"
+ - func[3261] <disclosurecontext_purpose> -> "disclosurecontext_purpose"
+ - func[3262] <disclosurepublicinputs_amounts> -> "disclosurepublicinputs_amounts"
+ - func[3263] <disclosurepublicinputs_extContextHash> -> "disclosurepublicinputs_extContextHash"
+ - func[3264] <disclosurepublicinputs_noteCommitments> -> "disclosurepublicinputs_noteCommitments"
+ - func[3265] <disclosurepublicinputs_nullifiers> -> "disclosurepublicinputs_nullifiers"
+ - func[3266] <disclosurepublicinputs_roots> -> "disclosurepublicinputs_roots"
+ - func[4544] <disclosurereceipt_circuit> -> "disclosurereceipt_circuit"
+ - func[4545] <disclosurereceipt_context> -> "disclosurereceipt_context"
+ - func[3267] <disclosurereceipt_issuedAt> -> "disclosurereceipt_issuedAt"
+ - func[3268] <disclosurereceipt_proofCompressedHex> -> "disclosurereceipt_proofCompressedHex"
+ - func[4546] <disclosurereceipt_publicInputs> -> "disclosurereceipt_publicInputs"
+ - func[4253] <disclosurereceipt_toJSON> -> "disclosurereceipt_toJSON"
+ - func[6199] <disclosurereceipt_version> -> "disclosurereceipt_version"
+ - func[1867] <disclosurerequest_fromValue> -> "disclosurerequest_fromValue"
+ - func[896] <disclosurerequest_new> -> "disclosurerequest_new"
+ - func[6200] <disclosureverificationreport_contextVerified> -> "disclosureverificationreport_contextVerified"
+ - func[6201] <disclosureverificationreport_knownRootStatus> -> "disclosureverificationreport_knownRootStatus"
+ - func[6202] <disclosureverificationreport_nullifiersUnspent> -> "disclosureverificationreport_nullifiersUnspent"
+ - func[6203] <disclosureverificationreport_proofVerified> -> "disclosureverificationreport_proofVerified"
+ - func[6204] <disclosureverificationreport_spentNullifierIndices> -> "disclosureverificationreport_spentNullifierIndices"
+ - func[4479] <dump_recent_logs> -> "dump_recent_logs"
+ - func[3269] <globalviewkeyciphertext_c1> -> "globalviewkeyciphertext_c1"
+ - func[3270] <globalviewkeyciphertext_c2> -> "globalviewkeyciphertext_c2"
+ - func[3271] <globalviewkeyciphertext_c3> -> "globalviewkeyciphertext_c3"
+ - func[4547] <globalviewkeyciphertext_r> -> "globalviewkeyciphertext_r"
+ - func[4064] <gvkaudit_nextTx> -> "gvkaudit_nextTx"
+ - func[3272] <operationalfeeditem_body> -> "operationalfeeditem_body"
+ - func[3273] <operationalfeeditem_contractId> -> "operationalfeeditem_contractId"
+ - func[3274] <operationalfeeditem_kind> -> "operationalfeeditem_kind"
+ - func[6205] <operationalfeeditem_ledger> -> "operationalfeeditem_ledger"
+ - func[3275] <operationalfeeditem_poolContractId> -> "operationalfeeditem_poolContractId"
+ - func[3276] <operationalfeeditem_title> -> "operationalfeeditem_title"
+ - func[3277] <operationalfeeditem_txType> -> "operationalfeeditem_txType"
+ - func[1388] <parseTokenAmount> -> "parseTokenAmount"
+ - func[4254] <poolconfigentry_asset> -> "poolconfigentry_asset"
+ - func[6206] <poolconfigentry_deploymentLedger> -> "poolconfigentry_deploymentLedger"
+ - func[6207] <poolconfigentry_enabled> -> "poolconfigentry_enabled"
+ - func[4255] <poolconfigentry_gvkAuthorityPubKey> -> "poolconfigentry_gvkAuthorityPubKey"
+ - func[3278] <poolconfigentry_gvkMode> -> "poolconfigentry_gvkMode"
+ - func[3279] <poolconfigentry_policyFlags> -> "poolconfigentry_policyFlags"
+ - func[3280] <poolconfigentry_poolContractId> -> "poolconfigentry_poolContractId"
+ - func[3281] <poolconfigentry_tokenContractId> -> "poolconfigentry_tokenContractId"
+ - func[3282] <poolestimate_fees> -> "poolestimate_fees"
+ - func[6208] <poolestimate_txCount> -> "poolestimate_txCount"
+ - func[3598] <poolexecuteresult_code> -> "poolexecuteresult_code"
+ - func[3283] <poolexecuteresult_hashes> -> "poolexecuteresult_hashes"
+ - func[3284] <poolexecuteresult_message> -> "poolexecuteresult_message"
+ - func[3285] <poolexecuteresult_status> -> "poolexecuteresult_status"
+ - func[4256] <poolexecuteresult_toJSON> -> "poolexecuteresult_toJSON"
+ - func[3286] <poolinfo_admin> -> "poolinfo_admin"
+ - func[4257] <poolinfo_adminViewKey> -> "poolinfo_adminViewKey"
+ - func[3287] <poolinfo_aspMembership> -> "poolinfo_aspMembership"
+ - func[3288] <poolinfo_aspNonMembership> -> "poolinfo_aspNonMembership"
+ - func[3289] <poolinfo_contractId> -> "poolinfo_contractId"
+ - func[3290] <poolinfo_contractType> -> "poolinfo_contractType"
+ - func[6209] <poolinfo_depositsPaused> -> "poolinfo_depositsPaused"
+ - func[3291] <poolinfo_fee> -> "poolinfo_fee"
+ - func[3599] <poolinfo_gvkMode> -> "poolinfo_gvkMode"
+ - func[6210] <poolinfo_ledger> -> "poolinfo_ledger"
+ - func[3292] <poolinfo_maximumDepositAmount> -> "poolinfo_maximumDepositAmount"
+ - func[6299] <poolinfo_merkleCapacity> -> "poolinfo_merkleCapacity"
+ - func[3600] <poolinfo_merkleCurrentRootIndex> -> "poolinfo_merkleCurrentRootIndex"
+ - func[6211] <poolinfo_merkleLevels> -> "poolinfo_merkleLevels"
+ - func[3293] <poolinfo_merkleNextIndex> -> "poolinfo_merkleNextIndex"
+ - func[3294] <poolinfo_merkleRoot> -> "poolinfo_merkleRoot"
+ - func[3295] <poolinfo_minimumDepositAmount> -> "poolinfo_minimumDepositAmount"
+ - func[3296] <poolinfo_policyFlags> -> "poolinfo_policyFlags"
+ - func[3297] <poolinfo_token> -> "poolinfo_token"
+ - func[3298] <poolinfo_totalCommitments> -> "poolinfo_totalCommitments"
+ - func[3299] <poolinfo_verifier> -> "poolinfo_verifier"
+ - func[1777] <pooloptions_fromValue> -> "pooloptions_fromValue"
+ - func[2402] <pooloptions_new> -> "pooloptions_new"
+ - func[3300] <pooloptions_poolContract> -> "pooloptions_poolContract"
+ - func[3301] <portfoliobalance_amount> -> "portfoliobalance_amount"
+ - func[6212] <portfoliobalance_noteCount> -> "portfoliobalance_noteCount"
+ - func[3302] <portfoliobalance_poolContractId> -> "portfoliobalance_poolContractId"
+ - func[3303] <portfoliobalance_tokenContractId> -> "portfoliobalance_tokenContractId"
+ - func[3304] <portfoliobalance_tokenLabel> -> "portfoliobalance_tokenLabel"
+ - func[3683] <privatepool_audit> -> "privatepool_audit"
+ - func[4258] <privatepool_balance> -> "privatepool_balance"
+ - func[3684] <privatepool_deposit> -> "privatepool_deposit"
+ - func[3944] <privatepool_disclose> -> "privatepool_disclose"
+ - func[3685] <privatepool_estimate> -> "privatepool_estimate"
+ - func[4259] <privatepool_fee> -> "privatepool_fee"
+ - func[4260] <privatepool_maxSpend> -> "privatepool_maxSpend"
+ - func[4261] <privatepool_notes> -> "privatepool_notes"
+ - func[4065] <privatepool_tokenDecimals> -> "privatepool_tokenDecimals"
+ - func[3945] <privatepool_transact> -> "privatepool_transact"
+ - func[3173] <privatepool_transfer> -> "privatepool_transfer"
+ - func[2895] <privatepool_transferToKeys> -> "privatepool_transferToKeys"
+ - func[3435] <privatepool_verifyDisclosure> -> "privatepool_verifyDisclosure"
+ - func[3174] <privatepool_withdraw> -> "privatepool_withdraw"
+ - func[3175] <proverbridge_configureCircuitsBase> -> "proverbridge_configureCircuitsBase"
+ - func[4262] <proverbridge_fork> -> "proverbridge_fork"
+ - func[4263] <proverbridge_ping> -> "proverbridge_ping"
+ - func[2497] <proverbridge_spawn> -> "proverbridge_spawn"
+ - func[4172] <proverbridge_toHandle> -> "proverbridge_toHandle"
+ - func[3305] <publickeyentry_address> -> "publickeyentry_address"
+ - func[3306] <publickeyentry_encryptionKey> -> "publickeyentry_encryptionKey"
+ - func[6213] <publickeyentry_ledger> -> "publickeyentry_ledger"
+ - func[3307] <publickeyentry_noteKey> -> "publickeyentry_noteKey"
+ - func[3436] <readTokenDecimals> -> "readTokenDecimals"
+ - func[3686] <recipientlookup_entry> -> "recipientlookup_entry"
+ - func[6214] <recipientlookup_networkTipLedger> -> "recipientlookup_networkTipLedger"
+ - func[6215] <recipientlookup_registryFullySynced> -> "recipientlookup_registryFullySynced"
+ - func[6216] <recipientlookup_registryLastFullyIndexedLedger> -> "recipientlookup_registryLastFullyIndexedLedger"
+ - func[1892] <registerTelemetrySinks> -> "registerTelemetrySinks"
+ - func[2249] <set_log_level> -> "set_log_level"
+ - func[3687] <storage_call> -> "storage_call"
+ - func[4264] <storage_close> -> "storage_close"
+ - func[6300] <storage_encryptedStorageEnabled> -> "storage_encryptedStorageEnabled"
+ - func[4265] <storage_fork> -> "storage_fork"
+ - func[4266] <storage_open> -> "storage_open"
+ - func[4267] <storage_toHandle> -> "storage_toHandle"
+ - func[3308] <usernotesummary_amount> -> "usernotesummary_amount"
+ - func[6217] <usernotesummary_createdAtLedger> -> "usernotesummary_createdAtLedger"
+ - func[3524] <usernotesummary_gvkCiphertext> -> "usernotesummary_gvkCiphertext"
+ - func[3309] <usernotesummary_id> -> "usernotesummary_id"
+ - func[6218] <usernotesummary_leafIndex> -> "usernotesummary_leafIndex"
+ - func[3310] <usernotesummary_poolContractId> -> "usernotesummary_poolContractId"
+ - func[6219] <usernotesummary_spent> -> "usernotesummary_spent"
+ - func[3311] <verifierentry_address> -> "userpublickeys_encryptionPublicKey"
+ - func[3312] <verifierentry_suffix> -> "userpublickeys_notePublicKey"
+ - func[3311] <verifierentry_address> -> "verifierentry_address"
+ - func[3312] <verifierentry_suffix> -> "verifierentry_suffix"
+ - func[2649] <verifySelectiveDisclosure> -> "verifySelectiveDisclosure"
+ - func[1778] <verifydisclosureoptions_fromValue> -> "verifydisclosureoptions_fromValue"
+ - func[1182] <walletsigner_new> -> "walletsigner_new"
+ - func[4173] <walletsigner_toHandle> -> "walletsigner_toHandle"
+ - func[2899] <rust_sqlite_wasm_host_epoch_timestamp_in_ms> -> "rust_sqlite_wasm_host_epoch_timestamp_in_ms"
+ - func[501] <rust_sqlite_wasm_host_sleep> -> "rust_sqlite_wasm_host_sleep"
+ - func[2232] <rust_sqlite_wasm_host_random> -> "rust_sqlite_wasm_host_random"
+ - func[5752] <rust_sqlite_wasm_abort> -> "rust_sqlite_wasm_abort"
+ - func[1611] <rust_sqlite_wasm_assert_fail> -> "rust_sqlite_wasm_assert_fail"
+ - func[3328] <rust_sqlite_wasm_calloc> -> "rust_sqlite_wasm_calloc"
+ - func[3886] <rust_sqlite_wasm_malloc> -> "rust_sqlite_wasm_malloc"
+ - func[3887] <rust_sqlite_wasm_free> -> "rust_sqlite_wasm_free"
+ - func[4350] <rust_sqlite_wasm_getentropy> -> "rust_sqlite_wasm_getentropy"
+ - func[3462] <rust_sqlite_wasm_host_fill_entropy> -> "rust_sqlite_wasm_host_fill_entropy"
+ - func[623] <rust_sqlite_wasm_host_localtime> -> "rust_sqlite_wasm_host_localtime"
+ - func[988] <rust_sqlite_wasm_localtime> -> "rust_sqlite_wasm_localtime"
+ - func[2409] <rust_sqlite_wasm_realloc> -> "rust_sqlite_wasm_realloc"
+ - func[3624] <sqlite3_os_end> -> "sqlite3_os_end"
+ - func[3550] <sqlite3_os_init> -> "sqlite3_os_init"
+ - global[1] -> "__abort_handler"
+ - global[2] -> "__instance_terminated"
+ - func[2712] <__wasm_bindgen_func_elem_10514> -> "__wasm_bindgen_func_elem_10514"
+ - func[4666] <__wasm_bindgen_func_elem_10516> -> "__wasm_bindgen_func_elem_10516"
+ - func[4610] <__wasm_bindgen_func_elem_1845> -> "__wasm_bindgen_func_elem_1845"
+ - func[4776] <__wasm_bindgen_func_elem_10433> -> "__wasm_bindgen_func_elem_10433"
+ - func[4749] <__wasm_bindgen_func_elem_6720> -> "__wasm_bindgen_func_elem_6720"
+ - func[3350] <__wbindgen_export> -> "__wbindgen_export"
+ - func[3572] <__wbindgen_export2> -> "__wbindgen_export2"
+ - func[5456] <__wbindgen_export3> -> "__wbindgen_export3"
+ - func[5457] <__wbindgen_export4> -> "__wbindgen_export4"
+ - func[3996] <__wbindgen_export5> -> "__wbindgen_export5"
+ - func[5808] <__wbindgen_add_to_stack_pointer> -> "__wbindgen_add_to_stack_pointer"
