@@ -43,7 +43,7 @@ if (emitted.length > 0) {
   throw new Error('copy-canonical-landing: Vite output has no install-prompt asset to preserve');
 }
 
-for (const marker of ['Tu dinero. Tus claves. Tu privacidad.', 'Abrir Astrym Webapp', './website.css', '/site-language.js']) {
+for (const marker of ['Tu dinero. Tus claves. Tu privacidad.', 'Abrir Astrym Webapp', './website.css', '/site-language.js', '/site-demo.js', 'transfer-demo']) {
   if (!html.includes(marker)) {
     throw new Error(`copy-canonical-landing: landing lost ${marker}`);
   }
@@ -80,7 +80,7 @@ for (const rel of fontFiles) {
 for (const page of ['wallet','privacy','payments','learn','security','download','docs','about','roadmap','faq']) {
   if (!existsSync(resolve(dist, page + '.html'))) throw new Error('copy-canonical-landing: missing page ' + page);
 }
-if (!existsSync(resolve(dist, 'site-language.js'))) throw new Error('copy-canonical-landing: missing language script');
+for (const script of ['site-language.js','site-demo.js']) if (!existsSync(resolve(dist, script))) throw new Error('copy-canonical-landing: missing script ' + script);
 
 const shippedManifest = resolve(dist, 'manifest.json');
 if (existsSync(shippedManifest) && readFileSync(shippedManifest, 'utf8').includes('"manifest_version"')) {

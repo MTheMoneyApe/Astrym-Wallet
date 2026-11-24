@@ -1,17 +1,20 @@
 // Local translations: Spanish, English and Simplified Chinese. No remote requests.
 const dictionary = {
   "Skip to content": {
-    "zh": "跳转到正文"
+    "zh": "跳转到正文",
+    "es": "Ir al contenido"
   },
   "Product": {
-    "zh": "产品"
+    "zh": "产品",
+    "es": "Producto"
   },
   "Wallet": {
     "zh": "钱包",
     "es": "Billetera"
   },
   "Privacy": {
-    "zh": "隐私"
+    "zh": "隐私",
+    "es": "Privacidad"
   },
   "Payments": {
     "zh": "支付"
@@ -23,7 +26,8 @@ const dictionary = {
     "zh": "学习中心"
   },
   "Security": {
-    "zh": "安全"
+    "zh": "安全",
+    "es": "Seguridad"
   },
   "Documentation": {
     "zh": "技术文档"
@@ -56,9 +60,8 @@ const dictionary = {
     "zh": "© 2026 Astrym · 实验性软件 · 仅限测试资金"
   },
   "Astrym is experimental. Use disposable Stellar Testnet accounts and test funds only. It does not claim absolute anonymity, completed audits, or Mainnet SPP availability.": {
-    "zh": "Astrym 目前是实验性产品。请仅使用专用的 Stellar 测试网账户和测试资金。我们不承诺完全匿名，不声称已完成独立审计，也未宣布主网 SPP 可用。",
-    "es": "Astrym está en fase de pruebas. Usa una cuenta nueva y dinero de prueba de Stellar Testnet, nunca dinero real. No afirma anonimato absoluto, auditorías completadas ni disponibilidad SPP en Mainnet.",
-    "en": "Astrym is in testing. Use a fresh Stellar Testnet account and test funds, never real money. We do not claim absolute anonymity, completed audits or Mainnet SPP availability."
+    "zh": "Astrym 仍为实验性产品。仅使用 Stellar 测试网专用账户与测试资金。不承诺完全匿名，不声称已完成审计，也未宣布主网 SPP 可用。",
+    "es": "Astrym está en fase experimental. Usa únicamente fondos y cuentas desechables de Stellar Testnet. No afirma anonimato absoluto, auditorías completadas ni disponibilidad SPP en Mainnet."
   },
   "Experimental Stellar self-custody wallet with Nym network privacy and SPP under validation.": {
     "zh": "基于 Stellar 的实验性数字钱包，支持 Nym 网络隐私模式，SPP 正在验证。"
@@ -69,7 +72,8 @@ const dictionary = {
     "en": "YOUR WALLET / YOUR PRIVACY / STELLAR"
   },
   "Your money. Your keys. Your privacy.": {
-    "zh": "你的钱，你的密钥，你的隐私。"
+    "zh": "你的钱，你的密钥，你的隐私。",
+    "es": "Tu dinero. Tus claves. Tu privacidad."
   },
   "Financial freedom starts with controlling your assets and what you reveal when using them. Meet Astrym, a Stellar wallet designed around privacy.": {
     "zh": "Astrym 是一款数字钱包。你可以自己保管、发送和接收 Stellar 数字资产，还可以选择隐私连接模式，减少网络活动暴露。",
@@ -77,7 +81,8 @@ const dictionary = {
     "en": "Astrym is a digital wallet for storing, sending and receiving Stellar assets. You control your money and can choose a more private connection."
   },
   "Open Astrym Webapp": {
-    "zh": "打开 Astrym 网页钱包"
+    "zh": "打开 Astrym 网页钱包",
+    "es": "Abrir Astrym Webapp"
   },
   "Why Astrym": {
     "zh": "为什么选择 Astrym"
@@ -91,7 +96,8 @@ const dictionary = {
     "zh": "概念示意"
   },
   "Available balance": {
-    "zh": "可用余额"
+    "zh": "可用余额",
+    "es": "Saldo disponible"
   },
   "Illustrative balance": {
     "zh": "示例余额"
@@ -119,8 +125,7 @@ const dictionary = {
   },
   "Self-custody": {
     "zh": "自主保管",
-    "es": "Tu dinero bajo tu control",
-    "en": "You control your money"
+    "es": "Autocustodia"
   },
   "Your keys stay on your device. You control your account.": {
     "zh": "密钥保存在你的设备上，由你控制账户。",
@@ -166,7 +171,8 @@ const dictionary = {
     "en": "SPP aims to reveal less information about your payments. Astrym is testing this technology; complete private payments still need validation."
   },
   "Explore SPP ↗": {
-    "zh": "了解 SPP ↗"
+    "zh": "了解 SPP ↗",
+    "es": "Consultar SPP ↗"
   },
   "ON YOUR DEVICES": {
     "zh": "适用于你的设备"
@@ -196,7 +202,8 @@ const dictionary = {
     "en": "Add Astrym to your home screen from the browser. It is not a native app."
   },
   "Install PWA (Android / iOS)": {
-    "zh": "安装网页应用（Android / iOS）"
+    "zh": "安装网页应用（Android / iOS）",
+    "es": "Instalar PWA (Android / iOS)"
   },
   "LEARN AND VERIFY": {
     "zh": "学习与验证"
@@ -545,7 +552,8 @@ const dictionary = {
     "zh": "想象一封信不是直接寄给收件人，而是经过多个分拣中心。Nym 中继节点将加密的网络流量与其他流量混合，使请求更难与发送者关联。"
   },
   "Normal mode": {
-    "zh": "普通模式"
+    "zh": "普通模式",
+    "es": "Modo normal"
   },
   "Your Astrym wallet": {
     "zh": "你的 Astrym 钱包"
@@ -646,6 +654,310 @@ const dictionary = {
     "zh": "网页应用",
     "es": "App instalable",
     "en": "Installable web app"
+  },
+  "Learn": {
+    "zh": "学习",
+    "es": "Aprender"
+  },
+  "SIMULATOR · TESTNET": {
+    "zh": "模拟器 · 测试网",
+    "es": "SIMULADOR · TESTNET"
+  },
+  "Review transfer": {
+    "zh": "审核转账",
+    "es": "Revisar envío"
+  },
+  "Interactive example. No keys or funds are used.": {
+    "zh": "交互示例。不使用密钥，也不发送资金。",
+    "es": "Ejemplo interactivo. No utiliza claves ni envía fondos."
+  },
+  "Amount (XLM)": {
+    "zh": "金额（XLM）",
+    "es": "Importe (XLM)"
+  },
+  "Sample recipient": {
+    "zh": "示例收款人",
+    "es": "Destinatario de ejemplo"
+  },
+  "Network": {
+    "zh": "网络",
+    "es": "Red"
+  },
+  "Example fee": {
+    "zh": "示例手续费",
+    "es": "Comisión de ejemplo"
+  },
+  "Estimated total": {
+    "zh": "预计总额",
+    "es": "Total estimado"
+  },
+  "Connection mode": {
+    "zh": "连接模式",
+    "es": "Modo de conexión"
+  },
+  "Normal": {
+    "zh": "普通",
+    "es": "Normal"
+  },
+  "Nym private": {
+    "zh": "Nym 隐私",
+    "es": "Privado Nym"
+  },
+  "Direct connection to the Stellar service.": {
+    "zh": "直接连接 Stellar 服务。",
+    "es": "Conexión directa al servicio Stellar."
+  },
+  "Illustrative Nym route. No actual connection is opened.": {
+    "zh": "Nym 路径示意，不建立真实连接。",
+    "es": "Ruta Nym ilustrativa. No se abre una conexión real."
+  },
+  "Enter a positive amount with up to 7 decimals within the simulated balance of 1,250 XLM.": {
+    "zh": "请输入大于零、最多七位小数且不超过 1,250 XLM 模拟余额的金额。",
+    "es": "Introduce un importe mayor que cero, con hasta 7 decimales, dentro del saldo simulado de 1.250 XLM."
+  },
+  "Simulate approval": {
+    "zh": "模拟授权",
+    "es": "Simular autorización"
+  },
+  "Simulated review complete. No transaction was signed or sent.": {
+    "zh": "模拟审核完成。未签名或发送任何交易。",
+    "es": "Revisión simulada completada. No se ha firmado ni enviado ninguna transacción."
+  },
+  "SAMPLE BALANCE": {
+    "zh": "示例余额",
+    "es": "SALDO DE EJEMPLO"
+  },
+  "A Stellar wallet to hold, send and receive assets with local keys and optional Nym connectivity.": {
+    "zh": "基于 Stellar 的数字钱包，使用本地密钥保管、发送和接收资产，并可选择 Nym 连接。",
+    "es": "Una billetera Stellar para guardar, enviar y recibir activos con claves locales y conexión Nym opcional."
+  },
+  "Open wallet": {
+    "zh": "打开钱包",
+    "es": "Abrir billetera"
+  },
+  "Getting started": {
+    "zh": "如何开始",
+    "es": "Cómo empezar"
+  },
+  "STATUS / TESTNET · TEST FUNDS ONLY": {
+    "zh": "状态 / 测试网 · 仅限测试资金",
+    "es": "ESTADO / TESTNET · SOLO FONDOS DE PRUEBA"
+  },
+  "What you can do": {
+    "zh": "你可以做什么",
+    "es": "Qué puedes hacer"
+  },
+  "Your keys are encrypted on your device. Astrym does not hold your assets.": {
+    "zh": "密钥加密保存在你的设备上。Astrym 不托管你的资产。",
+    "es": "Las claves que permiten usar tu dinero se guardan cifradas en tu dispositivo. Astrym no custodia tus activos."
+  },
+  "ACCOUNT · EXAMPLE": {
+    "zh": "账户 · 示例",
+    "es": "CUENTA · EJEMPLO"
+  },
+  "Key": {
+    "zh": "密钥",
+    "es": "Clave"
+  },
+  "Local": {
+    "zh": "本地",
+    "es": "Local"
+  },
+  "Account": {
+    "zh": "账户",
+    "es": "Cuenta"
+  },
+  "Explore wallet ↗": {
+    "zh": "了解钱包 ↗",
+    "es": "Ver la billetera ↗"
+  },
+  "Hold and manage": {
+    "zh": "保管与管理",
+    "es": "Guardar y gestionar"
+  },
+  "Review the address, amount and fee before approving. Share only your public address to receive.": {
+    "zh": "授权前核对地址、金额和手续费。收款时只需分享公开地址。",
+    "es": "Revisa la dirección, el importe y la comisión antes de autorizar. Comparte solo tu dirección pública para recibir."
+  },
+  "REVIEW · EXAMPLE": {
+    "zh": "审核 · 示例",
+    "es": "REVISIÓN · EJEMPLO"
+  },
+  "Amount": {
+    "zh": "金额",
+    "es": "Importe"
+  },
+  "Try simulator": {
+    "zh": "体验模拟器",
+    "es": "Probar simulador"
+  },
+  "Open wallet ↗": {
+    "zh": "打开钱包 ↗",
+    "es": "Abrir billetera ↗"
+  },
+  "Send and receive": {
+    "zh": "发送与接收",
+    "es": "Enviar y recibir"
+  },
+  "Enable Nym to reduce exposure of connection information such as your IP address. If private mode fails, protected operations stop.": {
+    "zh": "启用 Nym 可减少 IP 地址等连接信息暴露。隐私模式失败时，受保护的操作将停止。",
+    "es": "Activa Nym para reducir la exposición de información de tu conexión, como tu dirección IP. Si el modo privado falla, las operaciones protegidas se detienen."
+  },
+  "TRANSPORT · DIAGRAM": {
+    "zh": "传输 · 示意",
+    "es": "TRANSPORTE · ESQUEMA"
+  },
+  "Private mode": {
+    "zh": "隐私模式",
+    "es": "Modo privado"
+  },
+  "Nym failure": {
+    "zh": "Nym 故障",
+    "es": "Fallo de Nym"
+  },
+  "Blocked": {
+    "zh": "阻止",
+    "es": "Bloqueo"
+  },
+  "How Nym works ↗": {
+    "zh": "了解 Nym ↗",
+    "es": "Cómo funciona Nym ↗"
+  },
+  "Choose your connection": {
+    "zh": "选择连接方式",
+    "es": "Elegir tu conexión"
+  },
+  "Stellar Private Payments (SPP) aims to reduce public payment information. Integration remains under validation; private payments are not ready for Mainnet.": {
+    "zh": "Stellar Private Payments（SPP）旨在减少公开支付信息。集成仍在验证，尚未准备好在主网进行隐私支付。",
+    "es": "Stellar Private Payments (SPP) busca reducir la información pública de los pagos. La integración sigue en validación; no es una función de pagos privados lista para Mainnet."
+  },
+  "Environment": {
+    "zh": "环境",
+    "es": "Entorno"
+  },
+  "Status": {
+    "zh": "状态",
+    "es": "Estado"
+  },
+  "Under validation": {
+    "zh": "验证中",
+    "es": "En validación"
+  },
+  "Mainnet": {
+    "zh": "主网",
+    "es": "Mainnet"
+  },
+  "Unavailable": {
+    "zh": "不可用",
+    "es": "No disponible"
+  },
+  "More private payments": {
+    "zh": "更具隐私的支付",
+    "es": "Pagos con más privacidad"
+  },
+  "Security by design": {
+    "zh": "安全设计",
+    "es": "Seguridad, por diseño"
+  },
+  "What Astrym controls, what you must protect and what still needs verification.": {
+    "zh": "Astrym 的保护范围、你需要保护的内容以及仍需验证的事项。",
+    "es": "Qué controla Astrym, qué debes proteger tú y qué queda por verificar."
+  },
+  "Control": {
+    "zh": "控制项",
+    "es": "Control"
+  },
+  "Implementation and limits": {
+    "zh": "实现与限制",
+    "es": "Implementación y límites"
+  },
+  "Local keys and an encrypted vault. Keep recovery words offline.": {
+    "zh": "本地密钥与加密保险库。请离线保存恢复助记词。",
+    "es": "Claves locales y bóveda cifrada. Conserva tus palabras de recuperación fuera de internet."
+  },
+  "Local signing": {
+    "zh": "本地签名",
+    "es": "Firma local"
+  },
+  "Operations are authorized in the wallet. This website does not request keys.": {
+    "zh": "在钱包内授权操作。此网站不会要求提供密钥。",
+    "es": "Las operaciones se autorizan desde la wallet. La landing no solicita claves."
+  },
+  "Nym transport": {
+    "zh": "Nym 传输",
+    "es": "Transporte Nym"
+  },
+  "Optional mode; protected operations are blocked if the private connection is not ready.": {
+    "zh": "可选模式；隐私连接未就绪时阻止受保护的操作。",
+    "es": "Modo opcional; bloqueo de operaciones protegidas si la conexión privada no está lista."
+  },
+  "SPP scope": {
+    "zh": "SPP 范围",
+    "es": "Alcance SPP"
+  },
+  "Experimental Testnet integration. It is not equivalent to a validated private payment.": {
+    "zh": "测试网实验性集成，不代表隐私支付已经验证。",
+    "es": "Integración experimental en Testnet. No equivale a un pago privado validado."
+  },
+  "Audit": {
+    "zh": "审计",
+    "es": "Auditoría"
+  },
+  "No completed independent audit is claimed. Do not use real money.": {
+    "zh": "不声称已完成独立审计。请勿使用真实资金。",
+    "es": "No se afirma que se hayan completado auditorías independientes. No uses dinero real."
+  },
+  "Security details ↗": {
+    "zh": "安全详情 ↗",
+    "es": "Detalles de seguridad ↗"
+  },
+  "Review code ↗": {
+    "zh": "查看代码 ↗",
+    "es": "Revisar código ↗"
+  },
+  "Choose your device": {
+    "zh": "选择设备",
+    "es": "Elige tu dispositivo"
+  },
+  "Extension for Chrome and Chromium. Manual installation.": {
+    "zh": "Chrome 和 Chromium 扩展。手动安装。",
+    "es": "Extensión para Chrome y Chromium. Instalación manual."
+  },
+  "Download instructions": {
+    "zh": "下载说明",
+    "es": "Instrucciones de descarga"
+  },
+  "Browser": {
+    "zh": "浏览器",
+    "es": "Navegador"
+  },
+  "Use the wallet in a tab. No installation needed.": {
+    "zh": "在标签页中使用钱包，无需安装。",
+    "es": "Usa la billetera en una pestaña. No necesitas instalar nada."
+  },
+  "Web": {
+    "zh": "网页",
+    "es": "Web"
+  },
+  "Add the web app to your home screen. It is not a native app.": {
+    "zh": "将网页应用添加到主屏幕。并非原生应用。",
+    "es": "Añade la aplicación web a la pantalla de inicio. No es una aplicación nativa."
+  },
+  "Mobile": {
+    "zh": "手机",
+    "es": "Móvil"
+  },
+  "Before you start": {
+    "zh": "开始之前",
+    "es": "Antes de empezar"
+  },
+  "A digital wallet lets you manage digital money. Stellar is the network and XLM is its currency. Your recovery words back up your account: never share them.": {
+    "zh": "数字钱包用于管理数字资金。Stellar 是网络，XLM 是其货币。恢复助记词用于备份账户：切勿分享。",
+    "es": "Una billetera digital te permite gestionar dinero digital. Stellar es la red y XLM es su moneda. Tus palabras de recuperación son la copia de seguridad de tu cuenta: no las compartas."
+  },
+  "Beginner guide ↗": {
+    "zh": "入门指南 ↗",
+    "es": "Guía para principiantes ↗"
   }
 };
 const nodes = [...document.querySelectorAll('[data-en]')];

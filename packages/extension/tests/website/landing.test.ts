@@ -20,7 +20,7 @@ describe('Astrym landing page', () => {
   const vercel = readFileSync(resolve(root, '../../vercel.json'), 'utf8');
 
   it('uses the official brand and honest bilingual product copy', () => {
-    for (const marker of ['brand/astrym-logo.png','Tu dinero. Tus claves. Tu privacidad.','Abrir Astrym Webapp','href="./webapp.html"','Instalar PWA (Android / iOS)','Stellar Private Payments','No afirma anonimato','data-language="en"','data-language="es"']) expect(html).toContain(marker);
+    for (const marker of ['class="brand wordmark"','Tu dinero. Tus claves. Tu privacidad.','Abrir Astrym Webapp','href="./webapp.html"','Instalar PWA (Android / iOS)','Stellar Private Payments','No afirma anonimato','data-language="en"','data-language="es"']) expect(html).toContain(marker);
     expect(i18n).toContain('astrym-site-language');
     for (const page of ['wallet','privacy','payments','learn','security','download','docs','about','roadmap','faq']) {
       expect(html).toContain('/' + page + '.html');
@@ -33,10 +33,10 @@ describe('Astrym landing page', () => {
   });
 
   it('uses the Astrym palette and local font fallbacks', () => {
-    expect(css).toContain('#191a1c');
-    expect(css).toContain('#141416');
-    expect(css).toContain('#3ce894');
-    expect(css).toContain('#f7cb08');
+    for (const color of ['#F3F2EE','#0E0E0E','#D4D2C9','#FF4500']) expect(css).toContain(color);
+    expect(css).not.toMatch(/(?:radial|linear)-gradient|backdrop-filter|box-shadow/i);
+    expect(css).not.toMatch(/border-radius:\s*(?:[5-9]|[1-9]\d+)px/i);
+    expect(css).toContain('120ms ease-out');
     expect(css).toContain('.cards');
     expect(html).not.toContain('fonts.googleapis.com');
     expect(html).not.toContain('fonts.gstatic.com');
@@ -46,9 +46,8 @@ describe('Astrym landing page', () => {
     expect(css).toContain('./fonts/instrument-sans/instrument-sans-latin.woff2');
     expect(css).toContain('./fonts/jetbrains-mono/jetbrains-mono-latin-500.woff2');
     expect(css).toContain('./fonts/orbitron/orbitron-latin.woff2');
-    expect(css).toContain('"Instrument Sans", sans-serif');
-    expect(css).toContain('"JetBrains Mono", ui-monospace, monospace');
-    expect(css).toContain('Orbitron, sans-serif');
+    expect(css).toContain('"Instrument Sans",sans-serif');
+    expect(css).toContain('"JetBrains Mono",ui-monospace,monospace');
     for (const file of localFonts) {
       expect(existsSync(resolve(root, file)), file).toBe(true);
     }
@@ -76,5 +75,18 @@ describe('beginner-friendly multilingual site', () => {
     expect(js).toContain('简中');
     expect(js).toContain('你的钱，你的密钥，你的隐私。');
     expect(js).toContain('astrym-site-language');
+  });
+});
+
+describe('editorial simulator', () => {
+  it('ships a local educational transfer review without wallet or network APIs', () => {
+    const html = readFileSync(resolve(root,'index.html'),'utf8');
+    const js = readFileSync(resolve(root,'public/site-demo.js'),'utf8');
+    expect(html).toContain('id="transfer-demo"');
+    expect(html).toContain('0.0000100 XLM');
+    expect(html).toContain('No se ha firmado ni enviado ninguna transacción.');
+    expect(js).toContain('event.preventDefault()');
+    expect(js).toContain('10000000n');
+    expect(js).not.toMatch(/\b(?:fetch|WebSocket|XMLHttpRequest|sendIpcMessage|crypto\.subtle)\b/);
   });
 });
