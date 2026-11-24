@@ -90,3 +90,14 @@ describe('editorial simulator', () => {
     expect(js).not.toMatch(/\b(?:fetch|WebSocket|XMLHttpRequest|sendIpcMessage|crypto\.subtle)\b/);
   });
 });
+
+describe('hybrid editorial landing', () => {
+  it('combines accessible onboarding and flat dark contrast with the precision simulator', () => {
+    const html = readFileSync(resolve(root,'index.html'),'utf8');
+    const css = readFileSync(resolve(root,'public/website.css'),'utf8');
+    for (const marker of ['class="hero-band"','class="tech-band"','id="start"','class="privacy-band"','id="transfer-demo"','class="engineering"']) expect(html).toContain(marker);
+    expect(html.indexOf('id="start"')).toBeLessThan(html.indexOf('id="product"'));
+    expect(css).toContain('.hero-band{background:#0E0E0E');
+    expect(css).not.toMatch(/(?:radial|linear)-gradient|backdrop-filter|box-shadow/i);
+  });
+});

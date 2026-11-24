@@ -732,12 +732,12 @@ const dictionary = {
     "es": "Una billetera Stellar para guardar, enviar y recibir activos con claves locales y conexión Nym opcional."
   },
   "Open wallet": {
-    "zh": "打开钱包",
-    "es": "Abrir billetera"
+    "es": "Abrir billetera",
+    "zh": "打开钱包"
   },
   "Getting started": {
-    "zh": "如何开始",
-    "es": "Cómo empezar"
+    "es": "Cómo empezar",
+    "zh": "如何开始"
   },
   "STATUS / TESTNET · TEST FUNDS ONLY": {
     "zh": "状态 / 测试网 · 仅限测试资金",
@@ -956,8 +956,48 @@ const dictionary = {
     "es": "Una billetera digital te permite gestionar dinero digital. Stellar es la red y XLM es su moneda. Tus palabras de recuperación son la copia de seguridad de tu cuenta: no las compartas."
   },
   "Beginner guide ↗": {
-    "zh": "入门指南 ↗",
-    "es": "Guía para principiantes ↗"
+    "es": "Guía para principiantes ↗",
+    "zh": "入门指南 ↗"
+  },
+  "TECHNOLOGY / 01–03": {
+    "es": "TECNOLOGÍA / 01–03",
+    "zh": "技术 / 01–03"
+  },
+  "Payment network": {
+    "es": "Red de pagos",
+    "zh": "支付网络"
+  },
+  "Connection privacy": {
+    "es": "Privacidad de conexión",
+    "zh": "连接隐私"
+  },
+  "Private payments in testing": {
+    "es": "Pagos privados en pruebas",
+    "zh": "隐私支付测试中"
+  },
+  "GUIDE / 00": {
+    "es": "GUÍA / 00",
+    "zh": "指南 / 00"
+  },
+  "Your first wallet, without the jargon.": {
+    "es": "Tu primera billetera, sin complicaciones.",
+    "zh": "你的第一个钱包，无需复杂术语。"
+  },
+  "Astrym is an app to hold, send and receive digital money. Stellar is its network and XLM is its currency. Your recovery words back up your account: never share them.": {
+    "es": "Astrym es una aplicación para guardar, enviar y recibir dinero digital. Stellar es la red que utiliza y XLM es su moneda. Tus palabras de recuperación son la copia de seguridad de tu cuenta: nunca las compartas.",
+    "zh": "Astrym 是一款用于保管、发送和接收数字资金的应用。Stellar 是其网络，XLM 是其货币。恢复助记词用于备份账户，切勿分享。"
+  },
+  "Learn from scratch ↗": {
+    "es": "Aprende desde cero ↗",
+    "zh": "从零开始学习 ↗"
+  },
+  "Get started with Astrym.": {
+    "es": "Empieza con Astrym.",
+    "zh": "开始使用 Astrym。"
+  },
+  "Create a test account and explore the wallet before using any financial product with real money.": {
+    "es": "Crea una cuenta de prueba y explora la billetera antes de utilizar cualquier producto financiero con dinero real.",
+    "zh": "创建测试账户并体验钱包，再考虑使用真实资金的金融产品。"
   }
 };
 const nodes = [...document.querySelectorAll('[data-en]')];
