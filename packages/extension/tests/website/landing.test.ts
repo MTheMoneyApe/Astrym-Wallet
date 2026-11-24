@@ -60,3 +60,21 @@ describe('Astrym landing page', () => {
     expect(vercel).toContain('application/wasm');
   });
 });
+
+describe('beginner-friendly multilingual site', () => {
+  it('offers Simplified Chinese and explains Nym without claiming anonymity', () => {
+    const html = readFileSync(resolve(root, 'index.html'), 'utf8');
+    const privacy = readFileSync(resolve(root, 'public/privacy.html'), 'utf8');
+    const js = readFileSync(resolve(root, 'public/site-language.js'), 'utf8');
+    for (const page of [html, privacy]) {
+      expect(page).toContain('data-language="zh-CN"');
+      expect(page).toContain('id="how-nym"');
+      expect(page).toContain('Modo Normal');
+      expect(page).toContain('Modo Privado Nym');
+      expect(page).toContain('Un pago público de Stellar sigue siendo visible');
+    }
+    expect(js).toContain('简中');
+    expect(js).toContain('你的钱，你的密钥，你的隐私。');
+    expect(js).toContain('astrym-site-language');
+  });
+});
