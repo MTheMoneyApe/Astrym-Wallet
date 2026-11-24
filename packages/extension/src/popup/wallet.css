@@ -1239,3 +1239,24 @@ html.astrym-webapp .android-webapp-bar__logo {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Astrym desktop presentation: layout only, preserving all wallet actions and gates. */
+html.astrym-webapp .dashboard .card { border-radius: 20px; }
+html.astrym-webapp .dashboard .btn-primary,
+html.astrym-webapp .dashboard .btn-secondary { border-radius: 999px; }
+html.astrym-webapp .dashboard .balance-amount { overflow-wrap: anywhere; letter-spacing: -.035em; font-family: var(--font-body); }
+@media (min-width: 1024px) {
+  html.astrym-webapp .wallet-shell:has(.dashboard-content) { width: min(100%, 1180px); }
+  html.astrym-webapp .dashboard .dashboard-content {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
+    align-items: start;
+    gap: 20px !important;
+  }
+  html.astrym-webapp .dashboard-content > .privacy-card { grid-column: 1 / -1; }
+  html.astrym-webapp .dashboard-content > .balance-card { grid-column: 1; grid-row: 2 / span 2; padding: 28px; }
+  html.astrym-webapp .dashboard-content > .action-grid { grid-column: 2; }
+  html.astrym-webapp .dashboard-content > .activity-card { grid-column: 2; }
+  html.astrym-webapp .dashboard .balance-amount { font-size: clamp(2rem, 4vw, 3.6rem); }
+  html.astrym-webapp .dashboard .activity-card { min-width: 0; overflow-wrap: anywhere; }
+}

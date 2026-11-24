@@ -2472,7 +2472,7 @@ export function Dashboard({ onLock }: { onLock: () => void }) {
           <p className="text-secondary">Cargando cuenta…</p>
         </div>
       ) : account ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="dashboard-content" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <PrivacyModeSelector
             snapshot={nymSnapshot}
             busy={nymBusy}
