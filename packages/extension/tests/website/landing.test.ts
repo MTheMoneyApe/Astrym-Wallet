@@ -81,9 +81,19 @@ describe('beginner-friendly multilingual site', () => {
 
  it('publishes crawler-readable social previews on the official domain', () => {
  const html = readFileSync(resolve(root,'index.html'),'utf8');
- expect(html).toContain('property="og:image" content="https://astrym-wallet.vercel.app/brand/astrym-social-v1.png"');
+ expect(html).toContain('property="og:image" content="https://astrym-wallet.vercel.app/brand/astrym-social-v2.png"');
  expect(html).toContain('name="twitter:card" content="summary_large_image"');
- const png = readFileSync(resolve(root,'public/brand/astrym-social-v1.png'));
+ const png = readFileSync(resolve(root,'public/brand/astrym-social-v2.png'));
  expect(png.readUInt32BE(16)).toBe(1200);
  expect(png.readUInt32BE(20)).toBe(630);
  });
+
+it('uses English sharing metadata and detects Spanish and Chinese browser languages with English fallback', () => {
+ const html = readFileSync(resolve(root,'index.html'),'utf8');
+ const js = readFileSync(resolve(root,'public/site-language.js'),'utf8');
+ expect(html).toContain('property="og:locale" content="en_US"');
+ expect(html).toContain('property="og:title" content="Astrym Wallet — Your money. Your keys. Your privacy."');
+ expect(js).toContain("return primary === 'zh' ? 'zh-CN' : primary === 'es' ? 'es' : 'en'");
+ expect(js).toContain('navigator.languages?.[0] || navigator.language');
+ expect(js).toContain('setLanguage(button.dataset.language, true)');
+});

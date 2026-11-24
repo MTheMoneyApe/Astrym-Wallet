@@ -747,11 +747,11 @@ function translate(key, source, lang) {
   const lookup = dictionary[key];
   if (lang === 'es') return lookup?.es ?? source;
   if (lang === 'en') return lookup?.en ?? key;
-  if (lookup) return lookup.zh;
+  if (lookup?.zh) return lookup.zh;
   if (key.startsWith('Astrym — ')) return 'Astrym — ' + translate(key.slice(9),source,'zh-CN');
   return key;
 }
-function setLanguage(lang) {
+function setLanguage(lang, remember = false) {
   if (!languages.includes(lang)) return;
   document.documentElement.lang = lang;
   for (const node of nodes) {
@@ -760,11 +760,15 @@ function setLanguage(lang) {
     else node.textContent = value;
   }
   for (const button of buttons) button.setAttribute('aria-pressed', String(button.dataset.language === lang));
-  try { localStorage.setItem('astrym-site-language', lang); } catch {}
+  if (remember) { try { localStorage.setItem('astrym-site-language', lang); } catch {} }
 }
-let lang = navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : navigator.language.toLowerCase().startsWith('en') ? 'en' : 'es';
+function detectLanguage(preferred) {
+  const primary = String(preferred || 'en').toLowerCase().split(/[-_]/)[0];
+  return primary === 'zh' ? 'zh-CN' : primary === 'es' ? 'es' : 'en';
+}
+let lang = detectLanguage(navigator.languages?.[0] || navigator.language);
 try { const saved = localStorage.getItem('astrym-site-language'); if (languages.includes(saved)) lang = saved; } catch {}
-buttons.forEach(button => button.addEventListener('click', () => setLanguage(button.dataset.language)));
+buttons.forEach(button => button.addEventListener('click', () => setLanguage(button.dataset.language, true)));
 setLanguage(lang);
 document.addEventListener('click', event => { for (const menu of document.querySelectorAll('.nav details[open]')) if (!menu.contains(event.target)) menu.open = false; });
 document.addEventListener('keydown', event => { if (event.key === 'Escape') for (const menu of document.querySelectorAll('.nav details[open]')) { menu.open = false; menu.querySelector('summary')?.focus(); } });
