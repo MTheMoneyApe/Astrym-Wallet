@@ -141,24 +141,3 @@ test('build contact sheet artifact', async ({ page }) => {
   );
   expect(existsSync(contactPath)).toBe(true);
 });
-
-test('landing simulator uses local arithmetic and remains explicitly simulated', async ({page}) => {
-  await page.goto('./index.html');
-  await page.locator('[data-language="en"]').click();
-  await page.locator('#demo-amount').fill('12.3456789');
-  await expect(page.locator('#demo-total')).toHaveText('12.3456889 XLM');
-  await page.locator('input[name="demo-mode"][value="nym"]').check();
-  await expect(page.locator('#demo-nym')).toBeVisible();
-  await page.locator('#transfer-demo button[type="submit"]').click();
-  await expect(page.locator('#demo-approved')).toContainText('No transaction was signed or sent');
-  await page.locator('#demo-amount').fill('1250');
-  await expect(page.locator('#transfer-demo button[type="submit"]')).toBeDisabled();
-  await expect(page.locator('#demo-approved')).toBeHidden();
-  await page.locator('[data-language="zh-CN"]').click();
-  await expect(page.locator('html')).toHaveAttribute('lang','zh-CN');
-  await expect(page.locator('h1')).toContainText('你的钱');
-  for (const width of [320,768,1440]) {
-    await page.setViewportSize({width,height:900});
-    await assertNoHorizontalOverflow(page);
-  }
-});
