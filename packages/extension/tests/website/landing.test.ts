@@ -20,7 +20,7 @@ describe('Astrym landing page', () => {
   const vercel = readFileSync(resolve(root, '../../vercel.json'), 'utf8');
 
   it('uses the official brand and honest bilingual product copy', () => {
-    for (const marker of ['brand/astrym-logo.png','Tu dinero. Tus claves. Tu privacidad.','Abrir Astrym Webapp','href="./webapp.html"','Instalar PWA (Android / iOS)','Stellar Private Payments','No afirma anonimato','data-language="en"','data-language="es"']) expect(html).toContain(marker);
+    for (const marker of ['brand/astrym-logo-transparent.svg','Tu dinero. Tus claves. Tu privacidad.','Abrir Astrym Webapp','href="./webapp.html"','Instalar PWA (Android / iOS)','Stellar Private Payments','No afirma anonimato','data-language="en"','data-language="es"']) expect(html).toContain(marker);
     expect(i18n).toContain('astrym-site-language');
     for (const page of ['wallet','privacy','payments','learn','security','download','docs','about','roadmap','faq']) {
       expect(html).toContain('/' + page + '.html');
