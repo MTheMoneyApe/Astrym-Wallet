@@ -125,8 +125,11 @@ export async function initializeSppHostWritePool(
     // Indexer sync (no broadcast). On-chain registerPublicKeys is separate and gated.
     try {
       await input.client.sync();
-    } catch {
-      // Sync failures are non-fatal for pool bind; lookup UX will surface them.
+    } catch (cause) {
+      // Do not publish a write handle against stale recipient/indexer state.
+      disposeSppHostWritePool('indexer synchronization failed');
+      const detail = cause instanceof Error ? cause.message : 'unknown error';
+      throw new Error(`SPP_INDEXER_SYNC_FAILED: ${detail}`, { cause });
     }
     const sdkPool = (await account.pool({
       poolContract: input.poolContract,
