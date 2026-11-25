@@ -100,6 +100,7 @@ jobs:
             tests/stellar/spp/sppSignGate.test.ts \
             tests/stellar/spp/SppWalletSignerAdapter.test.ts \
             tests/stellar/spp/sppStorageUnlockGate.test.ts \
+            tests/stellar/spp/sppProvingKeys.test.ts \
             tests/stellar/spp/SppSession.test.ts \
             2>&1 | tee "$RUNNER_TEMP/spp-logs/spp-signer-tests.txt"
 
@@ -116,6 +117,7 @@ jobs:
             tests/popup/SppAccountPanel.test.tsx \
             tests/popup/Dashboard.test.tsx \
             tests/background/handlers/sppStorageUnlockApprovalHandler.test.ts \
+            tests/spp-host/sppHostWritePoolFactory.test.ts \
             tests/spp-host/sppHostRemoteSigner.test.ts \
             tests/spp-host/sessionConstruct.test.ts \
             tests/spp-host/sppStorageKeyProvider.test.ts \

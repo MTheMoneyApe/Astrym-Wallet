@@ -38,7 +38,7 @@ describe('sppProvingKeys', () => {
   });
 
   it('accepts present artifacts via HEAD ok', async () => {
-    const fetchImpl = vi.fn(async () => new Response('', { status: 200 }));
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 200, headers: { 'content-length': '1', 'content-type': 'application/octet-stream' } }));
     const result = await probeSppProvingKeys({
       circuitsBaseUrl: 'chrome-extension://id/spp/dist/circuits/',
       lock: parseCircuitLock(lock),
@@ -59,7 +59,7 @@ describe('sppProvingKeys', () => {
   it('probes proving keys under path-absolute bases', async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       expect(String(url).startsWith('/spp/dist/circuits/')).toBe(true);
-      return new Response('', { status: 200 });
+      return new Response(null, { status: 200, headers: { 'content-length': '1', 'content-type': 'application/octet-stream' } });
     });
     const result = await probeSppProvingKeys({
       circuitsBaseUrl: '/spp/dist/circuits/',
@@ -67,5 +67,30 @@ describe('sppProvingKeys', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     expect(result.ok).toBe(true);
+  });
+});
+
+describe('circuit artifact response validation', () => {
+  it('rejects HTML fallback served with HTTP 200', async () => {
+    const fetchImpl = vi.fn(async () => new Response('<html>not a circuit</html>', {
+      status: 200, headers: { 'content-type': 'text/html', 'content-length': '26' },
+    }));
+    const result = await probeSppProvingKeys({ circuitsBaseUrl: '/spp/', lock, fetchImpl: fetchImpl as unknown as typeof fetch });
+    expect(result.ok).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it('rejects empty binary responses', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 200, headers: { 'content-length': '0' } }));
+    expect((await probeSppProvingKeys({ circuitsBaseUrl: '/spp/', lock, fetchImpl: fetchImpl as unknown as typeof fetch })).ok).toBe(false);
+  });
+
+  it('falls back to a nonempty ranged response when HEAD is unsupported', async () => {
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'HEAD'
+        ? new Response(null, { status: 405 })
+        : new Response(new Uint8Array([1]), { status: 206, headers: { 'content-type': 'application/octet-stream' } }));
+    expect((await probeSppProvingKeys({ circuitsBaseUrl: '/spp/', lock, fetchImpl: fetchImpl as unknown as typeof fetch })).ok).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(6);
   });
 });
