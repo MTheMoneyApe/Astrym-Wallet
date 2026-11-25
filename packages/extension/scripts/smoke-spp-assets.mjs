@@ -162,15 +162,28 @@ async function main() {
     fail('js/index.js missing import.meta.url worker path to ../dist/workers/storage-worker.js');
   }
 
-  const lock = JSON.parse(readFileSync(join(root, 'dist/circuits/circuits.json'), 'utf8'));
+  const packagedLock = readFileSync(join(root, 'dist/circuits/circuits.json'));
+  const pinnedLock = readFileSync(resolve(EXTENSION_ROOT, '../wallet-core/src/stellar/spp/nethermind/testnet-circuits.json'));
+  if (!packagedLock.equals(pinnedLock)) fail('Packaged circuits.json differs from repository pin');
+  const lock = JSON.parse(packagedLock.toString('utf8'));
   /** @type {string[]} */
   const circuitIds = [];
   for (const [key, value] of Object.entries(lock)) {
     if (key === 'version' || key === 'meta') continue;
     if (!value || typeof value !== 'object') continue;
     circuitIds.push(key);
-    for (const artifact of [`${key}.r1cs`, `${key}.graph.bin`, `${key}_proving_key.bin`]) {
-      assertNonEmptyFile(root, `dist/circuits/${artifact}`);
+    for (const [artifact, fingerprint] of [
+      [`${key}.r1cs`, value.r1cs],
+      [`${key}.graph.bin`, value['graph.bin']],
+      [`${key}_proving_key.bin`, value['proving_key.bin']],
+    ]) {
+      const rel = `dist/circuits/${artifact}`;
+      const { full } = assertNonEmptyFile(root, rel);
+      if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) {
+        fail(`Missing or invalid circuit SHA-256: ${rel}`);
+      }
+      const digest = await sha256File(full);
+      if (digest !== fingerprint) fail(`Circuit SHA-256 mismatch: ${rel}`);
     }
   }
   if (circuitIds.length === 0) fail('circuits.json contained no circuit entries');

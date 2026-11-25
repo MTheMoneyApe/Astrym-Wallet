@@ -16,25 +16,20 @@ const localFonts = [
 describe('Astrym landing page', () => {
   const html = readFileSync(resolve(root, 'index.html'), 'utf8');
   const css = readFileSync(resolve(root, 'public/website.css'), 'utf8');
-  const i18n = readFileSync(resolve(root, 'src/website/i18n.ts'), 'utf8');
+  const i18n = readFileSync(resolve(root, 'public/site-language.js'), 'utf8');
   const vercel = readFileSync(resolve(root, '../../vercel.json'), 'utf8');
 
-  it('uses the official brand, honest product copy, and HackMeridian badge', () => {
-    expect(html).toContain('brand/astrym-logo.png');
-    expect(html).toContain('>ASTRYM<');
-    expect(html).toContain('HACKMERIDIAN 2026 · LISBON · STELLAR × NYM');
-    expect(html).toContain('Abrir Astrym Webapp');
-    expect(html).toContain('href="./webapp.html"');
-    expect(html).toContain('Instalar PWA (Android / iOS)');
-    expect(html).toContain('Qué hace Astrym hoy');
-    expect(html).toContain('Stellar Private Payments');
-    expect(html).toContain('Implementado');
-    expect(html).toContain('En curso');
-    expect(html).toContain('Futuro');
-    expect(html).toContain('no afirma anonimato');
-    expect(html).toContain('spp-host.html');
-    expect(i18n).toContain('Technical workflow');
-    expect(i18n).toContain('does not claim cryptographic anonymity');
+  it('uses the official brand and honest bilingual product copy', () => {
+    for (const marker of ['brand/astrym-logo-transparent.svg','Tu dinero. Tus claves. Tu privacidad.','Abrir Astrym Webapp','href="./webapp.html"','Instalar PWA (Android / iOS)','Stellar Private Payments','No afirma anonimato','data-language="en"','data-language="es"']) expect(html).toContain(marker);
+    expect(i18n).toContain('astrym-site-language');
+    for (const page of ['wallet','privacy','payments','learn','security','download','docs','about','roadmap','faq']) {
+      expect(html).toContain('/' + page + '.html');
+      const body = readFileSync(resolve(root, 'public', page + '.html'), 'utf8');
+      expect(body).toContain('data-en');
+      expect(body).toContain('Testnet');
+    }
+    expect(readFileSync(resolve(root,'public/about.html'),'utf8')).toContain('HACKMERIDIAN 2026');
+    expect(readFileSync(resolve(root,'public/docs.html'),'utf8')).toContain('spp-host.html');
   });
 
   it('uses the Astrym palette and local font fallbacks', () => {
@@ -42,7 +37,7 @@ describe('Astrym landing page', () => {
     expect(css).toContain('#141416');
     expect(css).toContain('#3ce894');
     expect(css).toContain('#f7cb08');
-    expect(css).toContain('.status-board');
+    expect(css).toContain('.cards');
     expect(html).not.toContain('fonts.googleapis.com');
     expect(html).not.toContain('fonts.gstatic.com');
     expect(css).not.toContain('fonts.googleapis.com');
@@ -64,4 +59,41 @@ describe('Astrym landing page', () => {
     expect(vercel).toContain('packages/extension/dist-webapp');
     expect(vercel).toContain('application/wasm');
   });
+});
+
+describe('beginner-friendly multilingual site', () => {
+  it('offers Simplified Chinese and explains Nym without claiming anonymity', () => {
+    const html = readFileSync(resolve(root, 'index.html'), 'utf8');
+    const privacy = readFileSync(resolve(root, 'public/privacy.html'), 'utf8');
+    const js = readFileSync(resolve(root, 'public/site-language.js'), 'utf8');
+    for (const page of [html, privacy]) {
+      expect(page).toContain('data-language="zh-CN"');
+      expect(page).toContain('id="how-nym"');
+      expect(page).toContain('Modo Normal');
+      expect(page).toContain('Modo Privado Nym');
+      expect(page).toContain('Un pago público de Stellar sigue siendo visible');
+    }
+    expect(js).toContain('简中');
+    expect(js).toContain('你的钱，你的密钥，你的隐私。');
+    expect(js).toContain('astrym-site-language');
+  });
+});
+
+ it('publishes crawler-readable social previews on the official domain', () => {
+ const html = readFileSync(resolve(root,'index.html'),'utf8');
+ expect(html).toContain('property="og:image" content="https://astrym-wallet.vercel.app/brand/astrym-social-v2.png"');
+ expect(html).toContain('name="twitter:card" content="summary_large_image"');
+ const png = readFileSync(resolve(root,'public/brand/astrym-social-v2.png'));
+ expect(png.readUInt32BE(16)).toBe(1200);
+ expect(png.readUInt32BE(20)).toBe(630);
+ });
+
+it('uses English sharing metadata and detects Spanish and Chinese browser languages with English fallback', () => {
+ const html = readFileSync(resolve(root,'index.html'),'utf8');
+ const js = readFileSync(resolve(root,'public/site-language.js'),'utf8');
+ expect(html).toContain('property="og:locale" content="en_US"');
+ expect(html).toContain('property="og:title" content="Astrym Wallet — Your money. Your keys. Your privacy."');
+ expect(js).toContain("return primary === 'zh' ? 'zh-CN' : primary === 'es' ? 'es' : 'en'");
+ expect(js).toContain('navigator.languages?.[0] || navigator.language');
+ expect(js).toContain('setLanguage(button.dataset.language, true)');
 });

@@ -83,9 +83,17 @@ export async function loadCircuitLockFromBaseUrl(
   return parseCircuitLock(await response.json());
 }
 
+/** Reject HTML/JSON fallback responses; circuit artifacts must be binary. */
+function hasInvalidArtifactType(response: Response): boolean {
+  const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+  return contentType.includes('text/html') || contentType.includes('application/json')
+    || contentType.includes('text/plain') || contentType.includes('application/xhtml+xml');
+}
+
 /**
- * Verify proving-key / graph / r1cs artifacts exist under circuitsBaseUrl.
- * Uses HEAD when available, falls back to ranged GET.
+ * Check binary artifact presence, not cryptographic integrity (verified by the
+ * build's pinned circuit lock). HEAD must report a positive size; otherwise
+ * probe a ranged GET and cancel the stream after the first nonempty chunk.
  */
 export async function probeSppProvingKeys(input: {
   circuitsBaseUrl: string;
@@ -102,14 +110,27 @@ export async function probeSppProvingKeys(input: {
       let present = false;
       try {
         const head = await fetchImpl(url, { method: 'HEAD' });
-        if (head.ok) {
-          present = true;
-        } else if (head.status === 405 || head.status === 501) {
+        if (head.ok && !hasInvalidArtifactType(head)) {
+          const length = head.headers.get('content-length');
+          present = length !== null && /^\d+$/.test(length) && Number(length) > 0;
+        }
+        if (!present && ((head.ok && !hasInvalidArtifactType(head))
+          || head.status === 405 || head.status === 501)) {
           const get = await fetchImpl(url, {
             method: 'GET',
             headers: { Range: 'bytes=0-0' },
           });
-          present = get.ok || get.status === 206;
+          if (get.ok && !hasInvalidArtifactType(get) && get.body) {
+            const reader = get.body.getReader();
+            try {
+              const chunk = await reader.read();
+              present = !chunk.done && (chunk.value?.byteLength ?? 0) > 0;
+            } finally {
+              await reader.cancel();
+            }
+          } else {
+            await get.body?.cancel();
+          }
         }
       } catch {
         present = false;
